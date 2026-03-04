@@ -98,8 +98,6 @@ const MyHours = () => {
     setSavingEdit(true);
 
     // Pause ist immer fix 12:00–13:00 (60 Min.)
-    const PAUSE_START = "12:00";
-    const PAUSE_END = "13:00";
     const pauseMinutes = editingEntry.pause_minutes || 0;
 
     let calculatedHours = 0;
