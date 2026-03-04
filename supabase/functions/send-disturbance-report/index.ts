@@ -1,8 +1,5 @@
-import { Resend } from "https://esm.sh/resend@2.0.0";
 import { jsPDF } from "https://esm.sh/jspdf@2.5.2";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-
-const resend = new Resend(Deno.env.get("RESEND_API_KEY"));
 
 // Supabase Admin Client for reading settings
 const supabaseAdmin = createClient(
@@ -95,7 +92,7 @@ async function fetchImageAsBase64(url: string): Promise<string | null> {
 
 async function generatePDF(data: ReportRequest & { technicians: string[] }, photoImages: (string | null)[]): Promise<string> {
   const { disturbance, materials, technicians, photos } = data;
-  
+
   // Create PDF document
   const doc = new jsPDF({
     orientation: "portrait",
@@ -168,7 +165,7 @@ async function generatePDF(data: ReportRequest & { technicians: string[] }, phot
 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(10);
-  
+
   doc.text(`Name: ${disturbance.kunde_name}`, margin, yPos);
   yPos += 5;
 
@@ -291,11 +288,11 @@ async function generatePDF(data: ReportRequest & { technicians: string[] }, phot
         doc.addPage();
         yPos = margin;
       }
-      
+
       // Draw row border
       doc.setDrawColor(200, 200, 200);
       doc.line(margin, yPos + 2, margin + contentWidth, yPos + 2);
-      
+
       doc.text(mat.material || "-", margin + 2, yPos);
       doc.text(mat.menge || "-", margin + 90, yPos);
       doc.text(mat.notizen || "-", margin + 120, yPos);
@@ -362,7 +359,7 @@ async function generatePDF(data: ReportRequest & { technicians: string[] }, phot
     try {
       // The signature is a base64 data URL
       const signatureData = disturbance.unterschrift_kunde;
-      
+
       // Add the signature image
       doc.addImage(signatureData, "PNG", margin, yPos, 60, 25);
       yPos += 30;
@@ -397,7 +394,7 @@ async function generatePDF(data: ReportRequest & { technicians: string[] }, phot
 function generateEmailHtml(data: ReportRequest & { technicians: string[] }): string {
   const { disturbance, technicians } = data;
   const technicianDisplay = technicians.length === 1 ? technicians[0] : technicians.join(", ");
-  
+
   return `
     <!DOCTYPE html>
     <html>
@@ -414,20 +411,20 @@ function generateEmailHtml(data: ReportRequest & { technicians: string[] }): str
       <div class="container">
         <div class="header">HOLZKNECHT NATURSTEINE</div>
         <h2>Regiebericht</h2>
-        
+
         <p>Sehr geehrte Damen und Herren,</p>
-        
+
         <p>im Anhang finden Sie den Regiebericht für den Einsatz bei <strong>${disturbance.kunde_name}</strong> vom <strong>${formatDate(disturbance.datum)}</strong>.</p>
-        
+
         <div class="info-box">
           <strong>Zusammenfassung:</strong><br>
           Techniker: ${technicianDisplay}<br>
           Arbeitszeit: ${disturbance.start_time.slice(0, 5)} - ${disturbance.end_time.slice(0, 5)} Uhr<br>
           Gesamtstunden: ${disturbance.stunden.toFixed(2)} h
         </div>
-        
+
         <p>Der vollständige Bericht mit allen Details und der Kundenunterschrift befindet sich im angehängten PDF-Dokument.</p>
-        
+
         <p>Mit freundlichen Grüßen,<br>
         Holzknecht Natursteine</p>
       </div>
@@ -445,7 +442,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const { disturbance, materials, technicianNames, technicianName, photos }: ReportRequest = await req.json();
 
     // Backward compatibility + fallback
-    const technicians = technicianNames?.length ? technicianNames : 
+    const technicians = technicianNames?.length ? technicianNames :
                         technicianName ? [technicianName] : ["Techniker"];
 
     if (!disturbance || !disturbance.unterschrift_kunde) {
@@ -500,23 +497,38 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     console.log("Sending email with PDF attachment to:", recipients);
 
-    const emailResponse = await resend.emails.send({
-      from: "Holzknecht Natursteine <noreply@chrisnapetschnig.at>",
-      to: recipients,
-      subject: subject,
-      html: emailHtml,
-      attachments: [
-        {
-          filename: pdfFilename,
-          content: pdfBase64,
-        },
-      ],
+    // Send email via Resend REST API directly (no SDK import needed)
+    const resendApiKey = Deno.env.get("RESEND_API_KEY")!;
+    const resendResponse = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${resendApiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from: "Holzknecht Natursteine <noreply@chrisnapetschnig.at>",
+        to: recipients,
+        subject: subject,
+        html: emailHtml,
+        attachments: [
+          {
+            filename: pdfFilename,
+            content: pdfBase64,
+          },
+        ],
+      }),
     });
 
-    console.log("Email sent successfully:", emailResponse);
+    if (!resendResponse.ok) {
+      const errorText = await resendResponse.text();
+      throw new Error(`Resend API error: ${resendResponse.status} - ${errorText}`);
+    }
+
+    const emailData = await resendResponse.json();
+    console.log("Email sent successfully:", emailData);
 
     return new Response(
-      JSON.stringify({ success: true, emailResponse }),
+      JSON.stringify({ success: true, emailResponse: emailData }),
       { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } }
     );
   } catch (error: unknown) {
