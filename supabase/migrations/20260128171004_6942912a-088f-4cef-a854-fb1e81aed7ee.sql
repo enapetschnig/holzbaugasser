@@ -1,13 +1,4 @@
--- Teil 1: Fehlenden User "Max Mustermann" manuell einfügen
-INSERT INTO public.profiles (id, vorname, nachname, is_active)
-VALUES ('f4556eed-6e68-4840-b1f2-e773f792680f', 'Max', 'Mustermann', true)
-ON CONFLICT (id) DO NOTHING;
-
-INSERT INTO public.user_roles (user_id, role)
-VALUES ('f4556eed-6e68-4840-b1f2-e773f792680f', 'mitarbeiter')
-ON CONFLICT (user_id, role) DO NOTHING;
-
--- Teil 2: Funktion für automatische Profil-Erstellung bei erstem Login
+-- Funktion für automatische Profil-Erstellung bei erstem Login
 CREATE OR REPLACE FUNCTION public.ensure_user_profile()
 RETURNS json
 LANGUAGE plpgsql
@@ -22,29 +13,29 @@ DECLARE
 BEGIN
   -- Get current user from auth context
   current_user_id := auth.uid();
-  
+
   IF current_user_id IS NULL THEN
     RETURN json_build_object('success', false, 'error', 'Not authenticated');
   END IF;
-  
+
   -- Check if profile already exists
   IF EXISTS (SELECT 1 FROM public.profiles WHERE id = current_user_id) THEN
     RETURN json_build_object('success', true, 'action', 'existing');
   END IF;
-  
+
   -- Get user metadata from auth.users
-  SELECT email, raw_user_meta_data 
+  SELECT email, raw_user_meta_data
   INTO user_email, user_meta
-  FROM auth.users 
+  FROM auth.users
   WHERE id = current_user_id;
-  
-  -- Determine role based on email
-  IF user_email IN ('office@moebel-eder.at', 'napetschnig.chris@gmail.com', 'office@elektro-brodnig.at') THEN
+
+  -- Determine role based on email (admin accounts)
+  IF user_email IN ('holzknecht.natursteine@gmail.com', 'napetschnig.chris@gmail.com') THEN
     assigned_role := 'administrator';
   ELSE
     assigned_role := 'mitarbeiter';
   END IF;
-  
+
   -- Create profile
   INSERT INTO public.profiles (id, vorname, nachname, is_active)
   VALUES (
@@ -53,14 +44,14 @@ BEGIN
     COALESCE(user_meta->>'nachname', ''),
     true
   );
-  
+
   -- Create role
   INSERT INTO public.user_roles (user_id, role)
   VALUES (current_user_id, assigned_role)
   ON CONFLICT (user_id, role) DO NOTHING;
-  
+
   RETURN json_build_object(
-    'success', true, 
+    'success', true,
     'action', 'created',
     'role', assigned_role
   );
