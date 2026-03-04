@@ -176,11 +176,12 @@ export const SignatureDialog = ({
       });
 
       if (sendError) {
+        const detail = (sendError as { message?: string })?.message || String(sendError);
         console.error("Email send error:", sendError);
         // Still mark as success since signature was saved
         toast({
           title: "Unterschrift gespeichert",
-          description: "Die Unterschrift wurde gespeichert, aber die E-Mail konnte nicht gesendet werden.",
+          description: `E-Mail Fehler: ${detail}`,
         });
       } else {
         toast({

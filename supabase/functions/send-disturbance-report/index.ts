@@ -452,13 +452,13 @@ Deno.serve(async (req: Request): Promise<Response> => {
       );
     }
 
-    console.log("Generating PDF for disturbance:", disturbance.id);
+    console.log("[1] Request received for disturbance:", disturbance.id);
 
     // Fetch photo images from storage
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const photoImages: (string | null)[] = [];
     if (photos && photos.length > 0) {
-      console.log(`Fetching ${photos.length} photos...`);
+      console.log(`[2] Fetching ${photos.length} photos...`);
       for (const photo of photos) {
         const photoUrl = `${supabaseUrl}/storage/v1/object/public/disturbance-photos/${photo.file_path}`;
         const imageData = await fetchImageAsBase64(photoUrl);
@@ -467,20 +467,31 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
 
     // Generate PDF
-    const pdfBase64 = await generatePDF({ disturbance, materials, technicians, photos }, photoImages);
+    console.log("[3] Starting PDF generation...");
+    let pdfBase64: string;
+    try {
+      pdfBase64 = await generatePDF({ disturbance, materials, technicians, photos }, photoImages);
+      console.log("[4] PDF generated successfully, size:", pdfBase64.length);
+    } catch (pdfError) {
+      console.error("[4] PDF generation FAILED:", pdfError instanceof Error ? pdfError.message : pdfError);
+      throw new Error(`PDF generation failed: ${pdfError instanceof Error ? pdfError.message : String(pdfError)}`);
+    }
 
     // Generate simple email HTML
     const emailHtml = generateEmailHtml({ disturbance, materials, technicians });
 
     // Fetch office email from settings with fallback
-    const { data: setting } = await supabaseAdmin
+    console.log("[5] Fetching office email from settings...");
+    const { data: setting, error: settingError } = await supabaseAdmin
       .from("app_settings")
       .select("value")
       .eq("key", "disturbance_report_email")
       .maybeSingle();
 
+    if (settingError) console.error("[5] Settings query error:", settingError.message);
+
     const officeEmail = setting?.value || "holzknecht.natursteine@gmail.com";
-    console.log("Using office email:", officeEmail);
+    console.log("[5] Using office email:", officeEmail);
 
     // Prepare recipients - office email for all reports
     const recipients = [officeEmail];
@@ -495,10 +506,13 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     const subject = `Regiebericht - ${disturbance.kunde_name} - ${formatDateShort(disturbance.datum)}`;
 
-    console.log("Sending email with PDF attachment to:", recipients);
+    console.log("[6] Sending email to:", recipients);
 
     // Send email via Resend REST API directly (no SDK import needed)
-    const resendApiKey = Deno.env.get("RESEND_API_KEY")!;
+    const resendApiKey = Deno.env.get("RESEND_API_KEY");
+    if (!resendApiKey) {
+      throw new Error("RESEND_API_KEY is not configured");
+    }
     const resendResponse = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: {
@@ -521,11 +535,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     if (!resendResponse.ok) {
       const errorText = await resendResponse.text();
+      console.error("[7] Resend API error:", resendResponse.status, errorText);
       throw new Error(`Resend API error: ${resendResponse.status} - ${errorText}`);
     }
 
     const emailData = await resendResponse.json();
-    console.log("Email sent successfully:", emailData);
+    console.log("[7] Email sent successfully:", emailData);
 
     return new Response(
       JSON.stringify({ success: true, emailResponse: emailData }),
