@@ -95,6 +95,9 @@ export default function Admin() {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [userToDelete, setUserToDelete] = useState<Profile | null>(null);
 
+  // Employee save state
+  const [savingEmployee, setSavingEmployee] = useState(false);
+
   // App settings states
   const [regiereportEmail, setRegiereportEmail] = useState("");
   const [savingSettings, setSavingSettings] = useState(false);
@@ -524,8 +527,9 @@ export default function Admin() {
 
   const handleSaveEmployee = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedEmployee) return;
+    if (!selectedEmployee || savingEmployee) return;
 
+    setSavingEmployee(true);
     try {
       const { error } = await supabase
         .from("employees")
@@ -536,10 +540,11 @@ export default function Admin() {
 
       // Keep profiles table in sync (name is displayed throughout the app)
       if (selectedEmployee.user_id) {
-        await supabase
+        const { error: profileError } = await supabase
           .from("profiles")
           .update({ vorname: formData.vorname, nachname: formData.nachname })
           .eq("id", selectedEmployee.user_id);
+        if (profileError) throw profileError;
       }
 
       toast({ title: "Erfolg", description: "Änderungen gespeichert" });
@@ -548,6 +553,8 @@ export default function Admin() {
       setSelectedEmployee(null);
     } catch (error: any) {
       toast({ title: "Fehler", description: error.message, variant: "destructive" });
+    } finally {
+      setSavingEmployee(false);
     }
   };
 
@@ -1135,7 +1142,9 @@ export default function Admin() {
                     <Button type="button" variant="outline" onClick={() => setSelectedEmployee(null)}>
                       Abbrechen
                     </Button>
-                    <Button type="submit">Speichern</Button>
+                    <Button type="submit" disabled={savingEmployee}>
+                      {savingEmployee ? "Wird gespeichert..." : "Speichern"}
+                    </Button>
                   </div>
                 </form>
               </ScrollArea>

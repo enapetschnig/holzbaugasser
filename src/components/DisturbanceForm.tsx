@@ -186,10 +186,12 @@ export const DisturbanceForm = ({ open, onOpenChange, onSuccess, editData }: Dis
       }
 
       // Update time entries for all workers
-      await updateTimeEntriesForAllWorkers(editData.id, user.id, stunden);
+      const timeOk = await updateTimeEntriesForAllWorkers(editData.id, user.id, stunden);
+      if (!timeOk) { setSaving(false); return; }
 
       // Update materials
-      await updateMaterials(editData.id, user.id);
+      const matOk = await updateMaterials(editData.id, user.id);
+      if (!matOk) { setSaving(false); return; }
 
       toast({ title: "Erfolg", description: "Regiebericht wurde aktualisiert" });
     } else {
@@ -207,7 +209,7 @@ export const DisturbanceForm = ({ open, onOpenChange, onSuccess, editData }: Dis
       }
 
       // Create time entry for current user
-      await supabase.from("time_entries").insert({
+      const { error: timeError } = await supabase.from("time_entries").insert({
         user_id: user.id,
         datum: formData.datum,
         start_time: formData.startTime,
@@ -219,18 +221,28 @@ export const DisturbanceForm = ({ open, onOpenChange, onSuccess, editData }: Dis
         taetigkeit: `Regiebericht: ${formData.kundeName.trim()}`,
         location_type: "baustelle",
       });
+      if (timeError) {
+        toast({ variant: "destructive", title: "Fehler", description: "Zeiteintrag konnte nicht erstellt werden" });
+        setSaving(false);
+        return;
+      }
 
       // Add main worker entry
-      await supabase.from("disturbance_workers").insert({
+      const { error: workerError } = await supabase.from("disturbance_workers").insert({
         disturbance_id: newDisturbance.id,
         user_id: user.id,
         is_main: true,
       });
+      if (workerError) {
+        toast({ variant: "destructive", title: "Fehler", description: "Mitarbeiter-Eintrag konnte nicht erstellt werden" });
+        setSaving(false);
+        return;
+      }
 
       // Create materials
       const validMaterials = materials.filter(m => m.material.trim());
       if (validMaterials.length > 0) {
-        await supabase.from("disturbance_materials").insert(
+        const { error: matError } = await supabase.from("disturbance_materials").insert(
           validMaterials.map(m => ({
             disturbance_id: newDisturbance.id,
             user_id: user.id,
@@ -238,6 +250,11 @@ export const DisturbanceForm = ({ open, onOpenChange, onSuccess, editData }: Dis
             menge: m.menge.trim() || null,
           }))
         );
+        if (matError) {
+          toast({ variant: "destructive", title: "Fehler", description: "Materialien konnten nicht gespeichert werden" });
+          setSaving(false);
+          return;
+        }
       }
 
       toast({ title: "Erfolg", description: "Regiebericht wurde erfasst" });
@@ -254,9 +271,8 @@ export const DisturbanceForm = ({ open, onOpenChange, onSuccess, editData }: Dis
     onSuccess();
   };
 
-  const updateTimeEntriesForAllWorkers = async (disturbanceId: string, mainUserId: string, stunden: number) => {
-    // Update existing time entries
-    await supabase
+  const updateTimeEntriesForAllWorkers = async (disturbanceId: string, mainUserId: string, stunden: number): Promise<boolean> => {
+    const { error } = await supabase
       .from("time_entries")
       .update({
         datum: formData.datum,
@@ -267,19 +283,26 @@ export const DisturbanceForm = ({ open, onOpenChange, onSuccess, editData }: Dis
         taetigkeit: `Regiebericht: ${formData.kundeName.trim()}`,
       })
       .eq("disturbance_id", disturbanceId);
+    if (error) {
+      toast({ variant: "destructive", title: "Fehler", description: "Zeiteinträge konnten nicht aktualisiert werden" });
+      return false;
+    }
+    return true;
   };
 
-  const updateMaterials = async (disturbanceId: string, userId: string) => {
-    // Delete existing materials
-    await supabase
+  const updateMaterials = async (disturbanceId: string, userId: string): Promise<boolean> => {
+    const { error: delError } = await supabase
       .from("disturbance_materials")
       .delete()
       .eq("disturbance_id", disturbanceId);
+    if (delError) {
+      toast({ variant: "destructive", title: "Fehler", description: "Materialien konnten nicht aktualisiert werden" });
+      return false;
+    }
 
-    // Add new materials
     const validMaterials = materials.filter(m => m.material.trim());
     if (validMaterials.length > 0) {
-      await supabase.from("disturbance_materials").insert(
+      const { error: insError } = await supabase.from("disturbance_materials").insert(
         validMaterials.map(m => ({
           disturbance_id: disturbanceId,
           user_id: userId,
@@ -287,7 +310,12 @@ export const DisturbanceForm = ({ open, onOpenChange, onSuccess, editData }: Dis
           menge: m.menge.trim() || null,
         }))
       );
+      if (insError) {
+        toast({ variant: "destructive", title: "Fehler", description: "Materialien konnten nicht gespeichert werden" });
+        return false;
+      }
     }
+    return true;
   };
 
   return (

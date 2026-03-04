@@ -421,13 +421,14 @@ export default function HoursReport() {
       }
     }
 
-    // Regelarbeitszeit-Summe berechnen für Export ohne Überstunden
+    // Regelarbeitszeit-Summe berechnen für Export ohne Überstunden (dedupliziert)
     const calculateRegelarbeitszeitSumme = () => {
       let summe = 0;
       for (let day = 1; day <= daysInMonth; day++) {
         const dayDate = new Date(year, month - 1, day);
         const dayEntries = timeEntries.filter((e) => isSameDay(parseISO(e.datum), dayDate));
-        if (dayEntries.length > 0) {
+        const uniqueDayEntries = deduplicateDayEntries(dayEntries);
+        if (uniqueDayEntries.length > 0) {
           const dayOfWeek = dayDate.getDay();
           const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
           summe += isWeekend ? 0 : 8;
@@ -771,18 +772,18 @@ export default function HoursReport() {
                                     <div className="flex items-center gap-1">
                                       <span>{entry.start_time?.substring(0, 5)}</span>
                                       <span>-</span>
-                                      <span>{lunchBreak?.start || entry.end_time?.substring(0, 5)}</span>
+                                      <span>{entry.pause_minutes > 0 ? "12:00" : entry.end_time?.substring(0, 5)}</span>
                                     </div>
                                   </TableCell>
                                   <TableCell>
-                                    {lunchBreak && entry.pause_minutes > 0 && (
-                                      <span className="text-sm">{lunchBreak.start} - {lunchBreak.end}</span>
+                                    {entry.pause_minutes > 0 && (
+                                      <span className="text-sm">12:00 - 13:00</span>
                                     )}
                                   </TableCell>
                                   <TableCell>
-                                    {lunchBreak && (
+                                    {entry.pause_minutes > 0 && (
                                       <div className="flex items-center gap-1">
-                                        <span>{lunchBreak.end}</span>
+                                        <span>13:00</span>
                                         <span>-</span>
                                         <span>{entry.end_time?.substring(0, 5)}</span>
                                       </div>

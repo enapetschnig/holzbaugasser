@@ -68,39 +68,22 @@ const MyHours = () => {
     setLoading(false);
   };
 
+  const hasPause = (entry: TimeEntry) =>
+    !!(entry.pause_minutes && entry.pause_minutes > 0);
+
   const calculateMorningEnd = (entry: TimeEntry) => {
-    // Fallback für alte Einträge ohne Zeitangaben
-    if (!entry.start_time || !entry.end_time) {
-      return "Alte Buchung";
-    }
-    if (!entry.pause_minutes || entry.pause_minutes === 0) {
-      return entry.end_time?.substring(0, 5) || '-';
-    }
-    // Mo-Do: 12:00, Fr: 12:00 (keine Pause)
-    return "12:00";
+    if (!entry.start_time || !entry.end_time) return "Alte Buchung";
+    return hasPause(entry) ? "12:00" : entry.end_time?.substring(0, 5) || '-';
   };
 
   const calculateAfternoonStart = (entry: TimeEntry) => {
-    // Fallback für alte Einträge
     if (!entry.start_time || !entry.end_time) return '-';
-    if (!entry.pause_minutes || entry.pause_minutes === 0) return '-';
-    
-    const morningEnd = calculateMorningEnd(entry);
-    if (morningEnd === '-' || morningEnd === "Alte Buchung") return '-';
-    
-    const [hours, minutes] = morningEnd.split(':').map(Number);
-    const totalMinutes = hours * 60 + minutes + entry.pause_minutes;
-    return `${String(Math.floor(totalMinutes / 60)).padStart(2, '0')}:${String(totalMinutes % 60).padStart(2, '0')}`;
+    return hasPause(entry) ? "13:00" : '-';
   };
 
   const formatPauseTime = (entry: TimeEntry) => {
-    // Fallback für alte Einträge
     if (!entry.start_time || !entry.end_time) return '-';
-    if (!entry.pause_minutes || entry.pause_minutes === 0) return '-';
-    const morningEnd = calculateMorningEnd(entry);
-    const afternoonStart = calculateAfternoonStart(entry);
-    if (morningEnd === '-' || morningEnd === "Alte Buchung" || afternoonStart === '-') return '-';
-    return `${morningEnd} - ${afternoonStart}`;
+    return hasPause(entry) ? "12:00 - 13:00" : '-';
   };
 
   const isCurrentMonth = (datum: string) => {
@@ -114,29 +97,19 @@ const MyHours = () => {
 
     setSavingEdit(true);
 
-    // Berechne Stunden basierend auf Vormittag und Nachmittag
-    const morningStart = editingEntry.start_time ? new Date(`2000-01-01T${editingEntry.start_time}`) : null;
-    // Morning End: immer 12:00
-    const morningEndTime = "12:00";
-    const morningEnd = new Date(`2000-01-01T${morningEndTime}`);
-    
+    // Pause ist immer fix 12:00–13:00 (60 Min.)
+    const PAUSE_START = "12:00";
+    const PAUSE_END = "13:00";
+    const pauseMinutes = editingEntry.pause_minutes || 0;
+
     let calculatedHours = 0;
-    
-    if (morningStart) {
-      // Vormittagsstunden
-      const morningMs = morningEnd.getTime() - morningStart.getTime();
-      const morningMinutes = morningMs / (1000 * 60);
-      calculatedHours += morningMinutes / 60;
-      
-      // Nachmittagsstunden (wenn vorhanden)
-      if (editingEntry.end_time) {
-        const afternoonEnd = new Date(`2000-01-01T${editingEntry.end_time}`);
-        const pauseMinutes = editingEntry.pause_minutes || 0;
-        const afternoonStartTime = new Date(morningEnd.getTime() + pauseMinutes * 60 * 1000);
-        const afternoonMs = afternoonEnd.getTime() - afternoonStartTime.getTime();
-        const afternoonMinutes = Math.max(0, afternoonMs / (1000 * 60));
-        calculatedHours += afternoonMinutes / 60;
-      }
+    if (editingEntry.start_time && editingEntry.end_time) {
+      const toMin = (t: string) => {
+        const [h, m] = t.substring(0, 5).split(":").map(Number);
+        return h * 60 + m;
+      };
+      const totalMinutes = toMin(editingEntry.end_time) - toMin(editingEntry.start_time) - pauseMinutes;
+      calculatedHours = Math.max(0, totalMinutes / 60);
     }
 
     const { error } = await supabase
@@ -434,15 +407,7 @@ const MyHours = () => {
                     <Input
                       id="edit-afternoon-start"
                       type="time"
-                      value={(() => {
-                        const dayOfWeek = new Date(editingEntry.datum).getDay();
-                        const isFriday = dayOfWeek === 5;
-                        const morningEnd = isFriday ? "12:30" : "12:00";
-                        const [hours, minutes] = morningEnd.split(':').map(Number);
-                        const pauseMinutes = editingEntry.pause_minutes || 0;
-                        const totalMinutes = hours * 60 + minutes + pauseMinutes;
-                        return `${String(Math.floor(totalMinutes / 60)).padStart(2, '0')}:${String(totalMinutes % 60).padStart(2, '0')}`;
-                      })()}
+                      value="13:00"
                       disabled
                       className="bg-muted"
                     />
@@ -457,11 +422,6 @@ const MyHours = () => {
                     />
                   </div>
                 </div>
-                {new Date(editingEntry.datum).getDay() === 5 && (
-                  <p className="text-xs text-muted-foreground">
-                    Freitags ist die Normalarbeitszeit 7:30-12:30 Uhr. Nachmittag nur bei Überstunden.
-                  </p>
-                )}
               </div>
 
               <div className="flex gap-2 pt-4">
