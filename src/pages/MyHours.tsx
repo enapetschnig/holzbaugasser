@@ -8,8 +8,11 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+
+type ProjectOption = { id: string; name: string; plz: string | null };
 
 type TimeEntry = {
   id: string;
@@ -38,10 +41,21 @@ const MyHours = () => {
   const [editingEntry, setEditingEntry] = useState<TimeEntry | null>(null);
   const [showEditDialog, setShowEditDialog] = useState(false);
   const [savingEdit, setSavingEdit] = useState(false);
+  const [projectOptions, setProjectOptions] = useState<ProjectOption[]>([]);
 
   useEffect(() => {
     fetchEntries();
+    fetchProjects();
   }, [selectedMonth]);
+
+  const fetchProjects = async () => {
+    const { data } = await supabase
+      .from("projects")
+      .select("id, name, plz")
+      .eq("status", "aktiv")
+      .order("name");
+    if (data) setProjectOptions(data);
+  };
 
   const fetchEntries = async () => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -119,6 +133,7 @@ const MyHours = () => {
         pause_minutes: editingEntry.pause_minutes || 0,
         notizen: editingEntry.notizen,
         stunden: Math.max(0, calculatedHours),
+        project_id: editingEntry.project_id,
       })
       .eq("id", editingEntry.id);
 
@@ -353,6 +368,26 @@ const MyHours = () => {
                   onChange={(e) => setEditingEntry({...editingEntry, taetigkeit: e.target.value})}
                   placeholder="z.B. Dachstuhl montieren"
                 />
+              </div>
+
+              <div>
+                <Label>Projekt</Label>
+                <Select
+                  value={editingEntry.project_id || "none"}
+                  onValueChange={(v) => setEditingEntry({...editingEntry, project_id: v === "none" ? null : v})}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Projekt auswählen" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Kein Projekt</SelectItem>
+                    {projectOptions.map((p) => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {p.name}{p.plz ? ` (${p.plz})` : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
 
               {/* Vormittag */}

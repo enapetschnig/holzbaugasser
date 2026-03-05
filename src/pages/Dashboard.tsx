@@ -1,29 +1,77 @@
-import { Building2, Clock, FileText, FolderOpen, Users, FileSpreadsheet, Zap, Receipt } from "lucide-react";
+import { Building2, Clock, FileText, FolderOpen, Users, FileSpreadsheet, Zap, Bell, X } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { formatDistanceToNow } from "date-fns";
+import { de } from "date-fns/locale";
+
+type Notification = {
+  id: string;
+  type: string;
+  title: string;
+  message: string;
+  is_read: boolean;
+  metadata: Record<string, unknown> | null;
+  created_at: string;
+};
 
 const Dashboard = () => {
   const navigate = useNavigate();
   const [isAdmin, setIsAdmin] = useState(false);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [userId, setUserId] = useState<string | null>(null);
 
   useEffect(() => {
-    checkAdminStatus();
+    init();
   }, []);
 
-  const checkAdminStatus = async () => {
+  useEffect(() => {
+    if (!userId) return;
+    const channel = supabase
+      .channel("dashboard-notifications")
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "notifications", filter: `user_id=eq.${userId}` },
+        (payload) => setNotifications((prev) => [payload.new as Notification, ...prev])
+      )
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [userId]);
+
+  const init = async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
+    setUserId(user.id);
 
-    const { data } = await supabase
+    const { data: role } = await supabase
       .from("user_roles")
       .select("role")
       .eq("user_id", user.id)
       .single();
+    setIsAdmin(role?.role === "administrator");
 
-    setIsAdmin(data?.role === "administrator");
+    const { data: notifs } = await supabase
+      .from("notifications")
+      .select("*")
+      .eq("user_id", user.id)
+      .eq("is_read", false)
+      .order("created_at", { ascending: false })
+      .limit(10);
+    if (notifs) setNotifications(notifs as Notification[]);
+  };
+
+  const handleNotificationClick = async (notif: Notification) => {
+    await supabase.from("notifications").update({ is_read: true }).eq("id", notif.id);
+    setNotifications((prev) => prev.filter((n) => n.id !== notif.id));
+
+    if (notif.type === "lohnzettel_upload") navigate("/my-documents");
+    else if (notif.type === "krankmeldung_upload") navigate("/employees");
+  };
+
+  const dismissNotification = async (e: React.MouseEvent, notifId: string) => {
+    e.stopPropagation();
+    await supabase.from("notifications").update({ is_read: true }).eq("id", notifId);
+    setNotifications((prev) => prev.filter((n) => n.id !== notifId));
   };
 
   const features = [
@@ -69,6 +117,37 @@ const Dashboard = () => {
             </div>
           </div>
         </div>
+
+        {notifications.length > 0 && (
+          <div className="mb-6 space-y-2">
+            {notifications.map((notif) => (
+              <Card
+                key={notif.id}
+                className="border-l-4 border-l-blue-500 cursor-pointer hover:bg-muted/50 transition-colors"
+                onClick={() => handleNotificationClick(notif)}
+              >
+                <CardContent className="flex items-center gap-3 py-3 px-4">
+                  <Bell className="h-5 w-5 text-blue-500 flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-sm">{notif.title}</p>
+                    <p className="text-xs text-muted-foreground truncate">{notif.message}</p>
+                  </div>
+                  <span className="text-xs text-muted-foreground whitespace-nowrap">
+                    {formatDistanceToNow(new Date(notif.created_at), { addSuffix: true, locale: de })}
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 w-6 p-0 flex-shrink-0"
+                    onClick={(e) => dismissNotification(e, notif.id)}
+                  >
+                    <X className="h-3 w-3" />
+                  </Button>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {features.map((feature) => {

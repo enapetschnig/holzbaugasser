@@ -8,7 +8,10 @@ import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, Table
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "@/hooks/use-toast";
-import { ArrowLeft, Download, FileSpreadsheet, Building2, Hammer, ChevronDown, AlertTriangle } from "lucide-react";
+import { ArrowLeft, Download, FileSpreadsheet, Building2, Hammer, ChevronDown, AlertTriangle, Pencil, Trash2 } from "lucide-react";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { format, isSameDay, parseISO } from "date-fns";
 import { de } from "date-fns/locale";
 import * as XLSX from "xlsx-js-style";
@@ -67,6 +70,10 @@ export default function HoursReport() {
   const [projects, setProjects] = useState<Record<string, Project>>({});
   const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [editingEntry, setEditingEntry] = useState<TimeEntry | null>(null);
+  const [showEditDialog, setShowEditDialog] = useState(false);
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [projectList, setProjectList] = useState<Project[]>([]);
 
   const years = Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - 2 + i);
 
@@ -74,6 +81,7 @@ export default function HoursReport() {
     checkAdminStatus();
     fetchProfiles();
     fetchProjects();
+    fetchProjectList();
   }, []);
 
   useEffect(() => {
@@ -148,6 +156,66 @@ export default function HoursReport() {
       setTimeEntries(data || []);
     }
     setLoading(false);
+  };
+
+  const fetchProjectList = async () => {
+    const { data } = await supabase
+      .from("projects")
+      .select("id, name, plz")
+      .eq("status", "aktiv")
+      .order("name");
+    if (data) setProjectList(data as Project[]);
+  };
+
+  const handleUpdateEntry = async () => {
+    if (!editingEntry || savingEdit) return;
+    setSavingEdit(true);
+
+    const pauseMinutes = editingEntry.pause_minutes || 0;
+    let calculatedHours = 0;
+    if (editingEntry.start_time && editingEntry.end_time) {
+      const toMinCalc = (t: string) => {
+        const [h, m] = t.substring(0, 5).split(":").map(Number);
+        return h * 60 + m;
+      };
+      const totalMinutes = toMinCalc(editingEntry.end_time) - toMinCalc(editingEntry.start_time) - pauseMinutes;
+      calculatedHours = Math.max(0, totalMinutes / 60);
+    }
+
+    const { error } = await supabase
+      .from("time_entries")
+      .update({
+        taetigkeit: editingEntry.taetigkeit,
+        start_time: editingEntry.start_time,
+        end_time: editingEntry.end_time,
+        pause_minutes: pauseMinutes,
+        stunden: Math.max(0, calculatedHours),
+        project_id: editingEntry.project_id,
+      })
+      .eq("id", editingEntry.id);
+
+    if (error) {
+      toast({ variant: "destructive", title: "Fehler", description: "Eintrag konnte nicht aktualisiert werden" });
+    } else {
+      toast({ title: "Erfolg", description: "Eintrag wurde aktualisiert" });
+      setShowEditDialog(false);
+      setEditingEntry(null);
+      fetchTimeEntries();
+    }
+    setSavingEdit(false);
+  };
+
+  const handleDeleteEntry = async (id: string) => {
+    if (!confirm("Möchtest du diesen Eintrag wirklich löschen?")) return;
+    const { error } = await supabase.from("time_entries").delete().eq("id", id);
+    if (error) {
+      toast({ variant: "destructive", title: "Fehler", description: "Eintrag konnte nicht gelöscht werden" });
+    } else {
+      toast({ title: "Erfolg", description: "Eintrag wurde gelöscht" });
+      setShowEditDialog(false);
+      setEditingEntry(null);
+      fetchTimeEntries();
+    }
   };
 
   const generateMonthDays = () => {
@@ -693,6 +761,7 @@ export default function HoursReport() {
                           <TableHead>Ort</TableHead>
                           <TableHead>Projekt</TableHead>
                           <TableHead>Tätigkeit</TableHead>
+                          {isAdmin && <TableHead className="w-[50px]"></TableHead>}
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -830,6 +899,18 @@ export default function HoursReport() {
                                   <TableCell className="max-w-[150px] truncate">
                                     {entry.taetigkeit}
                                   </TableCell>
+                                  {isAdmin && (
+                                    <TableCell>
+                                      <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        className="h-7 w-7 p-0"
+                                        onClick={() => { setEditingEntry(entry); setShowEditDialog(true); }}
+                                      >
+                                        <Pencil className="h-3.5 w-3.5" />
+                                      </Button>
+                                    </TableCell>
+                                  )}
                                 </TableRow>
                               );
                             });
@@ -862,6 +943,103 @@ export default function HoursReport() {
           <ProjectHoursReport />
         </TabsContent>
       </Tabs>
+
+      {/* Admin Edit Dialog */}
+      <Dialog open={showEditDialog} onOpenChange={(open) => {
+        setShowEditDialog(open);
+        if (!open) setEditingEntry(null);
+      }}>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Stundeneintrag bearbeiten</DialogTitle>
+            <DialogDescription>
+              {editingEntry && (
+                <>
+                  {profiles[editingEntry.user_id]
+                    ? `${profiles[editingEntry.user_id].vorname} ${profiles[editingEntry.user_id].nachname} – `
+                    : ""}
+                  {format(parseISO(editingEntry.datum), "EEEE, dd. MMMM yyyy", { locale: de })}
+                </>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          {editingEntry && (
+            <div className="space-y-4">
+              <div>
+                <Label>Tätigkeit</Label>
+                <Input
+                  value={editingEntry.taetigkeit}
+                  onChange={(e) => setEditingEntry({ ...editingEntry, taetigkeit: e.target.value })}
+                />
+              </div>
+
+              <div>
+                <Label>Projekt</Label>
+                <Select
+                  value={editingEntry.project_id || "none"}
+                  onValueChange={(v) => setEditingEntry({ ...editingEntry, project_id: v === "none" ? null : v })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Projekt auswählen" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Kein Projekt</SelectItem>
+                    {projectList.map((p) => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {p.name}{p.plz ? ` (${p.plz})` : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label>Beginn</Label>
+                  <Input
+                    type="time"
+                    value={editingEntry.start_time?.substring(0, 5) || ""}
+                    onChange={(e) => setEditingEntry({ ...editingEntry, start_time: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <Label>Ende</Label>
+                  <Input
+                    type="time"
+                    value={editingEntry.end_time?.substring(0, 5) || ""}
+                    onChange={(e) => setEditingEntry({ ...editingEntry, end_time: e.target.value })}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <Label>Pause (Minuten)</Label>
+                <Input
+                  type="number"
+                  min="0"
+                  value={editingEntry.pause_minutes || 0}
+                  onChange={(e) => setEditingEntry({ ...editingEntry, pause_minutes: parseInt(e.target.value) || 0 })}
+                />
+              </div>
+
+              <div className="flex gap-2 pt-4">
+                <Button onClick={handleUpdateEntry} className="flex-1" disabled={savingEdit}>
+                  {savingEdit ? "Wird gespeichert..." : "Speichern"}
+                </Button>
+                <Button
+                  variant="destructive"
+                  onClick={() => editingEntry && handleDeleteEntry(editingEntry.id)}
+                  className="flex-1"
+                  disabled={savingEdit}
+                >
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  Löschen
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
