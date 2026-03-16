@@ -1155,9 +1155,10 @@ const TimeTracking = () => {
                 </span>
                 {t.position === 1 ? (
                   <Input
-                    value={pos1Text}
-                    readOnly
-                    className="flex-1 bg-muted/50"
+                    value={t.bezeichnung}
+                    onChange={(e) => updateTaetigkeit(t.position, e.target.value)}
+                    placeholder={pos1Text}
+                    className="flex-1"
                   />
                 ) : (
                   <Input

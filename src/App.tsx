@@ -25,6 +25,7 @@ import HoursReport from "./pages/HoursReport";
 import Employees from "./pages/Employees";
 import Notepad from "./pages/Notepad";
 import MaterialList from "./pages/MaterialList";
+import Absence from "./pages/Absence";
 import Disturbances from "./pages/Disturbances";
 import DisturbanceDetail from "./pages/DisturbanceDetail";
 import NotFound from "./pages/NotFound";
@@ -107,6 +108,7 @@ function AppContent() {
         <Route path="/hours-report" element={<HoursReport />} />
         <Route path="/employees" element={<Employees />} />
         <Route path="/notepad" element={<Notepad />} />
+        <Route path="/absence" element={<Absence />} />
         <Route path="/disturbances" element={<Disturbances />} />
         <Route path="/disturbances/:id" element={<DisturbanceDetail />} />
         <Route path="*" element={<NotFound />} />

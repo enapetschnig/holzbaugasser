@@ -437,26 +437,24 @@ export default function Index() {
           {/* Regiearbeiten ausgeblendet - nicht mehr benötigt */}
 
 
-          {/* Urlaub beantragen - Für Mitarbeiter (die keine Zeiterfassung haben) */}
-          {!canManageTime && (
-            <Card
-              className="cursor-pointer hover:shadow-lg transition-all hover:border-primary/50"
-              onClick={() => navigate("/time-tracking?absence=true")}
-            >
-              <CardHeader className="space-y-2 pb-3">
-                <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center">
-                  <Clock className="h-6 w-6 text-primary" />
-                </div>
-                <CardTitle className="text-lg sm:text-xl">Urlaub / Abwesenheit</CardTitle>
-                <CardDescription className="text-sm">
-                  Urlaub, Krankenstand oder ZA eintragen
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <Button className="w-full" size="sm">Abwesenheit melden</Button>
-              </CardContent>
-            </Card>
-          )}
+          {/* Urlaub / Abwesenheit - Für alle Benutzer */}
+          <Card
+            className="cursor-pointer hover:shadow-lg transition-all hover:border-primary/50"
+            onClick={() => navigate("/absence")}
+          >
+            <CardHeader className="space-y-2 pb-3">
+              <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center">
+                <Clock className="h-6 w-6 text-primary" />
+              </div>
+              <CardTitle className="text-lg sm:text-xl">Urlaub / Abwesenheit</CardTitle>
+              <CardDescription className="text-sm">
+                Urlaub, Krankenstand oder ZA eintragen
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button className="w-full" size="sm">Abwesenheit melden</Button>
+            </CardContent>
+          </Card>
 
           {/* Meine Dokumente - Für Mitarbeiter + Vorarbeiter */}
           {!isAdmin && (
