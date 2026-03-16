@@ -17,6 +17,7 @@ export type LeistungsberichtPDFData = {
     istFahrer: boolean;
     istWerkstatt: boolean;
     schmutzzulage: boolean;
+    regenSchicht: boolean;
     stunden: { position: number; stunden: number }[];
     summe: number;
   }[];
@@ -336,11 +337,12 @@ export async function generateLeistungsberichtPDF(
 
   // Column widths
   const colF = 5;
+  const colR = 5;
   const colName = 30;
   const colSum18 = 11;
   const colAct = 10; // each activity column
   const colSumme = 15;
-  const tableW = colF + colName + colSum18 + 8 * colAct + colSumme;
+  const tableW = colF + colR + colName + colSum18 + 8 * colAct + colSumme;
   const tableX = mL;
   const tableXEnd = tableX + tableW;
 
@@ -361,6 +363,10 @@ export async function generateLeistungsberichtPDF(
   // F header
   doc.text("F", hx + colF / 2, y + 6, { align: "center" });
   hx += colF;
+
+  // R header (Regen/Wetterschicht)
+  doc.text("R", hx + colR / 2, y + 6, { align: "center" });
+  hx += colR;
 
   // Mitarbeiter header
   doc.text("Mitarbeiter:", hx + 1, y + 3.5);
@@ -412,6 +418,13 @@ export async function generateLeistungsberichtPDF(
     }
     cx += colF;
 
+    // R column (Regen/Wetterschicht)
+    if (m && m.regenSchicht) {
+      doc.setFont("helvetica", "bold");
+      doc.text("R", cx + colR / 2, y + rowH * 0.7, { align: "center" });
+    }
+    cx += colR;
+
     // Name
     doc.setFont("helvetica", "normal");
     if (m) doc.text(m.name, cx + 1, y + rowH * 0.7);
@@ -458,6 +471,8 @@ export async function generateLeistungsberichtPDF(
   // Vertical lines
   let vx = tableX + colF;
   drawLine(doc, vx, tableTop, vx, tableBottom, 0.3); // after F
+  vx += colR;
+  drawLine(doc, vx, tableTop, vx, tableBottom, 0.3); // after R
   vx += colName;
   drawLine(doc, vx, tableTop, vx, tableBottom, 0.3); // after Name
   vx += colSum18;

@@ -1,97 +1,268 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { PageHeader } from "@/components/PageHeader";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { toast } from "@/hooks/use-toast";
-import { ArrowLeft, Download, FileSpreadsheet, Building2, Warehouse, ChevronDown, AlertTriangle, Pencil } from "lucide-react";
-import { format, isSameDay, parseISO } from "date-fns";
-import { de } from "date-fns/locale";
-import * as XLSX from "xlsx-js-style";
+import { Badge } from "@/components/ui/badge";
+import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import ProjectHoursReport from "@/components/ProjectHoursReport";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { getNormalWorkingHours } from "@/lib/workingHours";
+import { FileSpreadsheet, Building2, ClipboardList, Loader2 } from "lucide-react";
+import { format, parseISO } from "date-fns";
+import { de } from "date-fns/locale";
 
-interface TimeEntry {
-  id: string;
-  datum: string;
-  start_time: string;
-  end_time: string;
-  pause_minutes: number;
-  pause_start?: string;
-  pause_end?: string;
-  stunden: number;
-  location_type: string;
-  project_id: string | null;
-  user_id: string;
-  taetigkeit: string;
-  week_type?: string | null;
-  disturbance_id?: string | null;
-}
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
 
 interface Profile {
+  id: string;
   vorname: string;
   nachname: string;
 }
 
-interface Project {
-  id: string;
-  name: string;
-  adresse?: string;
-  plz?: string;
+interface TimeEntry {
+  user_id: string;
+  datum: string;
+  stunden: number;
+  taetigkeit: string;
+  location_type: string;
 }
 
+interface BerichtMitarbeiterRow {
+  mitarbeiter_id: string;
+  ist_fahrer: boolean;
+  ist_werkstatt: boolean;
+  schmutzzulage: boolean;
+  regen_schicht: boolean;
+  fahrer_stunden: number | null;
+  werkstatt_stunden: number | null;
+  schmutzzulage_stunden: number | null;
+  regen_stunden: number | null;
+  summe_stunden: number;
+  bericht_id: string;
+  bericht_datum: string;
+}
+
+interface DayData {
+  stunden: number;
+  istFahrer: boolean;
+  istWerkstatt: boolean;
+  schmutzzulage: boolean;
+  regenSchicht: boolean;
+  fahrerStunden: number | null;
+  werkstattStunden: number | null;
+  schmutzzulageStunden: number | null;
+  regenStunden: number | null;
+  isAbsence: boolean;
+  absenceType: string;
+}
+
+interface ExistingBericht {
+  id: string;
+  datum: string;
+  objekt: string | null;
+  projekt_name: string;
+  ersteller_name: string;
+  mitarbeiter_count: number;
+  total_stunden: number;
+}
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
 const monthNames = [
-  "Jänner", "Februar", "März", "April", "Mai", "Juni",
-  "Juli", "August", "September", "Oktober", "November", "Dezember"
+  "Jaenner",
+  "Feber",
+  "Maerz",
+  "April",
+  "Mai",
+  "Juni",
+  "Juli",
+  "August",
+  "September",
+  "Oktober",
+  "November",
+  "Dezember",
 ];
+
+const weekdayAbbr = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"];
+
+const ABSENCE_TYPES = [
+  "Urlaub",
+  "Krankenstand",
+  "Zeitausgleich",
+  "Berufsschule",
+  "Feiertag",
+  "Weiterbildung",
+];
+
+const ABSENCE_SHORT: Record<string, string> = {
+  Urlaub: "U",
+  Krankenstand: "K",
+  Zeitausgleich: "ZA",
+  Berufsschule: "Schule",
+  Feiertag: "Feiertag",
+  Weiterbildung: "WB",
+};
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function getDaysInMonth(year: number, month: number): number {
+  return new Date(year, month, 0).getDate();
+}
+
+function isWeekend(year: number, month: number, day: number): boolean {
+  const dow = new Date(year, month - 1, day).getDay();
+  return dow === 0 || dow === 6;
+}
+
+function getWeekday(year: number, month: number, day: number): string {
+  return weekdayAbbr[new Date(year, month - 1, day).getDay()];
+}
+
+/** Count working days (Mo-Fr) in a given month */
+function countWorkingDays(year: number, month: number): number {
+  const days = getDaysInMonth(year, month);
+  let count = 0;
+  for (let d = 1; d <= days; d++) {
+    if (!isWeekend(year, month, d)) count++;
+  }
+  return count;
+}
+
+function formatNumber(n: number): string {
+  if (n === Math.floor(n)) return n.toString();
+  // Show one decimal, remove trailing zero
+  const s = n.toFixed(1);
+  return s.endsWith("0") ? n.toString() : s;
+}
+
+function formatCell(dayData: DayData | null): { text: string; className: string } {
+  if (!dayData) return { text: "", className: "" };
+
+  if (dayData.isAbsence) {
+    const short = ABSENCE_SHORT[dayData.absenceType] || dayData.absenceType;
+    if (dayData.absenceType === "Urlaub") return { text: short, className: "text-green-600 font-semibold" };
+    if (dayData.absenceType === "Krankenstand") return { text: short, className: "text-red-600 font-semibold" };
+    if (dayData.absenceType === "Zeitausgleich") return { text: short, className: "text-blue-600 font-semibold" };
+    return { text: short, className: "text-gray-600" };
+  }
+
+  const h = dayData.stunden;
+  if (h === 0) return { text: "", className: "" };
+
+  const parts: string[] = [];
+
+  // Split hours logic: if specific hour amounts are given, show them
+  if (dayData.fahrerStunden !== null && dayData.fahrerStunden > 0) {
+    parts.push(`${formatNumber(dayData.fahrerStunden)}F`);
+  } else if (dayData.istFahrer) {
+    parts.push(`${formatNumber(h)}F`);
+  }
+
+  if (dayData.werkstattStunden !== null && dayData.werkstattStunden > 0) {
+    parts.push(`${formatNumber(dayData.werkstattStunden)}W`);
+  } else if (dayData.istWerkstatt && !dayData.istFahrer) {
+    parts.push(`${formatNumber(h)}W`);
+  }
+
+  if (dayData.schmutzzulageStunden !== null && dayData.schmutzzulageStunden > 0) {
+    parts.push(`${formatNumber(dayData.schmutzzulageStunden)}SCH`);
+  } else if (dayData.schmutzzulage && parts.length === 0) {
+    parts.push(`${formatNumber(h)}SCH`);
+  }
+
+  if (dayData.regenStunden !== null && dayData.regenStunden > 0) {
+    parts.push(`${formatNumber(dayData.regenStunden)}R`);
+  } else if (dayData.regenSchicht && parts.length === 0) {
+    parts.push(`${formatNumber(h)}R`);
+  }
+
+  if (parts.length === 0) {
+    parts.push(formatNumber(h));
+  }
+
+  return { text: parts.join(""), className: "" };
+}
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
 
 export default function HoursReport() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const [month, setMonth] = useState(() => {
+  const { toast } = useToast();
+
+  // Admin check
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [checkingAdmin, setCheckingAdmin] = useState(true);
+
+  // Shared data
+  const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [profileMap, setProfileMap] = useState<Record<string, Profile>>({});
+
+  // Tab 1: Arbeitszeiterfassung state
+  const [gridMonth, setGridMonth] = useState(() => {
     const p = searchParams.get("month");
     return p ? parseInt(p) : new Date().getMonth() + 1;
   });
-  const [year, setYear] = useState(() => {
+  const [gridYear, setGridYear] = useState(() => {
     const p = searchParams.get("year");
     return p ? parseInt(p) : new Date().getFullYear();
   });
-  const [selectedUserId, setSelectedUserId] = useState<string>(searchParams.get("user") || "");
-  const [timeEntries, setTimeEntries] = useState<TimeEntry[]>([]);
-  const [profiles, setProfiles] = useState<Record<string, Profile>>({});
-  const [projects, setProjects] = useState<Record<string, Project>>({});
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [gridEmployee, setGridEmployee] = useState<string>("all");
+  const [gridEntries, setGridEntries] = useState<TimeEntry[]>([]);
+  const [gridBerichtData, setGridBerichtData] = useState<BerichtMitarbeiterRow[]>([]);
+  const [gridLoading, setGridLoading] = useState(false);
+
+  // Tab 2: Leistungsberichte state
+  const [berichte, setBerichte] = useState<ExistingBericht[]>([]);
+  const [berichteLoading, setBerichteLoading] = useState(false);
+  const [berichteStartDate, setBerichteStartDate] = useState(() => {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split("T")[0];
+  });
+  const [berichteEndDate, setBerichteEndDate] = useState(
+    () => new Date().toISOString().split("T")[0]
+  );
+  const [berichteVorarbeiter, setBerichteVorarbeiter] = useState("all");
+  const [berichteMitarbeiter, setBerichteMitarbeiter] = useState("all");
+  const [berichteProjekt, setBerichteProjekt] = useState("all");
+  const [berichteProjects, setBerichteProjects] = useState<{ id: string; name: string }[]>([]);
 
   const years = Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - 2 + i);
+
+  // -------------------------------------------------------------------------
+  // Init
+  // -------------------------------------------------------------------------
 
   useEffect(() => {
     checkAdminStatus();
     fetchProfiles();
-    fetchProjects();
   }, []);
 
-  useEffect(() => {
-    if (selectedUserId) {
-      fetchTimeEntries();
-    }
-  }, [month, year, selectedUserId]);
-
   const checkAdminStatus = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) {
+      navigate("/");
+      return;
+    }
     const { data } = await supabase
       .from("user_roles")
       .select("role")
@@ -103,851 +274,762 @@ export default function HoursReport() {
       return;
     }
     setIsAdmin(true);
-
-    const employeeParam = searchParams.get("employee");
-    if (employeeParam) {
-      setSelectedUserId(employeeParam);
-    }
+    setCheckingAdmin(false);
   };
 
   const fetchProfiles = async () => {
-    const { data } = await supabase.from("profiles").select("id, vorname, nachname, is_active").eq("is_active", true);
+    const { data } = await supabase
+      .from("profiles")
+      .select("id, vorname, nachname")
+      .eq("is_active", true)
+      .order("nachname");
     if (data) {
-      const profileMap: Record<string, Profile> = {};
+      setProfiles(data);
+      const map: Record<string, Profile> = {};
       data.forEach((p) => {
-        profileMap[p.id] = { vorname: p.vorname, nachname: p.nachname };
+        map[p.id] = p;
       });
-      setProfiles(profileMap);
+      setProfileMap(map);
     }
   };
 
-  const fetchProjects = async () => {
-    const { data } = await supabase.from("projects").select("id, name, adresse, plz");
-    if (data) {
-      const projectMap: Record<string, Project> = {};
-      data.forEach((p) => {
-        projectMap[p.id] = p;
-      });
-      setProjects(projectMap);
-    }
-  };
+  // -------------------------------------------------------------------------
+  // Tab 1: Arbeitszeiterfassung data
+  // -------------------------------------------------------------------------
 
-  const fetchTimeEntries = async () => {
-    setLoading(true);
-    const startDate = new Date(year, month - 1, 1);
-    const endDate = new Date(year, month, 0);
+  const fetchGridData = useCallback(async () => {
+    setGridLoading(true);
+    const startOfMonth = `${gridYear}-${String(gridMonth).padStart(2, "0")}-01`;
+    const daysInMonth = getDaysInMonth(gridYear, gridMonth);
+    const endOfMonth = `${gridYear}-${String(gridMonth).padStart(2, "0")}-${String(daysInMonth).padStart(2, "0")}`;
 
-    const { data, error } = await supabase
+    // Fetch time entries
+    let entriesQuery = supabase
       .from("time_entries")
-      .select("*")
-      .eq("user_id", selectedUserId)
-      .gte("datum", format(startDate, "yyyy-MM-dd"))
-      .lte("datum", format(endDate, "yyyy-MM-dd"))
-      .order("datum");
+      .select("user_id, datum, stunden, taetigkeit, location_type")
+      .gte("datum", startOfMonth)
+      .lte("datum", endOfMonth);
 
-    if (error) {
-      toast({ title: "Fehler beim Laden", description: error.message, variant: "destructive" });
-    } else {
-      setTimeEntries(data || []);
-    }
-    setLoading(false);
-  };
-
-
-  const generateMonthDays = () => {
-    const daysInMonth = new Date(year, month, 0).getDate();
-    const days = [];
-
-    for (let day = 1; day <= daysInMonth; day++) {
-      const date = new Date(year, month - 1, day);
-      const dayOfWeek = date.getDay();
-
-      days.push({
-        date,
-        dayNumber: day,
-        dayOfWeek,
-        isWeekend: dayOfWeek === 0 || dayOfWeek === 6,
-        isFriday: dayOfWeek === 5,
-      });
+    if (gridEmployee !== "all") {
+      entriesQuery = entriesQuery.eq("user_id", gridEmployee);
     }
 
-    return days;
-  };
+    const { data: entries } = await entriesQuery;
+    setGridEntries(entries || []);
 
-  const calculateOvertime = (date: Date, totalHours: number): number => {
-    const normalHours = getNormalWorkingHours(date);
-    return Math.max(0, totalHours - normalHours);
-  };
+    // Fetch leistungsbericht_mitarbeiter flags via join
+    let bmQuery = supabase
+      .from("leistungsbericht_mitarbeiter" as any)
+      .select(
+        "mitarbeiter_id, ist_fahrer, ist_werkstatt, schmutzzulage, regen_schicht, fahrer_stunden, werkstatt_stunden, schmutzzulage_stunden, regen_stunden, summe_stunden, bericht_id, leistungsberichte!inner(datum)"
+      )
+      .gte("leistungsberichte.datum" as any, startOfMonth)
+      .lte("leistungsberichte.datum" as any, endOfMonth);
 
-  const toMin = (t: string) => {
-    const [h, m] = (t || "00:00").substring(0, 5).split(":").map(Number);
-    return h * 60 + m;
-  };
-
-  // Deduplicate overlapping time entries for a day (avoids double-counting from Regieberichte)
-  const deduplicateDayEntries = (entries: TimeEntry[]): TimeEntry[] => {
-    if (entries.length <= 1) return entries;
-    const sorted = [...entries].sort((a, b) =>
-      (a.start_time || "").localeCompare(b.start_time || "")
-    );
-    const result: TimeEntry[] = [];
-    for (const entry of sorted) {
-      const s = toMin(entry.start_time);
-      const e = toMin(entry.end_time);
-      const overlaps = result.some(r => s < toMin(r.end_time) && e > toMin(r.start_time));
-      if (!overlaps) result.push(entry);
+    if (gridEmployee !== "all") {
+      bmQuery = bmQuery.eq("mitarbeiter_id", gridEmployee);
     }
-    return result;
-  };
 
-  // Returns a Set of entry IDs that are overlapping (= removed by deduplication)
-  const getOverlappingEntryIds = (entries: TimeEntry[]): Set<string> => {
-    if (entries.length <= 1) return new Set();
-    const sorted = [...entries].sort((a, b) =>
-      (a.start_time || "").localeCompare(b.start_time || "")
-    );
-    const kept: TimeEntry[] = [];
-    const overlapping = new Set<string>();
-    for (const entry of sorted) {
-      const s = toMin(entry.start_time);
-      const e = toMin(entry.end_time);
-      const overlapsKept = kept.some(r => s < toMin(r.end_time) && e > toMin(r.start_time));
-      if (overlapsKept) {
-        overlapping.add(entry.id);
+    const { data: bmData } = await bmQuery;
+
+    const transformed: BerichtMitarbeiterRow[] = (bmData || []).map((row: any) => ({
+      mitarbeiter_id: row.mitarbeiter_id,
+      ist_fahrer: row.ist_fahrer || false,
+      ist_werkstatt: row.ist_werkstatt || false,
+      schmutzzulage: row.schmutzzulage || false,
+      regen_schicht: row.regen_schicht || false,
+      fahrer_stunden: row.fahrer_stunden,
+      werkstatt_stunden: row.werkstatt_stunden,
+      schmutzzulage_stunden: row.schmutzzulage_stunden,
+      regen_stunden: row.regen_stunden,
+      summe_stunden: row.summe_stunden || 0,
+      bericht_id: row.bericht_id,
+      bericht_datum: row.leistungsberichte?.datum || "",
+    }));
+
+    setGridBerichtData(transformed);
+    setGridLoading(false);
+  }, [gridMonth, gridYear, gridEmployee]);
+
+  useEffect(() => {
+    if (isAdmin) fetchGridData();
+  }, [isAdmin, fetchGridData]);
+
+  // Build grid data: userId -> day -> DayData
+  const gridDataMap = useMemo(() => {
+    const map: Record<string, Record<number, DayData>> = {};
+
+    // First pass: time_entries (for hours and absence types)
+    for (const entry of gridEntries) {
+      if (!map[entry.user_id]) map[entry.user_id] = {};
+      const day = parseInt(entry.datum.split("-")[2], 10);
+
+      const isAbsence = ABSENCE_TYPES.includes(entry.taetigkeit);
+
+      if (isAbsence) {
+        map[entry.user_id][day] = {
+          stunden: entry.stunden,
+          istFahrer: false,
+          istWerkstatt: false,
+          schmutzzulage: false,
+          regenSchicht: false,
+          fahrerStunden: null,
+          werkstattStunden: null,
+          schmutzzulageStunden: null,
+          regenStunden: null,
+          isAbsence: true,
+          absenceType: entry.taetigkeit,
+        };
       } else {
-        kept.push(entry);
+        const existing = map[entry.user_id][day];
+        if (existing && !existing.isAbsence) {
+          // Aggregate hours for the same day
+          existing.stunden += entry.stunden;
+        } else if (!existing) {
+          map[entry.user_id][day] = {
+            stunden: entry.stunden,
+            istFahrer: false,
+            istWerkstatt: false,
+            schmutzzulage: false,
+            regenSchicht: false,
+            fahrerStunden: null,
+            werkstattStunden: null,
+            schmutzzulageStunden: null,
+            regenStunden: null,
+            isAbsence: false,
+            absenceType: "",
+          };
+        }
       }
     }
-    return overlapping;
-  };
 
-  const calculateLunchBreak = (entry: TimeEntry) => {
-    // Pause aus DB-Werten lesen
-    if (entry.pause_start && entry.pause_end) {
-      return {
-        start: entry.pause_start.substring(0, 5),
-        end: entry.pause_end.substring(0, 5),
-      };
+    // Second pass: overlay leistungsbericht_mitarbeiter flags
+    for (const bm of gridBerichtData) {
+      const uid = bm.mitarbeiter_id;
+      const day = parseInt(bm.bericht_datum.split("-")[2], 10);
+      if (!map[uid]) map[uid] = {};
+
+      if (map[uid][day] && !map[uid][day].isAbsence) {
+        // Overlay flags from bericht onto existing time entry data
+        const d = map[uid][day];
+        d.istFahrer = d.istFahrer || bm.ist_fahrer;
+        d.istWerkstatt = d.istWerkstatt || bm.ist_werkstatt;
+        d.schmutzzulage = d.schmutzzulage || bm.schmutzzulage;
+        d.regenSchicht = d.regenSchicht || bm.regen_schicht;
+        if (bm.fahrer_stunden !== null) d.fahrerStunden = bm.fahrer_stunden;
+        if (bm.werkstatt_stunden !== null) d.werkstattStunden = bm.werkstatt_stunden;
+        if (bm.schmutzzulage_stunden !== null) d.schmutzzulageStunden = bm.schmutzzulage_stunden;
+        if (bm.regen_stunden !== null) d.regenStunden = bm.regen_stunden;
+      } else if (!map[uid][day]) {
+        // Bericht exists but no time_entry - use bericht summe_stunden
+        map[uid][day] = {
+          stunden: bm.summe_stunden,
+          istFahrer: bm.ist_fahrer,
+          istWerkstatt: bm.ist_werkstatt,
+          schmutzzulage: bm.schmutzzulage,
+          regenSchicht: bm.regen_schicht,
+          fahrerStunden: bm.fahrer_stunden,
+          werkstattStunden: bm.werkstatt_stunden,
+          schmutzzulageStunden: bm.schmutzzulage_stunden,
+          regenStunden: bm.regen_stunden,
+          isAbsence: false,
+          absenceType: "",
+        };
+      }
     }
-    if (entry.pause_minutes && entry.pause_minutes > 0) {
-      return { start: "Pause", end: `${entry.pause_minutes} Min.` };
+
+    return map;
+  }, [gridEntries, gridBerichtData]);
+
+  // Determine which employees to show
+  const gridEmployees = useMemo(() => {
+    if (gridEmployee !== "all") {
+      const p = profileMap[gridEmployee];
+      return p ? [p] : [];
     }
-    return null;
-  };
+    return profiles;
+  }, [gridEmployee, profiles, profileMap]);
 
-  const monthDays = generateMonthDays();
+  const daysInMonth = getDaysInMonth(gridYear, gridMonth);
+  const workingDays = countWorkingDays(gridYear, gridMonth);
 
-  // Group entries by day and deduplicate overlapping ones before summing
-  const uniqueEntriesByDay = Object.values(
-    timeEntries.reduce((acc, entry) => {
-      if (!acc[entry.datum]) acc[entry.datum] = [];
-      acc[entry.datum].push(entry);
-      return acc;
-    }, {} as Record<string, TimeEntry[]>)
-  ).flatMap((dayEntries) => deduplicateDayEntries(dayEntries));
+  // -------------------------------------------------------------------------
+  // Tab 2: Leistungsberichte data
+  // -------------------------------------------------------------------------
 
-  const totalHours = uniqueEntriesByDay.reduce((sum, entry) => sum + entry.stunden, 0);
-  const totalOvertime = uniqueEntriesByDay.reduce((sum, entry) => {
-    const entryDate = parseISO(entry.datum);
-    return sum + calculateOvertime(entryDate, entry.stunden);
-  }, 0);
+  const fetchBerichte = useCallback(async () => {
+    setBerichteLoading(true);
 
-  const addBordersToCell = (cell: any, thick: boolean = false, centered: boolean = false) => {
-    const borderStyle = thick ? "medium" : "thin";
-    cell.s = {
-      border: {
-        top: { style: borderStyle, color: { rgb: "000000" } },
-        bottom: { style: borderStyle, color: { rgb: "000000" } },
-        left: { style: borderStyle, color: { rgb: "000000" } },
-        right: { style: borderStyle, color: { rgb: "000000" } },
-      },
-      alignment: { vertical: "center", horizontal: centered ? "center" : "left" },
-    };
-  };
+    // Load projects for filter
+    const { data: projectsData } = await supabase
+      .from("projects")
+      .select("id, name")
+      .order("name");
+    setBerichteProjects(projectsData || []);
 
-  const exportToExcel = (includeOvertime: boolean = true) => {
-    if (!selectedUserId) {
-      toast({ title: "Kein Mitarbeiter ausgewählt", variant: "destructive" });
+    // Load berichte
+    const { data, error } = await supabase
+      .from("leistungsberichte" as any)
+      .select(
+        "id, datum, objekt, projekt_id, erstellt_von, projects:projekt_id(name)"
+      )
+      .gte("datum", berichteStartDate)
+      .lte("datum", berichteEndDate)
+      .order("datum", { ascending: false });
+
+    if (error || !data) {
+      console.error("Error loading berichte:", error);
+      setBerichteLoading(false);
       return;
     }
 
-    const employeeName = profiles[selectedUserId]
-      ? `${profiles[selectedUserId].vorname} ${profiles[selectedUserId].nachname}`
-      : "Mitarbeiter";
-
-    const monthNamesShort = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"];
-
-    const worksheetData: any[][] = [
-      // Firmendaten Header
-      ["Holzbau Gasser", "", "", "", "", "", "", "", "", "", "", ""],
-      ["", "", "", "", "", "", "", "", "", "", "", ""],
-      ["", "", "", "", "", "", "", "", "", "", "", ""],
-      ["", "", "", "", "", "", "", "", "", "", "", ""],
-      ["Dienstnehmer:", "", employeeName, "", "", "", "", "", "Monat:", `${monthNamesShort[month - 1]}-${year.toString().slice(-2)}`, "", ""],
-      ["", "", "", "", "", "", "", "", "", "", "", ""],
-    ];
-
-    // Header-Zeilen dynamisch je nach includeOvertime
-    if (includeOvertime) {
-      worksheetData.push(
-        ["Datum", "V o r m i t t a g", "", "Unterbrechung", "N a c h m i t t a g", "", "Stunden", "Überstunden", "Ort", "Projekt", "Tätigkeit", "PLZ"],
-        ["", "Beginn", "Ende", "von - bis", "Beginn", "Ende", "Gesamt", "", "", "", "", ""]
-      );
-    } else {
-      worksheetData.push(
-        ["Datum", "V o r m i t t a g", "", "Unterbrechung", "N a c h m i t t a g", "", "Stunden", "Ort", "Projekt", "Tätigkeit", "PLZ", ""],
-        ["", "Beginn", "Ende", "von - bis", "Beginn", "Ende", "Gesamt", "", "", "", "", ""]
-      );
+    // Load mitarbeiter counts and total hours
+    const berichtIds = data.map((b: any) => b.id);
+    let mitarbeiterDataAll: any[] = [];
+    if (berichtIds.length > 0) {
+      const { data: md } = await supabase
+        .from("leistungsbericht_mitarbeiter" as any)
+        .select("bericht_id, mitarbeiter_id, summe_stunden")
+        .in("bericht_id", berichtIds);
+      mitarbeiterDataAll = md || [];
     }
 
-    worksheetData.push(["", "", "", "", "", "", "", "", "", "", "", ""]);
-
-    // Vormonat letzter Tag hinzufügen (leere Zeile)
-    const prevMonthLastDay = new Date(year, month - 1, 0).getDate();
-    worksheetData.push([prevMonthLastDay, "", "", "", "", "", "", "", "", "", "", ""]);
-
-    // Alle Tage des Monats (1-31) durchgehen
-    const daysInMonth = new Date(year, month, 0).getDate();
-    for (let day = 1; day <= daysInMonth; day++) {
-      const dayDate = new Date(year, month - 1, day);
-      // Finde alle Einträge für diesen Tag
-      const dayEntries = timeEntries.filter((e) => isSameDay(parseISO(e.datum), dayDate));
-      
-
-      const uniqueDayEntries = deduplicateDayEntries(dayEntries);
-
-      if (uniqueDayEntries.length === 0) {
-        worksheetData.push([day, "", "", "", "", "", "", "", "", "", "", ""]);
-      } else {
-        // Alle (deduplizierten) Einträge des Tages hinzufügen
-        uniqueDayEntries.forEach((entry, entryIndex) => {
-          const lunchBreak = calculateLunchBreak(entry);
-          const project = projects[entry.project_id];
-          
-          // Ort-Spalte: Baustelle oder Werkstatt
-          const ortText = entry.location_type === "baustelle" ? "Baustelle" : "Lager";
-          
-          // Projekt-Spalte: Urlaub/Krankenstand/Weiterbildung, Störung oder Projektname
-          const isAbsence = ["Urlaub", "Krankenstand", "Weiterbildung", "Feiertag"].includes(entry.taetigkeit);
-          const isDisturbance = entry.disturbance_id != null || entry.taetigkeit?.startsWith("Störungseinsatz");
-          
-          let projektName = "";
-          if (isAbsence) {
-            projektName = entry.taetigkeit;
-          } else if (isDisturbance) {
-            projektName = "Störung";
-          } else {
-            projektName = project?.name || "";
-          }
-          
-          // PLZ: nur bei Baustellen (nicht bei Abwesenheit/Werkstatt/Störung)
-          const plz = (isAbsence || isDisturbance)
-            ? ""
-            : entry.location_type === "baustelle" ? (project?.plz || "") : "";
-
-          // Datum nur beim ersten Eintrag des Tages anzeigen
-          const displayDay = entryIndex === 0 ? day : "";
-
-          if (includeOvertime) {
-            // Export MIT Überstunden: Tatsächliche Zeiten verwenden
-            // Bei Abwesenheit (Urlaub, Krankenstand etc.) → Standard 8h-Tag anzeigen
-            if (isAbsence) {
-              worksheetData.push([
-                displayDay,
-                "08:00",
-                "12:00",
-                "12:00 - 13:00",
-                "13:00",
-                "17:00",
-                "8.00",
-                "",
-                ortText,
-                projektName,
-                entry.taetigkeit,
-                plz,
-              ]);
-            } else {
-              const startTime = entry.start_time?.substring(0, 5) || "";
-              const endTime = entry.end_time?.substring(0, 5) || "";
-              const startMin = toMin(entry.start_time);
-              const endMin = toMin(entry.end_time);
-              const pauseMins = entry.pause_minutes || 0;
-              const calculatedHours = Math.max(0, (endMin - startMin - pauseMins) / 60);
-              const overtime = calculateOvertime(dayDate, calculatedHours);
-              const overtimeText = overtime > 0 ? overtime.toFixed(2) : "";
-
-              let morningStart = "";
-              let morningEnd = "";
-              let pauseText = "";
-              let afternoonStart = "";
-              let afternoonEnd = "";
-
-              if (lunchBreak) {
-                morningStart = startTime;
-                morningEnd = lunchBreak.start;
-                pauseText = `${lunchBreak.start} - ${lunchBreak.end}`;
-                afternoonStart = lunchBreak.end;
-                afternoonEnd = endTime;
-              } else if (endMin <= 12 * 60) {
-                morningStart = startTime;
-                morningEnd = endTime;
-              } else if (startMin >= 12 * 60) {
-                afternoonStart = startTime;
-                afternoonEnd = endTime;
-              } else {
-                morningStart = startTime;
-                afternoonEnd = endTime;
-              }
-
-              worksheetData.push([
-                displayDay,
-                morningStart,
-                morningEnd,
-                pauseText,
-                afternoonStart,
-                afternoonEnd,
-                calculatedHours.toFixed(2),
-                overtimeText,
-                ortText,
-                projektName,
-                entry.taetigkeit,
-                plz,
-              ]);
-            }
-          } else {
-            // Export OHNE Überstunden: Tatsächliche Zeiten verwenden
-            const startTime = entry.start_time?.substring(0, 5) || "";
-            const endTime = entry.end_time?.substring(0, 5) || "";
-            const startMin = toMin(entry.start_time);
-            const endMin = toMin(entry.end_time);
-            const pauseMins = lunchBreak ? 60 : 0;
-            const calculatedHours = Math.max(0, (endMin - startMin - pauseMins) / 60);
-
-            let morningStart = "";
-            let morningEnd = "";
-            let pauseText = "";
-            let afternoonStart = "";
-            let afternoonEnd = "";
-
-            if (lunchBreak) {
-              morningStart = startTime;
-              morningEnd = lunchBreak.start;
-              pauseText = `${lunchBreak.start} - ${lunchBreak.end}`;
-              afternoonStart = lunchBreak.end;
-              afternoonEnd = endTime;
-            } else if (endMin <= 12 * 60) {
-              morningStart = startTime;
-              morningEnd = endTime;
-            } else if (startMin >= 12 * 60) {
-              afternoonStart = startTime;
-              afternoonEnd = endTime;
-            } else {
-              morningStart = startTime;
-              afternoonEnd = endTime;
-            }
-
-            worksheetData.push([
-              displayDay,
-              morningStart,
-              morningEnd,
-              pauseText,
-              afternoonStart,
-              afternoonEnd,
-              calculatedHours.toFixed(2),
-              ortText,
-              projektName,
-              entry.taetigkeit,
-              plz,
-              "",
-            ]);
-          }
-        });
-
-        // Tagessumme wenn mehrere Einträge am Tag
-        if (uniqueDayEntries.length > 1) {
-          const dayTotalHours = uniqueDayEntries.reduce((sum, e) => {
-            const s = toMin(e.start_time);
-            const en = toMin(e.end_time);
-            const p = e.pause_minutes || 0;
-            return sum + Math.max(0, (en - s - p) / 60);
-          }, 0);
-          const dayTotalOvertime = calculateOvertime(dayDate, dayTotalHours);
-          if (includeOvertime) {
-            worksheetData.push(["", "", "", "", "", "Tagessumme:", dayTotalHours.toFixed(2), dayTotalOvertime > 0 ? dayTotalOvertime.toFixed(2) : "", "", "", "", ""]);
-          } else {
-            const regelarbeitszeitTag = (dayDate.getDay() === 0 || dayDate.getDay() === 6) ? 0 : 8;
-            worksheetData.push(["", "", "", "", "", "Tagessumme:", regelarbeitszeitTag.toFixed(2), "", "", "", "", ""]);
-          }
-        }
-      }
-    }
-
-    // Regelarbeitszeit-Summe berechnen für Export ohne Überstunden (dedupliziert)
-    const calculateRegelarbeitszeitSumme = () => {
-      let summe = 0;
-      for (let day = 1; day <= daysInMonth; day++) {
-        const dayDate = new Date(year, month - 1, day);
-        const dayEntries = timeEntries.filter((e) => isSameDay(parseISO(e.datum), dayDate));
-        const uniqueDayEntries = deduplicateDayEntries(dayEntries);
-        if (uniqueDayEntries.length > 0) {
-          const dayOfWeek = dayDate.getDay();
-          const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
-          summe += isWeekend ? 0 : 8;
-        }
-      }
-      return summe;
-    };
-
-    // Summenzeile mit oder ohne Überstunden
-    if (includeOvertime) {
-      worksheetData.push(["", "", "", "", "", "SUMME", totalHours.toFixed(2), totalOvertime.toFixed(2), "", "", "", ""]);
-    } else {
-      const regelarbeitszeitSumme = calculateRegelarbeitszeitSumme();
-      worksheetData.push(["", "", "", "", "", "SUMME", regelarbeitszeitSumme.toFixed(2), "", "", "", "", ""]);
-    }
-    
-    // Footer: 1 Leerzeile + Datum/Unterschrift
-    worksheetData.push(["", "", "", "", "", "", "", "", "", "", "", ""]);
-    worksheetData.push(["", "Datum:", "", "", "", "Unterschrift:", "", "", "", "", "", ""]);
-
-    const ws = XLSX.utils.aoa_to_sheet(worksheetData);
-    
-    // Spaltenbreiten optimiert für A4-Querformat
-    ws["!cols"] = [
-      { wch: 10 },  // A: Datum
-      { wch: 8 },   // B: Beginn VM
-      { wch: 8 },   // C: Ende VM
-      { wch: 14 },  // D: Unterbrechung
-      { wch: 8 },   // E: Beginn NM
-      { wch: 8 },   // F: Ende NM
-      { wch: 8 },   // G: Stunden
-      { wch: 10 },  // H: Überstunden/Ort
-      { wch: 10 },  // I: Ort/Projekt
-      { wch: 18 },  // J: Projekt
-      { wch: 16 },  // K: Tätigkeit
-      { wch: 6 },   // L: PLZ
-    ];
-
-    // Druckeinstellungen: A4 Querformat, auf eine Seite skaliert
-    ws["!pageSetup"] = {
-      paperSize: 9, // A4
-      orientation: "landscape",
-      fitToWidth: 1,
-      fitToHeight: 1,
-      scale: 75,
-    };
-    ws["!margins"] = {
-      left: 0.4, right: 0.4, top: 0.4, bottom: 0.4,
-      header: 0.2, footer: 0.2,
-    };
-
-    // Merged Cells
-    ws["!merges"] = [
-      // Firmendaten Header
-      { s: { r: 0, c: 0 }, e: { r: 0, c: 5 } },
-      { s: { r: 1, c: 0 }, e: { r: 1, c: 5 } },
-      { s: { r: 2, c: 0 }, e: { r: 2, c: 5 } },
-      { s: { r: 3, c: 0 }, e: { r: 3, c: 5 } },
-      // Mitarbeiter und Monat
-      { s: { r: 5, c: 0 }, e: { r: 5, c: 1 } },
-      { s: { r: 5, c: 2 }, e: { r: 5, c: 7 } },
-      { s: { r: 5, c: 9 }, e: { r: 5, c: 11 } },
-      { s: { r: 7, c: 1 }, e: { r: 7, c: 2 } },
-      { s: { r: 7, c: 4 }, e: { r: 7, c: 5 } },
-    ];
-
-    // Zeilenhöhe für Header
-    ws["!rows"] = ws["!rows"] || [];
-    [0, 1, 2, 3].forEach((r) => {
-      ws["!rows"][r] = { hpt: 18 };
+    const result: ExistingBericht[] = data.map((b: any) => {
+      const maRows = mitarbeiterDataAll.filter((m: any) => m.bericht_id === b.id);
+      const erstellerProfile = profileMap[b.erstellt_von];
+      return {
+        id: b.id,
+        datum: b.datum,
+        objekt: b.objekt || null,
+        projekt_name: b.projects?.name || "-",
+        ersteller_name: erstellerProfile
+          ? `${erstellerProfile.vorname} ${erstellerProfile.nachname}`
+          : "-",
+        mitarbeiter_count: maRows.length,
+        total_stunden: maRows.reduce(
+          (s: number, m: any) => s + (m.summe_stunden || 0),
+          0
+        ),
+      };
     });
 
-    // Formatierung anwenden
-    const sumRowIndex = worksheetData.length - 3; // SUMME ist 3 Zeilen vor Ende (SUMME + 2 Leerzeilen)
-    const range = XLSX.utils.decode_range(ws["!ref"] || "A1");
-    for (let R = range.s.r; R <= range.e.r; ++R) {
-      for (let C = range.s.c; C <= range.e.c; ++C) {
-        const cellAddress = XLSX.utils.encode_cell({ r: R, c: C });
-        if (!ws[cellAddress]) {
-          ws[cellAddress] = { t: "s", v: "" };
-        }
+    setBerichte(result);
+    setBerichteLoading(false);
+  }, [berichteStartDate, berichteEndDate, profileMap]);
 
-        const isFirmenHeader = R >= 0 && R <= 3;
-        const isHeaderRow = R === 7 || R === 8;
-        const isSumRow = R === sumRowIndex;
-        const isFooterRow = R > sumRowIndex;
-        
-        const borderStyle = isHeaderRow ? "medium" : "thin";
-        
-        if (isFirmenHeader || isFooterRow) {
-          ws[cellAddress].s = {
-            alignment: { 
-              vertical: "center", 
-              horizontal: "left",
-              wrapText: true
-            },
-            font: { bold: R === 0, size: R === 0 ? 14 : 11 },
-          };
-        } else {
-          ws[cellAddress].s = {
-            border: {
-              top: { style: borderStyle, color: { rgb: "000000" } },
-              bottom: { style: borderStyle, color: { rgb: "000000" } },
-              left: { style: borderStyle, color: { rgb: "000000" } },
-              right: { style: borderStyle, color: { rgb: "000000" } },
-            },
-            alignment: { 
-              vertical: "center", 
-              horizontal: isHeaderRow ? "center" : "left",
-              wrapText: false
-            },
-          };
-          
-          if (isHeaderRow || isSumRow) {
-            ws[cellAddress].s = {
-              ...ws[cellAddress].s,
-              font: { bold: true },
-            };
-          }
-        }
-      }
-    }
+  useEffect(() => {
+    if (isAdmin && Object.keys(profileMap).length > 0) fetchBerichte();
+  }, [isAdmin, fetchBerichte, profileMap]);
 
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Arbeitszeit");
-    const suffix = includeOvertime ? "_mit_Ueberstunden" : "_ohne_Ueberstunden";
-    XLSX.writeFile(wb, `Arbeitszeiterfassung_${employeeName}_${monthNamesShort[month - 1]}_${year}${suffix}.xlsx`);
+  // Filter berichte
+  const filteredBerichte = useMemo(() => {
+    return berichte.filter((b) => {
+      if (berichteVorarbeiter !== "all" && !b.ersteller_name.includes(
+        profileMap[berichteVorarbeiter]
+          ? `${profileMap[berichteVorarbeiter].vorname} ${profileMap[berichteVorarbeiter].nachname}`
+          : ""
+      )) return false;
+      if (berichteProjekt !== "all" && b.projekt_name !== berichteProjects.find(p => p.id === berichteProjekt)?.name) return false;
+      return true;
+    });
+  }, [berichte, berichteVorarbeiter, berichteProjekt, profileMap, berichteProjects]);
 
-    toast({ title: "Excel exportiert", description: `Datei wurde heruntergeladen` });
-  };
+  // -------------------------------------------------------------------------
+  // Render
+  // -------------------------------------------------------------------------
+
+  if (checkingAdmin) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <Loader2 className="w-8 h-8 animate-spin" />
+      </div>
+    );
+  }
+
+  if (!isAdmin) return null;
 
   return (
-    <div className="container mx-auto p-4 space-y-6">
-      <div className="flex items-center gap-4">
-        <Button variant="ghost" size="icon" onClick={() => navigate(-1)}>
-          <ArrowLeft className="w-5 h-5" />
-        </Button>
-        <h1 className="text-3xl font-bold">Stundenauswertung</h1>
-      </div>
+    <div className="min-h-screen bg-background">
+      <PageHeader title="Stundenauswertung" />
 
-      <Tabs defaultValue="mitarbeiter" className="w-full">
-        <TabsList className="grid w-full grid-cols-2">
-          <TabsTrigger value="mitarbeiter">
-            <FileSpreadsheet className="w-4 h-4 mr-2" />
-            Arbeitszeiterfassung
-          </TabsTrigger>
-          <TabsTrigger value="projekte">
-            <Building2 className="w-4 h-4 mr-2" />
-            Projektzeiterfassung
-          </TabsTrigger>
-        </TabsList>
+      <div className="container mx-auto p-4 space-y-6">
+        <Tabs defaultValue="arbeitszeiterfassung" className="w-full">
+          <TabsList className="grid w-full grid-cols-3">
+            <TabsTrigger value="arbeitszeiterfassung" className="text-xs sm:text-sm">
+              <FileSpreadsheet className="w-4 h-4 mr-1 sm:mr-2 shrink-0" />
+              <span className="truncate">Arbeitszeiterfassung</span>
+            </TabsTrigger>
+            <TabsTrigger value="leistungsberichte" className="text-xs sm:text-sm">
+              <ClipboardList className="w-4 h-4 mr-1 sm:mr-2 shrink-0" />
+              <span className="truncate">Leistungsberichte</span>
+            </TabsTrigger>
+            <TabsTrigger value="projektzeiterfassung" className="text-xs sm:text-sm">
+              <Building2 className="w-4 h-4 mr-1 sm:mr-2 shrink-0" />
+              <span className="truncate">Projektzeiterfassung</span>
+            </TabsTrigger>
+          </TabsList>
 
-        <TabsContent value="mitarbeiter" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between flex-wrap gap-3">
-                <div>
-                  <CardTitle className="flex items-center gap-2 text-lg sm:text-xl">
-                    <FileSpreadsheet className="w-5 h-5 sm:w-6 sm:h-6" />
-                    Arbeitszeiterfassung nach Mitarbeitern
-                  </CardTitle>
-                  <CardDescription className="text-xs sm:text-sm">Monatsberichte mit Überstunden exportieren</CardDescription>
-                </div>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button disabled={!selectedUserId} className="h-11">
-                      <Download className="mr-2 h-4 w-4" />
-                      <span className="hidden sm:inline">Excel exportieren</span>
-                      <span className="sm:hidden">Export</span>
-                      <ChevronDown className="ml-2 h-4 w-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem onClick={() => exportToExcel(true)}>
-                      Mit Überstunden
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => exportToExcel(false)}>
-                      Ohne Überstunden
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              
-              <div className="flex flex-col sm:flex-row gap-3">
-                {isAdmin && (
-                  <Select value={selectedUserId} onValueChange={setSelectedUserId}>
-                    <SelectTrigger className="h-11">
-                      <SelectValue placeholder="Mitarbeiter auswählen" />
+          {/* ============================================================= */}
+          {/* TAB 1: Arbeitszeiterfassung (A3 Monthly Grid)                  */}
+          {/* ============================================================= */}
+          <TabsContent value="arbeitszeiterfassung" className="space-y-4">
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-lg">
+                  Monats\u00fcbersicht
+                </CardTitle>
+                <p className="text-sm text-muted-foreground">
+                  MONAT: {monthNames[gridMonth - 1]} {gridYear} = {workingDays} x 8 Std.
+                  ({workingDays * 8} Std. Regelarbeitszeit)
+                </p>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {/* Filters */}
+                <div className="flex flex-col sm:flex-row gap-3">
+                  <Select
+                    value={gridMonth.toString()}
+                    onValueChange={(v) => setGridMonth(parseInt(v))}
+                  >
+                    <SelectTrigger className="h-10 sm:w-[180px]">
+                      <SelectValue />
                     </SelectTrigger>
                     <SelectContent position="popper">
-                      {Object.entries(profiles).map(([id, profile]) => (
-                        <SelectItem key={id} value={id}>
-                          {profile.vorname} {profile.nachname}
+                      {monthNames.map((name, i) => (
+                        <SelectItem key={i} value={(i + 1).toString()}>
+                          {name}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
-                )}
-                <Select value={month.toString()} onValueChange={(v) => setMonth(parseInt(v))}>
-                  <SelectTrigger className="h-11">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent position="popper">
-                    {monthNames.map((name, i) => (
-                      <SelectItem key={i} value={(i + 1).toString()}>
-                        {name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Select value={year.toString()} onValueChange={(v) => setYear(parseInt(v))}>
-                  <SelectTrigger className="h-11">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent position="popper">
-                    {years.map((y) => (
-                      <SelectItem key={y} value={y.toString()}>
-                        {y}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
 
-              {selectedUserId && (
-                <>
-                  <div className="bg-muted/50 p-4 rounded-lg">
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <p className="text-sm text-muted-foreground">Gesamtstunden</p>
-                        <p className="text-2xl font-bold">{totalHours.toFixed(2)} h</p>
-                      </div>
-                      <div>
-                        <p className="text-sm text-muted-foreground">Überstunden</p>
-                        <p className="text-2xl font-bold">{totalOvertime.toFixed(2)} h</p>
-                      </div>
-                    </div>
+                  <Select
+                    value={gridYear.toString()}
+                    onValueChange={(v) => setGridYear(parseInt(v))}
+                  >
+                    <SelectTrigger className="h-10 sm:w-[120px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent position="popper">
+                      {years.map((y) => (
+                        <SelectItem key={y} value={y.toString()}>
+                          {y}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+
+                  <Select value={gridEmployee} onValueChange={setGridEmployee}>
+                    <SelectTrigger className="h-10 sm:w-[220px]">
+                      <SelectValue placeholder="Alle Mitarbeiter" />
+                    </SelectTrigger>
+                    <SelectContent position="popper">
+                      <SelectItem value="all">Alle Mitarbeiter</SelectItem>
+                      {profiles.map((p) => (
+                        <SelectItem key={p.id} value={p.id}>
+                          {p.nachname} {p.vorname}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Grid */}
+                {gridLoading ? (
+                  <div className="flex items-center justify-center py-16">
+                    <Loader2 className="w-6 h-6 animate-spin mr-2" />
+                    <span className="text-muted-foreground">Lade Daten...</span>
                   </div>
-
-                  <ScrollArea className="h-[500px] rounded-md border">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead className="w-[100px]">Datum</TableHead>
-                          <TableHead>Vormittag</TableHead>
-                          <TableHead>Pause</TableHead>
-                          <TableHead>Nachmittag</TableHead>
-                          <TableHead className="text-right">Stunden</TableHead>
-                          <TableHead className="text-right">Überstunden</TableHead>
-                          <TableHead>Ort</TableHead>
-                          <TableHead>Projekt</TableHead>
-                          <TableHead>Tätigkeit</TableHead>
-                          {isAdmin && <TableHead className="w-[50px]"></TableHead>}
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {loading ? (
-                          <TableRow>
-                            <TableCell colSpan={9} className="text-center">
-                              Lade...
-                            </TableCell>
-                          </TableRow>
-                        ) : monthDays.length === 0 ? (
-                          <TableRow>
-                            <TableCell colSpan={9} className="text-center">
-                              Keine Daten verfügbar
-                            </TableCell>
-                          </TableRow>
+                ) : (
+                  <div className="overflow-x-auto border rounded-lg">
+                    <table
+                      className="text-xs border-collapse"
+                      style={{ minWidth: `${120 + daysInMonth * 44 + 56}px` }}
+                    >
+                      <thead>
+                        {/* Row 1: Day numbers */}
+                        <tr className="bg-muted/60">
+                          <th className="sticky left-0 z-10 bg-muted/60 border border-border px-2 py-1 text-left font-semibold min-w-[120px]">
+                            Mitarbeiter
+                          </th>
+                          {Array.from({ length: daysInMonth }, (_, i) => {
+                            const day = i + 1;
+                            const we = isWeekend(gridYear, gridMonth, day);
+                            return (
+                              <th
+                                key={day}
+                                className={cn(
+                                  "border border-border px-0.5 py-1 text-center font-semibold min-w-[40px] w-10",
+                                  we && "bg-orange-100"
+                                )}
+                              >
+                                {day}
+                              </th>
+                            );
+                          })}
+                          <th className="border border-border px-2 py-1 text-center font-bold bg-gray-100 min-w-[56px]">
+                            &Sigma;
+                          </th>
+                        </tr>
+                        {/* Row 2: Weekday abbreviations */}
+                        <tr className="bg-muted/40">
+                          <th className="sticky left-0 z-10 bg-muted/40 border border-border px-2 py-0.5 text-left text-[10px] text-muted-foreground">
+                            &nbsp;
+                          </th>
+                          {Array.from({ length: daysInMonth }, (_, i) => {
+                            const day = i + 1;
+                            const we = isWeekend(gridYear, gridMonth, day);
+                            const wd = getWeekday(gridYear, gridMonth, day);
+                            return (
+                              <th
+                                key={day}
+                                className={cn(
+                                  "border border-border px-0.5 py-0.5 text-center text-[10px] font-normal text-muted-foreground",
+                                  we && "bg-orange-100"
+                                )}
+                              >
+                                {wd}
+                              </th>
+                            );
+                          })}
+                          <th className="border border-border px-2 py-0.5 text-center text-[10px] bg-gray-100">
+                            &nbsp;
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {gridEmployees.length === 0 ? (
+                          <tr>
+                            <td
+                              colSpan={daysInMonth + 2}
+                              className="text-center py-8 text-muted-foreground"
+                            >
+                              Keine Mitarbeiter gefunden
+                            </td>
+                          </tr>
                         ) : (
-                          monthDays.map((day) => {
-                            // Finde alle Einträge für diesen Tag
-                            const dayEntries = timeEntries.filter((e) => isSameDay(parseISO(e.datum), day.date));
-                            const overlappingIds = getOverlappingEntryIds(dayEntries);
-                            const uniqueDayEntries = deduplicateDayEntries(dayEntries);
-                            const dayTotalHours = uniqueDayEntries.reduce((sum, e) => sum + e.stunden, 0);
-                            const hasMultipleEntries = dayEntries.length > 1;
-
-                            if (dayEntries.length === 0) {
-                              return (
-                                <TableRow
-                                  key={day.dayNumber}
-                                  className={cn(day.isWeekend && "bg-muted/30", "text-muted-foreground")}
-                                >
-                                  <TableCell className="font-medium">
-                                    <div className="flex flex-col">
-                                      <span>{day.dayNumber}</span>
-                                      <span className="text-xs text-muted-foreground">
-                                        {format(day.date, "EEE", { locale: de })}
-                                      </span>
-                                    </div>
-                                  </TableCell>
-                                  <TableCell colSpan={8}></TableCell>
-                                </TableRow>
-                              );
+                          gridEmployees.map((employee) => {
+                            const employeeDays = gridDataMap[employee.id] || {};
+                            let totalHours = 0;
+                            for (let d = 1; d <= daysInMonth; d++) {
+                              const dd = employeeDays[d];
+                              if (dd) totalHours += dd.stunden;
                             }
 
-                            return dayEntries.map((entry, entryIndex) => {
-                              const lunchBreak = calculateLunchBreak(entry);
-                              const isOverlapping = overlappingIds.has(entry.id);
-                              const overtime = isOverlapping ? 0 : calculateOvertime(day.date, entry.stunden);
-                              const project = projects[entry.project_id];
-                              const ortIcon = entry.location_type === "baustelle" ? "🏗️" : entry.location_type === "werkstatt" ? "🏭" : "";
-                              const ortText = entry.location_type === "baustelle" ? "Baustelle" : entry.location_type === "werkstatt" ? "Lager" : "";
-                              const projektName = entry.taetigkeit === "Urlaub" || entry.taetigkeit === "Krankenstand"
-                                ? entry.taetigkeit
-                                : (project?.name || "");
-                              const isFirstEntry = entryIndex === 0;
-                              const isLastEntry = entryIndex === dayEntries.length - 1;
+                            return (
+                              <tr key={employee.id} className="hover:bg-muted/20">
+                                <td className="sticky left-0 z-10 bg-card border border-border px-2 py-1 font-medium whitespace-nowrap">
+                                  {employee.nachname} {employee.vorname}
+                                </td>
+                                {Array.from({ length: daysInMonth }, (_, i) => {
+                                  const day = i + 1;
+                                  const we = isWeekend(gridYear, gridMonth, day);
+                                  const dd = employeeDays[day] || null;
+                                  const cell = formatCell(dd);
 
-                              return (
-                                <TableRow
-                                  key={entry.id}
-                                  className={cn(
-                                    day.isWeekend && "bg-muted/30",
-                                    hasMultipleEntries && !isLastEntry && "border-b-0",
-                                    isOverlapping && "bg-orange-50/60"
-                                  )}
-                                >
-                                  <TableCell className="font-medium">
-                                    {isFirstEntry && (
-                                      <div className="flex flex-col">
-                                        <span>{day.dayNumber}</span>
-                                        <span className="text-xs text-muted-foreground">
-                                          {format(day.date, "EEE", { locale: de })}
-                                        </span>
-                                      </div>
-                                    )}
-                                  </TableCell>
-                                  <TableCell>
-                                    <div className="flex items-center gap-1">
-                                      <span>{entry.start_time?.substring(0, 5)}</span>
-                                      {lunchBreak && (
-                                        <>
-                                          <span>-</span>
-                                          <span>{lunchBreak.start}</span>
-                                        </>
+                                  return (
+                                    <td
+                                      key={day}
+                                      className={cn(
+                                        "border border-border px-0.5 py-1 text-center whitespace-nowrap",
+                                        we && !dd && "bg-orange-50",
+                                        we && dd && "bg-orange-100",
+                                        cell.className
                                       )}
-                                      {!lunchBreak && toMin(entry.end_time) <= 12 * 60 && (
-                                        <>
-                                          <span>-</span>
-                                          <span>{entry.end_time?.substring(0, 5)}</span>
-                                        </>
-                                      )}
-                                    </div>
-                                  </TableCell>
-                                  <TableCell>
-                                    {lunchBreak && (
-                                      <span className="text-sm">{lunchBreak.start} - {lunchBreak.end}</span>
-                                    )}
-                                  </TableCell>
-                                  <TableCell>
-                                    {lunchBreak ? (
-                                      <div className="flex items-center gap-1">
-                                        <span>{lunchBreak.end}</span>
-                                        <span>-</span>
-                                        <span>{entry.end_time?.substring(0, 5)}</span>
-                                      </div>
-                                    ) : toMin(entry.start_time) >= 12 * 60 ? (
-                                      <div className="flex items-center gap-1">
-                                        <span>{entry.start_time?.substring(0, 5)}</span>
-                                        <span>-</span>
-                                        <span>{entry.end_time?.substring(0, 5)}</span>
-                                      </div>
-                                    ) : !lunchBreak && toMin(entry.end_time) > 12 * 60 ? (
-                                      <div className="flex items-center gap-1">
-                                        <span>-</span>
-                                        <span>{entry.end_time?.substring(0, 5)}</span>
-                                      </div>
-                                    ) : null}
-                                  </TableCell>
-                                  <TableCell className="text-right font-medium">
-                                    {isOverlapping ? (
-                                      <div className="flex flex-col items-end gap-0.5">
-                                        <span className="line-through text-muted-foreground text-xs">
-                                          {entry.stunden.toFixed(2)} h
-                                        </span>
-                                        <span className="flex items-center gap-1 text-orange-600 text-xs font-semibold">
-                                          <AlertTriangle className="w-3 h-3" />
-                                          Doppelbuchung
-                                        </span>
-                                      </div>
-                                    ) : (
-                                      <>
-                                        {entry.stunden.toFixed(2)} h
-                                        {hasMultipleEntries && isLastEntry && (
-                                          <div className="text-xs text-primary font-bold mt-1">
-                                            Σ {dayTotalHours.toFixed(2)} h
-                                          </div>
-                                        )}
-                                      </>
-                                    )}
-                                  </TableCell>
-                                  <TableCell className="text-right">
-                                    {overtime > 0 && (
-                                      <span className="text-orange-600 font-medium">
-                                        +{overtime.toFixed(2)} h
-                                      </span>
-                                    )}
-                                  </TableCell>
-                                  <TableCell>
-                                    <span className="flex items-center gap-1">
-                                      <span>{ortIcon}</span>
-                                      <span className="text-xs">{ortText}</span>
-                                    </span>
-                                  </TableCell>
-                                  <TableCell className="max-w-[150px] truncate">
-                                    {projektName}
-                                  </TableCell>
-                                  <TableCell className="max-w-[150px] truncate">
-                                    {entry.taetigkeit}
-                                  </TableCell>
-                                  {isAdmin && (
-                                    <TableCell>
-                                      <Button
-                                        size="sm"
-                                        variant="ghost"
-                                        className="h-7 w-7 p-0"
-                                        onClick={() => navigate(`/time-tracking?date=${entry.datum}&user_id=${entry.user_id}&return_month=${month}&return_year=${year}`)}
-                                      >
-                                        <Pencil className="h-3.5 w-3.5" />
-                                      </Button>
-                                    </TableCell>
-                                  )}
-                                </TableRow>
-                              );
-                            });
+                                      title={
+                                        dd
+                                          ? dd.isAbsence
+                                            ? dd.absenceType
+                                            : `${dd.stunden}h${dd.istFahrer ? " Fahrer" : ""}${dd.istWerkstatt ? " Werkstatt" : ""}${dd.schmutzzulage ? " Schmutz" : ""}${dd.regenSchicht ? " Regen" : ""}`
+                                          : ""
+                                      }
+                                    >
+                                      {cell.text}
+                                    </td>
+                                  );
+                                })}
+                                <td className="border border-border px-2 py-1 text-center font-bold bg-gray-50 whitespace-nowrap">
+                                  {totalHours > 0 ? formatNumber(totalHours) : ""}
+                                </td>
+                              </tr>
+                            );
                           })
                         )}
-                      </TableBody>
-                      <TableFooter>
-                        <TableRow>
-                          <TableCell colSpan={4} className="text-right font-bold">
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {/* Legend */}
+                <div className="flex flex-wrap gap-3 text-xs text-muted-foreground pt-2">
+                  <span>
+                    <strong>F</strong> = Fahrer
+                  </span>
+                  <span>
+                    <strong>W</strong> = Werkstatt
+                  </span>
+                  <span>
+                    <strong>SCH</strong> = Schmutzzulage
+                  </span>
+                  <span>
+                    <strong>R</strong> = Regen
+                  </span>
+                  <span className="text-green-600">
+                    <strong>U</strong> = Urlaub
+                  </span>
+                  <span className="text-red-600">
+                    <strong>K</strong> = Krankenstand
+                  </span>
+                  <span className="text-blue-600">
+                    <strong>ZA</strong> = Zeitausgleich
+                  </span>
+                  <span>
+                    <strong>Schule</strong> = Berufsschule
+                  </span>
+                  <span className="bg-orange-100 px-1 rounded">Sa/So</span>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* ============================================================= */}
+          {/* TAB 2: Leistungsberichte                                       */}
+          {/* ============================================================= */}
+          <TabsContent value="leistungsberichte" className="space-y-4">
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-lg">Leistungsberichte</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {/* Filters */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                  <div>
+                    <label className="text-sm font-medium mb-1 block">Von</label>
+                    <input
+                      type="date"
+                      value={berichteStartDate}
+                      onChange={(e) => setBerichteStartDate(e.target.value)}
+                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium mb-1 block">Bis</label>
+                    <input
+                      type="date"
+                      value={berichteEndDate}
+                      onChange={(e) => setBerichteEndDate(e.target.value)}
+                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium mb-1 block">
+                      Vorarbeiter
+                    </label>
+                    <Select
+                      value={berichteVorarbeiter}
+                      onValueChange={setBerichteVorarbeiter}
+                    >
+                      <SelectTrigger className="h-10">
+                        <SelectValue placeholder="Alle" />
+                      </SelectTrigger>
+                      <SelectContent position="popper">
+                        <SelectItem value="all">Alle</SelectItem>
+                        {profiles.map((p) => (
+                          <SelectItem key={p.id} value={p.id}>
+                            {p.nachname} {p.vorname}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium mb-1 block">
+                      Projekt
+                    </label>
+                    <Select
+                      value={berichteProjekt}
+                      onValueChange={setBerichteProjekt}
+                    >
+                      <SelectTrigger className="h-10">
+                        <SelectValue placeholder="Alle" />
+                      </SelectTrigger>
+                      <SelectContent position="popper">
+                        <SelectItem value="all">Alle Projekte</SelectItem>
+                        {berichteProjects.map((p) => (
+                          <SelectItem key={p.id} value={p.id}>
+                            {p.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                {/* Quick date filters */}
+                <div className="flex gap-2 flex-wrap">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      const now = new Date();
+                      setBerichteStartDate(
+                        new Date(now.getFullYear(), now.getMonth(), 1)
+                          .toISOString()
+                          .split("T")[0]
+                      );
+                      setBerichteEndDate(
+                        new Date(now.getFullYear(), now.getMonth() + 1, 0)
+                          .toISOString()
+                          .split("T")[0]
+                      );
+                    }}
+                  >
+                    Dieser Monat
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      const now = new Date();
+                      setBerichteStartDate(
+                        new Date(now.getFullYear(), now.getMonth() - 1, 1)
+                          .toISOString()
+                          .split("T")[0]
+                      );
+                      setBerichteEndDate(
+                        new Date(now.getFullYear(), now.getMonth(), 0)
+                          .toISOString()
+                          .split("T")[0]
+                      );
+                    }}
+                  >
+                    Letzter Monat
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      const now = new Date();
+                      setBerichteStartDate(
+                        new Date(now.getFullYear(), 0, 1)
+                          .toISOString()
+                          .split("T")[0]
+                      );
+                      setBerichteEndDate(now.toISOString().split("T")[0]);
+                    }}
+                  >
+                    Dieses Jahr
+                  </Button>
+                </div>
+
+                {/* Table */}
+                {berichteLoading ? (
+                  <div className="flex items-center justify-center py-16">
+                    <Loader2 className="w-6 h-6 animate-spin mr-2" />
+                    <span className="text-muted-foreground">
+                      Lade Berichte...
+                    </span>
+                  </div>
+                ) : filteredBerichte.length === 0 ? (
+                  <div className="text-center py-12 text-muted-foreground">
+                    <ClipboardList className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                    <p>Keine Leistungsberichte im gew\u00e4hlten Zeitraum</p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto border rounded-lg">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-muted/60">
+                          <th className="border-b px-3 py-2 text-left font-semibold">
+                            Datum
+                          </th>
+                          <th className="border-b px-3 py-2 text-left font-semibold">
+                            Projekt
+                          </th>
+                          <th className="border-b px-3 py-2 text-left font-semibold">
+                            Objekt
+                          </th>
+                          <th className="border-b px-3 py-2 text-left font-semibold">
+                            Vorarbeiter
+                          </th>
+                          <th className="border-b px-3 py-2 text-center font-semibold">
+                            Mitarbeiter
+                          </th>
+                          <th className="border-b px-3 py-2 text-right font-semibold">
+                            Stunden
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredBerichte.map((b) => (
+                          <tr
+                            key={b.id}
+                            className="hover:bg-muted/30 cursor-pointer transition-colors"
+                            onClick={() =>
+                              navigate(`/time-tracking?edit=${b.id}`)
+                            }
+                          >
+                            <td className="border-b px-3 py-2 whitespace-nowrap">
+                              {format(parseISO(b.datum), "dd.MM.yyyy", {
+                                locale: de,
+                              })}
+                            </td>
+                            <td className="border-b px-3 py-2">
+                              {b.projekt_name}
+                            </td>
+                            <td className="border-b px-3 py-2 text-muted-foreground">
+                              {b.objekt || "-"}
+                            </td>
+                            <td className="border-b px-3 py-2">
+                              {b.ersteller_name}
+                            </td>
+                            <td className="border-b px-3 py-2 text-center">
+                              <Badge variant="secondary">
+                                {b.mitarbeiter_count}
+                              </Badge>
+                            </td>
+                            <td className="border-b px-3 py-2 text-right font-medium">
+                              {b.total_stunden.toFixed(1)} h
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      <tfoot>
+                        <tr className="bg-muted/30">
+                          <td
+                            colSpan={4}
+                            className="px-3 py-2 font-bold text-right"
+                          >
                             Gesamt:
-                          </TableCell>
-                          <TableCell className="text-right font-bold">
-                            {totalHours.toFixed(2)} h
-                          </TableCell>
-                          <TableCell className="text-right font-bold text-orange-600">
-                            {totalOvertime.toFixed(2)} h
-                          </TableCell>
-                          <TableCell colSpan={3}></TableCell>
-                        </TableRow>
-                      </TableFooter>
-                    </Table>
-                  </ScrollArea>
-                </>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
+                          </td>
+                          <td className="px-3 py-2 text-center font-bold">
+                            {filteredBerichte.reduce(
+                              (s, b) => s + b.mitarbeiter_count,
+                              0
+                            )}
+                          </td>
+                          <td className="px-3 py-2 text-right font-bold">
+                            {filteredBerichte
+                              .reduce((s, b) => s + b.total_stunden, 0)
+                              .toFixed(1)}{" "}
+                            h
+                          </td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
 
-        <TabsContent value="projekte">
-          <ProjectHoursReport />
-        </TabsContent>
-      </Tabs>
-
+          {/* ============================================================= */}
+          {/* TAB 3: Projektzeiterfassung (existing component)               */}
+          {/* ============================================================= */}
+          <TabsContent value="projektzeiterfassung">
+            <ProjectHoursReport />
+          </TabsContent>
+        </Tabs>
+      </div>
     </div>
   );
 }

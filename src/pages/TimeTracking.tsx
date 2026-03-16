@@ -50,6 +50,11 @@ type MitarbeiterRow = {
   istFahrer: boolean;
   istWerkstatt: boolean;
   schmutzzulage: boolean;
+  regenSchicht: boolean;
+  fahrerStunden: string;    // "" means all hours
+  werkstattStunden: string;
+  schmutzzulageStunden: string;
+  regenStunden: string;
   stunden: Record<number, number>; // position -> hours
 };
 
@@ -84,6 +89,11 @@ function createEmptyMitarbeiterRow(): MitarbeiterRow {
     istFahrer: false,
     istWerkstatt: false,
     schmutzzulage: false,
+    regenSchicht: false,
+    fahrerStunden: "",
+    werkstattStunden: "",
+    schmutzzulageStunden: "",
+    regenStunden: "",
     stunden: {},
   };
 }
@@ -115,6 +125,7 @@ const TimeTracking = () => {
   const [pauseBis, setPauseBis] = useState("11:30");
   const [wetter, setWetter] = useState("");
   const [schmutzzulageAlle, setSchmutzzulageAlle] = useState(false);
+  const [regenSchichtAlle, setRegenSchichtAlle] = useState(false);
 
   // Form: Taetigkeiten
   const [taetigkeiten, setTaetigkeiten] = useState<Taetigkeit[]>([
@@ -368,6 +379,13 @@ const TimeTracking = () => {
     );
   }, [schmutzzulageAlle]);
 
+  // Regen for all toggle
+  useEffect(() => {
+    setMitarbeiterRows((prev) =>
+      prev.map((r) => ({ ...r, regenSchicht: regenSchichtAlle }))
+    );
+  }, [regenSchichtAlle]);
+
   // -------------------------------------------------------------------------
   // Build Taetigkeiten display list (with auto-filled positions)
   // -------------------------------------------------------------------------
@@ -477,6 +495,7 @@ const TimeTracking = () => {
           anmerkungen: anmerkungen || null,
           fertiggestellt,
           schmutzzulage_alle: schmutzzulageAlle,
+          regen_schicht_alle: regenSchichtAlle,
         })
         .select("id")
         .single();
@@ -527,6 +546,11 @@ const TimeTracking = () => {
         ist_fahrer: r.istFahrer,
         ist_werkstatt: r.istWerkstatt,
         schmutzzulage: r.schmutzzulage,
+        regen_schicht: r.regenSchicht,
+        fahrer_stunden: r.fahrerStunden ? parseFloat(r.fahrerStunden) : null,
+        werkstatt_stunden: r.werkstattStunden ? parseFloat(r.werkstattStunden) : null,
+        schmutzzulage_stunden: r.schmutzzulageStunden ? parseFloat(r.schmutzzulageStunden) : null,
+        regen_stunden: r.regenStunden ? parseFloat(r.regenStunden) : null,
         summe_stunden: sumStunden(r),
       }));
 
@@ -667,6 +691,7 @@ const TimeTracking = () => {
     setPauseBis("11:30");
     setWetter("");
     setSchmutzzulageAlle(false);
+    setRegenSchichtAlle(false);
     setGeraete([]);
     setMaterialien([]);
     setAnmerkungen("");
@@ -705,6 +730,7 @@ const TimeTracking = () => {
       setPauseBis(b.pause_bis || "11:30");
       setWetter(b.wetter || "");
       setSchmutzzulageAlle(b.schmutzzulage_alle || false);
+      setRegenSchichtAlle(b.regen_schicht_alle || false);
       setAnmerkungen(b.anmerkungen || "");
       setFertiggestellt(b.fertiggestellt || false);
 
@@ -766,6 +792,11 @@ const TimeTracking = () => {
             istFahrer: m.ist_fahrer || false,
             istWerkstatt: m.ist_werkstatt || false,
             schmutzzulage: m.schmutzzulage || false,
+            regenSchicht: m.regen_schicht || false,
+            fahrerStunden: m.fahrer_stunden != null ? String(m.fahrer_stunden) : "",
+            werkstattStunden: m.werkstatt_stunden != null ? String(m.werkstatt_stunden) : "",
+            schmutzzulageStunden: m.schmutzzulage_stunden != null ? String(m.schmutzzulage_stunden) : "",
+            regenStunden: m.regen_stunden != null ? String(m.regen_stunden) : "",
             stunden: stundenMap,
           };
         });
@@ -1111,16 +1142,28 @@ const TimeTracking = () => {
             </div>
           </CardHeader>
           <CardContent>
-            {/* Schmutzzulage toggle */}
-            <div className="flex items-center gap-2 mb-4">
-              <Checkbox
-                id="schmutzzulage-alle"
-                checked={schmutzzulageAlle}
-                onCheckedChange={(v) => setSchmutzzulageAlle(v === true)}
-              />
-              <Label htmlFor="schmutzzulage-alle" className="text-sm cursor-pointer">
-                Schmutzzulage für alle
-              </Label>
+            {/* Schmutzzulage & Regen toggles */}
+            <div className="flex flex-wrap items-center gap-4 mb-4">
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="schmutzzulage-alle"
+                  checked={schmutzzulageAlle}
+                  onCheckedChange={(v) => setSchmutzzulageAlle(v === true)}
+                />
+                <Label htmlFor="schmutzzulage-alle" className="text-sm cursor-pointer">
+                  Schmutzzulage für alle
+                </Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="regen-alle"
+                  checked={regenSchichtAlle}
+                  onCheckedChange={(v) => setRegenSchichtAlle(v === true)}
+                />
+                <Label htmlFor="regen-alle" className="text-sm cursor-pointer">
+                  Regen für alle
+                </Label>
+              </div>
             </div>
 
             {/* Scrollable matrix table */}
@@ -1139,6 +1182,9 @@ const TimeTracking = () => {
                     </th>
                     <th className="px-1 py-2 font-medium text-center w-10" title="Schmutzzulage">
                       S
+                    </th>
+                    <th className="px-1 py-2 font-medium text-center w-10" title="Regen/Wetterschicht">
+                      R
                     </th>
                     {taetigkeiten.map((t) => (
                       <th
@@ -1185,42 +1231,115 @@ const TimeTracking = () => {
                         </td>
                         {/* F - Fahrer */}
                         <td className="px-1 py-1.5 text-center">
-                          <Checkbox
-                            checked={row.istFahrer}
-                            onCheckedChange={(v) =>
-                              updateMitarbeiterField(
-                                row.id,
-                                "istFahrer",
-                                v === true
-                              )
-                            }
-                          />
+                          <div className="flex items-center justify-center gap-0.5">
+                            <Checkbox
+                              checked={row.istFahrer}
+                              onCheckedChange={(v) =>
+                                updateMitarbeiterField(
+                                  row.id,
+                                  "istFahrer",
+                                  v === true
+                                )
+                              }
+                            />
+                            {row.istFahrer && (
+                              <Input
+                                type="number"
+                                step="0.25"
+                                min="0"
+                                className="h-7 w-12 text-center text-xs px-0.5"
+                                value={row.fahrerStunden}
+                                onChange={(e) =>
+                                  updateMitarbeiterField(row.id, "fahrerStunden", e.target.value)
+                                }
+                                placeholder="alle"
+                              />
+                            )}
+                          </div>
                         </td>
                         {/* W - Werkstatt */}
                         <td className="px-1 py-1.5 text-center">
-                          <Checkbox
-                            checked={row.istWerkstatt}
-                            onCheckedChange={(v) =>
-                              updateMitarbeiterField(
-                                row.id,
-                                "istWerkstatt",
-                                v === true
-                              )
-                            }
-                          />
+                          <div className="flex items-center justify-center gap-0.5">
+                            <Checkbox
+                              checked={row.istWerkstatt}
+                              onCheckedChange={(v) =>
+                                updateMitarbeiterField(
+                                  row.id,
+                                  "istWerkstatt",
+                                  v === true
+                                )
+                              }
+                            />
+                            {row.istWerkstatt && (
+                              <Input
+                                type="number"
+                                step="0.25"
+                                min="0"
+                                className="h-7 w-12 text-center text-xs px-0.5"
+                                value={row.werkstattStunden}
+                                onChange={(e) =>
+                                  updateMitarbeiterField(row.id, "werkstattStunden", e.target.value)
+                                }
+                                placeholder="alle"
+                              />
+                            )}
+                          </div>
                         </td>
                         {/* S - Schmutzzulage */}
                         <td className="px-1 py-1.5 text-center">
-                          <Checkbox
-                            checked={row.schmutzzulage}
-                            onCheckedChange={(v) =>
-                              updateMitarbeiterField(
-                                row.id,
-                                "schmutzzulage",
-                                v === true
-                              )
-                            }
-                          />
+                          <div className="flex items-center justify-center gap-0.5">
+                            <Checkbox
+                              checked={row.schmutzzulage}
+                              onCheckedChange={(v) =>
+                                updateMitarbeiterField(
+                                  row.id,
+                                  "schmutzzulage",
+                                  v === true
+                                )
+                              }
+                            />
+                            {row.schmutzzulage && (
+                              <Input
+                                type="number"
+                                step="0.25"
+                                min="0"
+                                className="h-7 w-12 text-center text-xs px-0.5"
+                                value={row.schmutzzulageStunden}
+                                onChange={(e) =>
+                                  updateMitarbeiterField(row.id, "schmutzzulageStunden", e.target.value)
+                                }
+                                placeholder="alle"
+                              />
+                            )}
+                          </div>
+                        </td>
+                        {/* R - Regen/Wetterschicht */}
+                        <td className="px-1 py-1.5 text-center">
+                          <div className="flex items-center justify-center gap-0.5">
+                            <Checkbox
+                              checked={row.regenSchicht}
+                              onCheckedChange={(v) =>
+                                updateMitarbeiterField(
+                                  row.id,
+                                  "regenSchicht",
+                                  v === true
+                                )
+                              }
+                            />
+                            {row.regenSchicht && (
+                              <Input
+                                type="number"
+                                step="0.25"
+                                min="0"
+                                className="h-7 w-12 text-center text-xs px-0.5"
+                                value={row.regenStunden}
+                                onChange={(e) =>
+                                  updateMitarbeiterField(row.id, "regenStunden", e.target.value)
+                                }
+                                placeholder="alle"
+                              />
+                            )}
+                          </div>
                         </td>
                         {/* Hours per activity */}
                         {taetigkeiten.map((t) => (
@@ -1276,7 +1395,7 @@ const TimeTracking = () => {
                 <tfoot>
                   <tr className="border-t-2">
                     <td
-                      colSpan={4 + taetigkeiten.length}
+                      colSpan={5 + taetigkeiten.length}
                       className="px-2 py-2 text-right font-semibold"
                     >
                       Gesamtsumme Arbeitsstunden:

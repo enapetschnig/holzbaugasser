@@ -383,13 +383,13 @@ export default function Index() {
                 <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center">
                   <Clock className="h-6 w-6 text-primary" />
                 </div>
-                <CardTitle className="text-lg sm:text-xl">Zeiterfassung</CardTitle>
+                <CardTitle className="text-lg sm:text-xl">Leistungsbericht</CardTitle>
                 <CardDescription className="text-sm">
-                  Stunden auf Projekte buchen
+                  Täglichen Leistungsbericht erstellen
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <Button className="w-full" size="sm">Stunden erfassen</Button>
+                <Button className="w-full" size="sm">Bericht erstellen</Button>
               </CardContent>
             </Card>
           )}
