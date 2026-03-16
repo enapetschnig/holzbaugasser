@@ -13,6 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 import * as XLSX from "xlsx-js-style";
@@ -96,6 +97,9 @@ export default function Admin() {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [userToDelete, setUserToDelete] = useState<Profile | null>(null);
   const [exportingBeforeDelete, setExportingBeforeDelete] = useState(false);
+
+  // Pending activation role selection
+  const [pendingRoles, setPendingRoles] = useState<Record<string, string>>({});
 
   // Employee save state
   const [savingEmployee, setSavingEmployee] = useState(false);
@@ -306,6 +310,34 @@ export default function Admin() {
 
     // If activated, jump to the user in the "Registrierte Benutzer" list
     if (activate) scrollToRegisteredUser(userId);
+  };
+
+  const handleActivateWithRole = async (userId: string) => {
+    const selectedRole = pendingRoles[userId] || "mitarbeiter";
+    // 1) Set role
+    const { error: roleError } = await supabase
+      .from("user_roles")
+      .upsert({ user_id: userId, role: selectedRole }, { onConflict: "user_id" });
+    if (roleError) {
+      toast({ variant: "destructive", title: "Fehler", description: roleError.message });
+      return;
+    }
+    setUserRoles((prev) => ({ ...prev, [userId]: selectedRole }));
+    // 2) Activate
+    await handleActivateUser(userId, true);
+  };
+
+  const handleRejectUser = async (userId: string) => {
+    // Delete profile (cascades or clean up related data)
+    const { error } = await supabase.from("profiles").delete().eq("id", userId);
+    if (error) {
+      toast({ variant: "destructive", title: "Fehler", description: error.message });
+      return;
+    }
+    // Also remove role entry if any
+    await supabase.from("user_roles").delete().eq("user_id", userId);
+    setProfiles((prev) => prev.filter((p) => p.id !== userId));
+    toast({ title: "Benutzer abgelehnt", description: "Der Benutzer wurde entfernt." });
   };
 
   const exportUserTimeEntries = async (userId: string, userName: string): Promise<boolean> => {
@@ -575,7 +607,7 @@ export default function Admin() {
     }
   };
 
-  const handleRoleChange = async (userId: string, newRole: "administrator" | "mitarbeiter") => {
+  const handleRoleChange = async (userId: string, newRole: "administrator" | "vorarbeiter" | "mitarbeiter") => {
     const { error } = await supabase
       .from("user_roles")
       .update({ role: newRole })
@@ -747,16 +779,16 @@ export default function Admin() {
       </header>
 
       <main className="container mx-auto px-3 sm:px-4 lg:px-6 py-4 sm:py-6 lg:py-8 space-y-8">
-        {/* ===== WARTENDE AKTIVIERUNGEN (vorerst ausgeblendet) ===== */}
-        {false && profiles.filter(p => !p.is_active).length > 0 && (
+        {/* ===== WARTENDE AKTIVIERUNGEN ===== */}
+        {profiles.filter(p => !p.is_active).length > 0 && (
           <section>
             <h2 className="text-2xl font-bold mb-4 flex items-center gap-2">
               Wartende Aktivierungen
-              <span className="bg-destructive text-destructive-foreground text-sm px-2 py-1 rounded-full">
+              <Badge variant="destructive">
                 {profiles.filter(p => !p.is_active).length}
-              </span>
+              </Badge>
             </h2>
-            
+
             <Card className="mb-6 border-destructive/50">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
@@ -770,7 +802,7 @@ export default function Admin() {
               <CardContent>
                 <div className="space-y-3">
                   {profiles.filter(p => !p.is_active).map((profile) => (
-                    <div key={profile.id} className="flex items-center justify-between p-4 rounded-lg border bg-card">
+                    <div key={profile.id} className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-lg border bg-card">
                       <div className="flex items-center gap-3">
                         <Avatar>
                           <AvatarFallback className="bg-destructive/10 text-destructive">
@@ -787,9 +819,29 @@ export default function Admin() {
                           </p>
                         </div>
                       </div>
-                      <Button onClick={() => handleActivateUser(profile.id, true)}>
-                        Aktivieren
-                      </Button>
+                      <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                        <Select
+                          value={pendingRoles[profile.id] || "mitarbeiter"}
+                          onValueChange={(val) => setPendingRoles((prev) => ({ ...prev, [profile.id]: val }))}
+                        >
+                          <SelectTrigger className="w-full sm:w-[180px]">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="administrator">Administrator</SelectItem>
+                            <SelectItem value="vorarbeiter">Vorarbeiter</SelectItem>
+                            <SelectItem value="mitarbeiter">Mitarbeiter</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <div className="flex gap-2">
+                          <Button onClick={() => handleActivateWithRole(profile.id)}>
+                            Freischalten
+                          </Button>
+                          <Button variant="destructive" onClick={() => handleRejectUser(profile.id)}>
+                            Ablehnen
+                          </Button>
+                        </div>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -883,11 +935,11 @@ export default function Admin() {
         </CardHeader>
             <CardContent>
               <div className="space-y-4">
-                {profiles.filter(p => p.is_active).map((profile) => (
+                {profiles.map((profile) => (
                   <div
                     key={profile.id}
                     id={`registered-user-${profile.id}`}
-                    className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 sm:p-4 rounded-lg border bg-card transition-shadow"
+                    className={`flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 sm:p-4 rounded-lg border bg-card transition-shadow ${!profile.is_active ? "opacity-70" : ""}`}
                   >
                     <div className="flex items-center gap-3">
                       <Avatar>
@@ -897,18 +949,23 @@ export default function Admin() {
                         </AvatarFallback>
                       </Avatar>
                       <div>
-                        <p className="font-medium">
+                        <p className="font-medium flex items-center gap-2">
                           {profile.vorname} {profile.nachname}
+                          {!profile.is_active && (
+                            <Badge variant="outline" className="bg-yellow-100 text-yellow-800 border-yellow-300 text-xs">
+                              Wartet
+                            </Badge>
+                          )}
                         </p>
                         <p className="text-sm text-muted-foreground">
-                          {userRoles[profile.id] === "administrator" ? "Administrator" : "Mitarbeiter"}
+                          {userRoles[profile.id] === "administrator" ? "Administrator" : userRoles[profile.id] === "vorarbeiter" ? "Vorarbeiter" : "Mitarbeiter"}
                         </p>
                       </div>
                     </div>
                     <div className="flex flex-col sm:flex-row sm:items-center gap-2">
                       <Select
                         value={userRoles[profile.id]}
-                        onValueChange={(val) => handleRoleChange(profile.id, val as "administrator" | "mitarbeiter")}
+                        onValueChange={(val) => handleRoleChange(profile.id, val as "administrator" | "vorarbeiter" | "mitarbeiter")}
                       >
                         <SelectTrigger className="w-full sm:w-[200px]">
                           <SelectValue />

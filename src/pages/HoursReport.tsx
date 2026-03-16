@@ -18,6 +18,7 @@ import { cn } from "@/lib/utils";
 import ProjectHoursReport from "@/components/ProjectHoursReport";
 import { FileSpreadsheet, Building2, ClipboardList, Loader2, Download } from "lucide-react";
 import { getMonthlyTargetHours, getWorkingDaysInMonth, getTargetHoursForDate } from "@/lib/workingHours";
+import { generateStundenauswertungPDF, StundenauswertungPDFData } from "@/lib/generateStundenauswertungPDF";
 import { format, parseISO } from "date-fns";
 import { de } from "date-fns/locale";
 
@@ -83,9 +84,9 @@ interface ExistingBericht {
 // ---------------------------------------------------------------------------
 
 const monthNames = [
-  "Jaenner",
+  "J\u00e4nner",
   "Feber",
-  "Maerz",
+  "M\u00e4rz",
   "April",
   "Mai",
   "Juni",
@@ -553,94 +554,73 @@ export default function HoursReport() {
   }, [berichte, berichteVorarbeiter, berichteProjekt, profileMap, berichteProjects]);
 
   // -------------------------------------------------------------------------
-  // Excel Export
+  // PDF Export (A3)
   // -------------------------------------------------------------------------
 
-  const exportToExcel = () => {
+  const handleExportPDF = async () => {
     const defaultMonthlyTarget = getMonthlyTargetHours(gridYear, gridMonth);
 
-    let html = '<html><head><meta charset="utf-8"></head><body>';
-    html += `<h2>MONAT: ${monthNames[gridMonth - 1]} ${gridYear} = ${defaultMonthlyTarget} Std. Regelarbeitszeit</h2>`;
-    html += '<table border="1" cellpadding="4" style="border-collapse:collapse;font-size:11px;">';
+    const pdfData: StundenauswertungPDFData = {
+      monat: monthNames[gridMonth - 1],
+      jahr: gridYear,
+      sollStunden: defaultMonthlyTarget,
+      mitarbeiter: gridEmployees.map((p) => {
+        const employeeDays = gridDataMap[p.id] || {};
+        let totalHours = 0;
+        let istHours = 0;
 
-    // Header row 1: Day numbers
-    html += '<tr><th style="min-width:120px;text-align:left;">Mitarbeiter</th>';
-    for (let d = 1; d <= daysInMonth; d++) {
-      const we = isWeekend(gridYear, gridMonth, d);
-      const bgStyle = we ? 'background:#F4C7A1;' : '';
-      html += `<th style="${bgStyle}text-align:center;min-width:35px;">${d}</th>`;
-    }
-    html += '<th style="background:#E5E7EB;text-align:center;font-weight:bold;">&Sigma;</th>';
-    html += '<th style="background:#E5E7EB;text-align:center;">Soll</th>';
-    html += '<th style="background:#E5E7EB;text-align:center;">Ist</th>';
-    html += '<th style="background:#E5E7EB;text-align:center;">+/-</th>';
-    html += '</tr>';
+        const tage = Array.from({ length: daysInMonth }, (_, i) => {
+          const day = i + 1;
+          const date = new Date(gridYear, gridMonth - 1, day);
+          const dayOfWeek = date.getDay();
+          const weekdays = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"];
 
-    // Header row 2: Weekday abbreviations
-    html += '<tr><th></th>';
-    for (let d = 1; d <= daysInMonth; d++) {
-      const we = isWeekend(gridYear, gridMonth, d);
-      const wd = getWeekday(gridYear, gridMonth, d);
-      const bgStyle = we ? 'background:#F4C7A1;' : '';
-      html += `<th style="${bgStyle}text-align:center;font-weight:normal;font-size:10px;">${wd}</th>`;
-    }
-    html += '<th style="background:#E5E7EB;"></th>';
-    html += '<th style="background:#E5E7EB;"></th>';
-    html += '<th style="background:#E5E7EB;"></th>';
-    html += '<th style="background:#E5E7EB;"></th>';
-    html += '</tr>';
+          const dd = employeeDays[day] || null;
+          const cell = formatCell(dd);
 
-    // Data rows
-    for (const employee of gridEmployees) {
-      const employeeDays = gridDataMap[employee.id] || {};
-      let totalHours = 0;
-      let istHours = 0;
-
-      html += `<tr><td style="white-space:nowrap;font-weight:bold;">${employee.nachname} ${employee.vorname}</td>`;
-      for (let d = 1; d <= daysInMonth; d++) {
-        const we = isWeekend(gridYear, gridMonth, d);
-        const dd = employeeDays[d] || null;
-        const cell = formatCell(dd);
-        const bgStyle = we ? (dd ? 'background:#F4C7A1;' : 'background:#FFF7ED;') : '';
-
-        let colorStyle = '';
-        if (dd?.isAbsence) {
-          if (dd.absenceType === 'Urlaub') colorStyle = 'color:#16A34A;font-weight:bold;';
-          else if (dd.absenceType === 'Krankenstand') colorStyle = 'color:#DC2626;font-weight:bold;';
-          else if (dd.absenceType === 'Zeitausgleich') colorStyle = 'color:#2563EB;font-weight:bold;';
-        }
-
-        html += `<td style="${bgStyle}${colorStyle}text-align:center;">${cell.text}</td>`;
-
-        if (dd) {
-          totalHours += dd.stunden;
-          if (showWithZA || !dd.isAbsence || dd.absenceType !== 'Zeitausgleich') {
-            istHours += dd.stunden;
+          if (dd) {
+            totalHours += dd.stunden;
+            if (showWithZA || !dd.isAbsence || dd.absenceType !== "Zeitausgleich") {
+              istHours += dd.stunden;
+            }
           }
-        }
-      }
 
-      const soll = employeeSollMap[employee.id] ?? defaultMonthlyTarget;
-      const diff = istHours - soll;
-      const diffColor = diff >= 0 ? 'color:#16A34A;' : 'color:#DC2626;';
-      const diffSign = diff >= 0 ? '+' : '';
+          return {
+            tag: day,
+            wochentag: weekdays[dayOfWeek],
+            isWeekend: dayOfWeek === 0 || dayOfWeek === 6,
+            content: cell.text,
+          };
+        });
 
-      html += `<td style="background:#F3F4F6;text-align:center;font-weight:bold;">${totalHours > 0 ? formatNumber(totalHours) : ''}</td>`;
-      html += `<td style="background:#F3F4F6;text-align:center;">${formatNumber(soll)}</td>`;
-      html += `<td style="background:#F3F4F6;text-align:center;">${formatNumber(istHours)}</td>`;
-      html += `<td style="background:#F3F4F6;text-align:center;${diffColor}font-weight:bold;">${diffSign}${formatNumber(diff)}</td>`;
-      html += '</tr>';
+        const employeeSoll = employeeSollMap[p.id] ?? defaultMonthlyTarget;
+
+        return {
+          name: `${p.nachname} ${p.vorname}`,
+          tage,
+          summe: totalHours,
+          soll: employeeSoll,
+          differenz: istHours - employeeSoll,
+        };
+      }),
+    };
+
+    try {
+      const blob = await generateStundenauswertungPDF(pdfData);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `Stundenauswertung_${monthNames[gridMonth - 1]}_${gridYear}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("PDF generation failed:", err);
+      toast({
+        title: "Fehler",
+        description: "PDF konnte nicht erstellt werden.",
+        variant: "destructive",
+      });
     }
-
-    html += '</table></body></html>';
-
-    const blob = new Blob([html], { type: 'application/vnd.ms-excel' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `Stundenauswertung_${monthNames[gridMonth - 1]}_${gridYear}.xls`;
-    a.click();
-    URL.revokeObjectURL(url);
   };
 
   // -------------------------------------------------------------------------
@@ -763,10 +743,10 @@ export default function HoursReport() {
                     variant="outline"
                     size="sm"
                     className="h-10"
-                    onClick={exportToExcel}
+                    onClick={handleExportPDF}
                   >
                     <Download className="w-4 h-4 mr-2" />
-                    Excel Export
+                    PDF Export (A3)
                   </Button>
                 </div>
 

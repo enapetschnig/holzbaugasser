@@ -263,8 +263,11 @@ export default function Index() {
       <div className="min-h-screen bg-background flex items-center justify-center p-4">
         <div className="text-center space-y-4 max-w-md">
           <img src="/gasser-logo.png" alt="Holzbau Gasser" className="h-20 mx-auto" />
-          <h1 className="text-xl font-bold">Konto deaktiviert</h1>
-          <p className="text-muted-foreground">Ihr Konto wurde deaktiviert. Bitte wenden Sie sich an den Administrator.</p>
+          <h1 className="text-xl font-bold">Freischaltung ausstehend</h1>
+          <p className="text-muted-foreground">
+            Ihr Konto wartet auf Freischaltung durch den Administrator.
+            Sie werden benachrichtigt, sobald Ihr Zugang aktiviert wurde.
+          </p>
           <Button variant="outline" onClick={() => supabase.auth.signOut()}>Abmelden</Button>
         </div>
       </div>
