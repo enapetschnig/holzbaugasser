@@ -18,6 +18,14 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -150,6 +158,13 @@ const TimeTracking = () => {
   // Anmerkungen & Fertiggestellt
   const [anmerkungen, setAnmerkungen] = useState("");
   const [fertiggestellt, setFertiggestellt] = useState(false);
+
+  // Mitarbeiter-Auswahl Dialog
+  const [showMitarbeiterDialog, setShowMitarbeiterDialog] = useState(false);
+  const [selectedNewMitarbeiter, setSelectedNewMitarbeiter] = useState<Set<string>>(new Set());
+
+  // Gleiche Stunden für alle
+  const [gleicheStundenFuerAlle, setGleicheStundenFuerAlle] = useState(false);
 
   // Saving state
   const [saving, setSaving] = useState(false);
@@ -344,9 +359,24 @@ const TimeTracking = () => {
     field: keyof MitarbeiterRow,
     value: any
   ) => {
-    setMitarbeiterRows((prev) =>
-      prev.map((r) => (r.id === id ? { ...r, [field]: value } : r))
-    );
+    // When "gleiche Stunden" is active, sync W/S/R flags (but NOT F) to all rows
+    const syncFields: (keyof MitarbeiterRow)[] = [
+      "istWerkstatt",
+      "schmutzzulage",
+      "regenSchicht",
+      "werkstattStunden",
+      "schmutzzulageStunden",
+      "regenStunden",
+    ];
+    if (gleicheStundenFuerAlle && syncFields.includes(field)) {
+      setMitarbeiterRows((prev) =>
+        prev.map((r) => ({ ...r, [field]: value }))
+      );
+    } else {
+      setMitarbeiterRows((prev) =>
+        prev.map((r) => (r.id === id ? { ...r, [field]: value } : r))
+      );
+    }
   };
 
   const updateMitarbeiterStunden = (
@@ -354,18 +384,54 @@ const TimeTracking = () => {
     position: number,
     value: number
   ) => {
-    setMitarbeiterRows((prev) =>
-      prev.map((r) =>
+    setMitarbeiterRows((prev) => {
+      if (gleicheStundenFuerAlle) {
+        // Apply the same hours value to ALL rows for this position
+        return prev.map((r) => ({
+          ...r,
+          stunden: { ...r.stunden, [position]: value },
+        }));
+      }
+      return prev.map((r) =>
         r.id === id
           ? { ...r, stunden: { ...r.stunden, [position]: value } }
           : r
-      )
-    );
+      );
+    });
   };
 
   const addMitarbeiter = () => {
     setMitarbeiterRows((prev) => [...prev, createEmptyMitarbeiterRow()]);
   };
+
+  const openMitarbeiterDialog = () => {
+    setSelectedNewMitarbeiter(new Set());
+    setShowMitarbeiterDialog(true);
+  };
+
+  const handleAddSelectedMitarbeiter = () => {
+    if (selectedNewMitarbeiter.size === 0) {
+      setShowMitarbeiterDialog(false);
+      return;
+    }
+    const newRows: MitarbeiterRow[] = Array.from(selectedNewMitarbeiter).map(
+      (profileId) => ({
+        ...createEmptyMitarbeiterRow(),
+        mitarbeiterId: profileId,
+      })
+    );
+    setMitarbeiterRows((prev) => {
+      // Remove the initial empty row if it exists and has no mitarbeiterId
+      const cleaned = prev.filter((r) => r.mitarbeiterId !== "");
+      return [...cleaned, ...newRows];
+    });
+    setShowMitarbeiterDialog(false);
+  };
+
+  const alreadyAddedMitarbeiterIds = useMemo(
+    () => new Set(mitarbeiterRows.filter((r) => r.mitarbeiterId).map((r) => r.mitarbeiterId)),
+    [mitarbeiterRows]
+  );
 
   const removeMitarbeiter = (id: string) => {
     if (mitarbeiterRows.length <= 1) return;
@@ -703,6 +769,7 @@ const TimeTracking = () => {
       { position: 4, bezeichnung: "" },
     ]);
     setMitarbeiterRows([createEmptyMitarbeiterRow()]);
+    setGleicheStundenFuerAlle(false);
     setDatum(format(new Date(), "yyyy-MM-dd"));
   };
 
@@ -1135,7 +1202,7 @@ const TimeTracking = () => {
               <CardTitle className="text-lg">
                 Mitarbeiter & Stunden
               </CardTitle>
-              <Button variant="outline" size="sm" onClick={addMitarbeiter}>
+              <Button variant="outline" size="sm" onClick={openMitarbeiterDialog}>
                 <Plus className="h-4 w-4 mr-1" />
                 Mitarbeiter
               </Button>
@@ -1166,24 +1233,44 @@ const TimeTracking = () => {
               </div>
             </div>
 
+            {/* Gleiche Stunden toggle */}
+            <div className="flex items-center gap-3 mb-4">
+              <Switch
+                id="gleiche-stunden"
+                checked={gleicheStundenFuerAlle}
+                onCheckedChange={setGleicheStundenFuerAlle}
+              />
+              <Label htmlFor="gleiche-stunden" className="text-sm cursor-pointer">
+                Stunden für alle Mitarbeiter gleich übernehmen
+              </Label>
+            </div>
+
+            {/* F/W/S/R Legende */}
+            <div className="flex flex-wrap gap-3 text-xs text-muted-foreground mt-2 mb-4">
+              <span><strong>F</strong> = Fahrer</span>
+              <span><strong>W</strong> = Werkstatt</span>
+              <span><strong>S</strong> = Schmutzzulage</span>
+              <span><strong>R</strong> = Regen/Wetterschicht</span>
+            </div>
+
             {/* Scrollable matrix table */}
             <div className="overflow-x-auto -mx-4 sm:-mx-6 px-4 sm:px-6">
               <table className="w-full text-sm border-collapse min-w-[600px]">
                 <thead>
                   <tr className="border-b bg-muted/50">
-                    <th className="text-left px-2 py-2 font-medium whitespace-nowrap min-w-[160px]">
+                    <th className="sticky left-0 z-10 bg-muted/50 text-left px-2 py-2 font-medium whitespace-nowrap min-w-[160px]">
                       Name
                     </th>
-                    <th className="px-1 py-2 font-medium text-center w-10" title="Fahrer">
+                    <th className="px-1 py-2 font-medium text-center min-w-[50px]" title="Fahrer">
                       F
                     </th>
-                    <th className="px-1 py-2 font-medium text-center w-10" title="Werkstatt">
+                    <th className="px-1 py-2 font-medium text-center min-w-[50px]" title="Werkstatt">
                       W
                     </th>
-                    <th className="px-1 py-2 font-medium text-center w-10" title="Schmutzzulage">
+                    <th className="px-1 py-2 font-medium text-center min-w-[50px]" title="Schmutzzulage">
                       S
                     </th>
-                    <th className="px-1 py-2 font-medium text-center w-10" title="Regen/Wetterschicht">
+                    <th className="px-1 py-2 font-medium text-center min-w-[50px]" title="Regen/Wetterschicht">
                       R
                     </th>
                     {taetigkeiten.map((t) => (
@@ -1210,7 +1297,7 @@ const TimeTracking = () => {
                     return (
                       <tr key={row.id} className="border-b hover:bg-muted/30">
                         {/* Name select */}
-                        <td className="px-2 py-1.5">
+                        <td className="sticky left-0 z-10 bg-card px-2 py-1.5">
                           <Select
                             value={row.mitarbeiterId}
                             onValueChange={(v) =>
@@ -1247,6 +1334,7 @@ const TimeTracking = () => {
                                 type="number"
                                 step="0.25"
                                 min="0"
+                                inputMode="decimal"
                                 className="h-7 w-12 text-center text-xs px-0.5"
                                 value={row.fahrerStunden}
                                 onChange={(e) =>
@@ -1275,6 +1363,7 @@ const TimeTracking = () => {
                                 type="number"
                                 step="0.25"
                                 min="0"
+                                inputMode="decimal"
                                 className="h-7 w-12 text-center text-xs px-0.5"
                                 value={row.werkstattStunden}
                                 onChange={(e) =>
@@ -1303,6 +1392,7 @@ const TimeTracking = () => {
                                 type="number"
                                 step="0.25"
                                 min="0"
+                                inputMode="decimal"
                                 className="h-7 w-12 text-center text-xs px-0.5"
                                 value={row.schmutzzulageStunden}
                                 onChange={(e) =>
@@ -1331,6 +1421,7 @@ const TimeTracking = () => {
                                 type="number"
                                 step="0.25"
                                 min="0"
+                                inputMode="decimal"
                                 className="h-7 w-12 text-center text-xs px-0.5"
                                 value={row.regenStunden}
                                 onChange={(e) =>
@@ -1346,6 +1437,7 @@ const TimeTracking = () => {
                           <td key={t.position} className="px-1 py-1.5 text-center">
                             <Input
                               type="number"
+                              inputMode="decimal"
                               step="0.25"
                               min="0"
                               max="24"
@@ -1710,6 +1802,85 @@ const TimeTracking = () => {
           </CardContent>
         </Card>
       </div>
+
+      {/* ---------- MITARBEITER AUSWAHL DIALOG ---------- */}
+      <Dialog open={showMitarbeiterDialog} onOpenChange={setShowMitarbeiterDialog}>
+        <DialogContent className="sm:max-w-md max-h-[80vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle>Mitarbeiter hinzufügen</DialogTitle>
+          </DialogHeader>
+          <div className="flex items-center gap-2 mb-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                const allIds = new Set(
+                  profiles
+                    .filter((p) => !alreadyAddedMitarbeiterIds.has(p.id))
+                    .map((p) => p.id)
+                );
+                setSelectedNewMitarbeiter(allIds);
+              }}
+            >
+              Alle auswählen
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setSelectedNewMitarbeiter(new Set())}
+            >
+              Alle abwählen
+            </Button>
+          </div>
+          <div className="flex-1 overflow-y-auto space-y-1 pr-1">
+            {profiles.map((p) => {
+              const alreadyAdded = alreadyAddedMitarbeiterIds.has(p.id);
+              const isSelected = alreadyAdded || selectedNewMitarbeiter.has(p.id);
+              return (
+                <label
+                  key={p.id}
+                  className={`flex items-center gap-3 px-3 py-2 rounded-md cursor-pointer hover:bg-muted/50 ${
+                    alreadyAdded ? "opacity-50 cursor-not-allowed" : ""
+                  }`}
+                >
+                  <Checkbox
+                    checked={isSelected}
+                    disabled={alreadyAdded}
+                    onCheckedChange={(checked) => {
+                      if (alreadyAdded) return;
+                      setSelectedNewMitarbeiter((prev) => {
+                        const next = new Set(prev);
+                        if (checked) {
+                          next.add(p.id);
+                        } else {
+                          next.delete(p.id);
+                        }
+                        return next;
+                      });
+                    }}
+                  />
+                  <span className="text-sm">
+                    {p.nachname} {p.vorname}
+                    {alreadyAdded && (
+                      <span className="ml-2 text-xs text-muted-foreground">(bereits hinzugefügt)</span>
+                    )}
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+          <DialogFooter className="mt-4">
+            <Button variant="outline" onClick={() => setShowMitarbeiterDialog(false)}>
+              Abbrechen
+            </Button>
+            <Button onClick={handleAddSelectedMitarbeiter} disabled={selectedNewMitarbeiter.size === 0}>
+              {selectedNewMitarbeiter.size > 0
+                ? `${selectedNewMitarbeiter.size} Mitarbeiter hinzufügen`
+                : "Hinzufügen"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
