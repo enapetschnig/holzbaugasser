@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { Plus, Trash2, Save, FileText, Users, CalendarDays } from "lucide-react";
+import { Plus, Trash2, Save, FileText, Users, CalendarDays, Info } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { format } from "date-fns";
 import { de } from "date-fns/locale";
@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -113,7 +114,6 @@ const TimeTracking = () => {
   const [pauseVon, setPauseVon] = useState("11:00");
   const [pauseBis, setPauseBis] = useState("11:30");
   const [wetter, setWetter] = useState("");
-  const [lkwStunden, setLkwStunden] = useState<number>(0);
   const [schmutzzulageAlle, setSchmutzzulageAlle] = useState(false);
 
   // Form: Taetigkeiten
@@ -128,6 +128,17 @@ const TimeTracking = () => {
   const [mitarbeiterRows, setMitarbeiterRows] = useState<MitarbeiterRow[]>([
     createEmptyMitarbeiterRow(),
   ]);
+
+  // Geräteeinsatz
+  const [geraete, setGeraete] = useState<{ id: string; geraet: string; stunden: string }[]>([]);
+  const GERAETE_OPTIONEN = ["LKW", "Kran", "Bagger", "Sonstiges"];
+
+  // Materialien
+  const [materialien, setMaterialien] = useState<{ id: string; bezeichnung: string; menge: string }[]>([]);
+
+  // Anmerkungen & Fertiggestellt
+  const [anmerkungen, setAnmerkungen] = useState("");
+  const [fertiggestellt, setFertiggestellt] = useState(false);
 
   // Saving state
   const [saving, setSaving] = useState(false);
@@ -423,6 +434,14 @@ const TimeTracking = () => {
           .from("leistungsbericht_taetigkeiten" as any)
           .delete()
           .eq("bericht_id", editingBerichtId);
+        await supabase
+          .from("leistungsbericht_geraete" as any)
+          .delete()
+          .eq("bericht_id", editingBerichtId);
+        await supabase
+          .from("leistungsbericht_materialien" as any)
+          .delete()
+          .eq("bericht_id", editingBerichtId);
 
         // Delete associated time_entries
         await supabase
@@ -454,8 +473,9 @@ const TimeTracking = () => {
           pause_von: pauseVon || null,
           pause_bis: pauseBis || null,
           pause_minuten: pauseMinuten,
-          lkw_stunden: lkwStunden || 0,
           wetter: wetter || null,
+          anmerkungen: anmerkungen || null,
+          fertiggestellt,
           schmutzzulage_alle: schmutzzulageAlle,
         })
         .select("id")
@@ -473,15 +493,6 @@ const TimeTracking = () => {
         if (bez) {
           finalTaetigkeiten.push({ position: t.position, bezeichnung: bez });
         }
-      }
-
-      // Add LKW position if hours > 0
-      if (lkwStunden > 0) {
-        const lkwPos = finalTaetigkeiten.length + 1;
-        finalTaetigkeiten.push({
-          position: lkwPos,
-          bezeichnung: `LKW AN+ABFAHRT (${lkwStunden} Std.)`,
-        });
       }
 
       // Add Pause position
@@ -586,6 +597,40 @@ const TimeTracking = () => {
 
       if (timeError) throw timeError;
 
+      // 7. Save Geräte
+      if (geraete.length > 0) {
+        const geraeteInserts = geraete
+          .filter((g) => g.geraet.trim() && parseFloat(g.stunden) > 0)
+          .map((g) => ({
+            bericht_id: berichtId,
+            geraet: g.geraet.trim(),
+            stunden: parseFloat(g.stunden),
+          }));
+        if (geraeteInserts.length > 0) {
+          const { error: geraeteError } = await supabase
+            .from("leistungsbericht_geraete" as any)
+            .insert(geraeteInserts);
+          if (geraeteError) throw geraeteError;
+        }
+      }
+
+      // 8. Save Materialien
+      if (materialien.length > 0) {
+        const materialienInserts = materialien
+          .filter((m) => m.bezeichnung)
+          .map((m) => ({
+            bericht_id: berichtId,
+            bezeichnung: m.bezeichnung,
+            menge: m.menge,
+          }));
+        if (materialienInserts.length > 0) {
+          const { error: materialienError } = await supabase
+            .from("leistungsbericht_materialien" as any)
+            .insert(materialienInserts);
+          if (materialienError) throw materialienError;
+        }
+      }
+
       toast({
         title: "Gespeichert",
         description: `Leistungsbericht für ${format(
@@ -621,8 +666,11 @@ const TimeTracking = () => {
     setPauseVon("11:00");
     setPauseBis("11:30");
     setWetter("");
-    setLkwStunden(0);
     setSchmutzzulageAlle(false);
+    setGeraete([]);
+    setMaterialien([]);
+    setAnmerkungen("");
+    setFertiggestellt(false);
     setTaetigkeiten([
       { position: 1, bezeichnung: "" },
       { position: 2, bezeichnung: "" },
@@ -656,8 +704,9 @@ const TimeTracking = () => {
       setPauseVon(b.pause_von || "11:00");
       setPauseBis(b.pause_bis || "11:30");
       setWetter(b.wetter || "");
-      setLkwStunden(b.lkw_stunden || 0);
       setSchmutzzulageAlle(b.schmutzzulage_alle || false);
+      setAnmerkungen(b.anmerkungen || "");
+      setFertiggestellt(b.fertiggestellt || false);
 
       // Load taetigkeiten
       const { data: tData } = await supabase
@@ -723,6 +772,42 @@ const TimeTracking = () => {
         setMitarbeiterRows(rows);
       }
 
+      // Load geraete
+      const { data: geraeteData } = await supabase
+        .from("leistungsbericht_geraete" as any)
+        .select("*")
+        .eq("bericht_id", id);
+
+      if (geraeteData && (geraeteData as any[]).length > 0) {
+        setGeraete(
+          (geraeteData as any[]).map((g: any) => ({
+            id: crypto.randomUUID(),
+            geraet: g.geraet,
+            stunden: String(g.stunden),
+          }))
+        );
+      } else {
+        setGeraete([]);
+      }
+
+      // Load materialien
+      const { data: materialienData } = await supabase
+        .from("leistungsbericht_materialien" as any)
+        .select("*")
+        .eq("bericht_id", id);
+
+      if (materialienData && (materialienData as any[]).length > 0) {
+        setMaterialien(
+          (materialienData as any[]).map((m: any) => ({
+            id: crypto.randomUUID(),
+            bezeichnung: m.bezeichnung,
+            menge: m.menge || "",
+          }))
+        );
+      } else {
+        setMaterialien([]);
+      }
+
       // Scroll to top
       window.scrollTo({ top: 0, behavior: "smooth" });
 
@@ -756,6 +841,14 @@ const TimeTracking = () => {
         .eq("bericht_id", id);
       await supabase
         .from("leistungsbericht_taetigkeiten" as any)
+        .delete()
+        .eq("bericht_id", id);
+      await supabase
+        .from("leistungsbericht_geraete" as any)
+        .delete()
+        .eq("bericht_id", id);
+      await supabase
+        .from("leistungsbericht_materialien" as any)
         .delete()
         .eq("bericht_id", id);
       await supabase
@@ -927,19 +1020,6 @@ const TimeTracking = () => {
                   placeholder="z.B. sonnig, Regen..."
                 />
               </div>
-              <div className="space-y-2">
-                <Label>LKW An+Abfahrt (Std.)</Label>
-                <Input
-                  type="number"
-                  step="0.25"
-                  min="0"
-                  value={lkwStunden || ""}
-                  onChange={(e) =>
-                    setLkwStunden(parseFloat(e.target.value) || 0)
-                  }
-                  placeholder="0"
-                />
-              </div>
             </div>
 
             {/* Normalarbeitszeit banner */}
@@ -1005,17 +1085,7 @@ const TimeTracking = () => {
               </div>
             ))}
 
-            {/* Auto-displayed LKW + Pause info */}
-            {lkwStunden > 0 && (
-              <div className="flex items-center gap-2 opacity-60">
-                <span className="w-8 text-center font-mono text-sm font-bold text-muted-foreground shrink-0">
-                  +
-                </span>
-                <div className="flex-1 text-sm px-3 py-2 rounded-md bg-muted border">
-                  LKW AN+ABFAHRT ({lkwStunden} Std.)
-                </div>
-              </div>
-            )}
+            {/* Auto-displayed Pause info */}
             <div className="flex items-center gap-2 opacity-60">
               <span className="w-8 text-center font-mono text-sm font-bold text-muted-foreground shrink-0">
                 +
@@ -1218,6 +1288,218 @@ const TimeTracking = () => {
                   </tr>
                 </tfoot>
               </table>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* ---------- GERÄTEEINSATZ ---------- */}
+        <Card>
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="text-lg">Geräteeinsatz</CardTitle>
+                <p className="text-sm text-muted-foreground">LKW, Kran (in Stunden)</p>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() =>
+                  setGeraete((prev) => [
+                    ...prev,
+                    { id: crypto.randomUUID(), geraet: "", stunden: "" },
+                  ])
+                }
+              >
+                <Plus className="h-4 w-4 mr-1" />
+                Gerät hinzufügen
+              </Button>
+            </div>
+          </CardHeader>
+          {geraete.length > 0 && (
+            <CardContent className="space-y-2">
+              {geraete.map((g) => (
+                <div key={g.id} className="flex items-center gap-2">
+                  {!GERAETE_OPTIONEN.includes(g.geraet) && g.geraet !== "" ? (
+                    <Input
+                      value={g.geraet.trim()}
+                      onChange={(e) =>
+                        setGeraete((prev) =>
+                          prev.map((item) =>
+                            item.id === g.id
+                              ? { ...item, geraet: e.target.value }
+                              : item
+                          )
+                        )
+                      }
+                      placeholder="Gerät eingeben..."
+                      className="flex-1"
+                    />
+                  ) : (
+                    <Select
+                      value={g.geraet}
+                      onValueChange={(v) =>
+                        setGeraete((prev) =>
+                          prev.map((item) =>
+                            item.id === g.id
+                              ? {
+                                  ...item,
+                                  geraet: v === "Sonstiges" ? " " : v,
+                                }
+                              : item
+                          )
+                        )
+                      }
+                    >
+                      <SelectTrigger className="flex-1">
+                        <SelectValue placeholder="Gerät auswählen..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {GERAETE_OPTIONEN.map((opt) => (
+                          <SelectItem key={opt} value={opt}>
+                            {opt}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                  <Input
+                    type="number"
+                    step="0.5"
+                    min="0"
+                    value={g.stunden}
+                    onChange={(e) =>
+                      setGeraete((prev) =>
+                        prev.map((item) =>
+                          item.id === g.id
+                            ? { ...item, stunden: e.target.value }
+                            : item
+                        )
+                      )
+                    }
+                    placeholder="Stunden"
+                    className="w-24"
+                  />
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="shrink-0 h-8 w-8 text-muted-foreground hover:text-destructive"
+                    onClick={() =>
+                      setGeraete((prev) => prev.filter((item) => item.id !== g.id))
+                    }
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              ))}
+            </CardContent>
+          )}
+        </Card>
+
+        {/* ---------- VERBRAUCHTE MATERIALIEN ---------- */}
+        <Card>
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-lg">Verbrauchte Materialien für Regiearbeiten</CardTitle>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() =>
+                  setMaterialien((prev) => [
+                    ...prev,
+                    { id: crypto.randomUUID(), bezeichnung: "", menge: "" },
+                  ])
+                }
+              >
+                <Plus className="h-4 w-4 mr-1" />
+                Material hinzufügen
+              </Button>
+            </div>
+          </CardHeader>
+          {materialien.length > 0 && (
+            <CardContent className="space-y-2">
+              {materialien.map((m) => (
+                <div key={m.id} className="flex items-center gap-2">
+                  <Input
+                    value={m.bezeichnung}
+                    onChange={(e) =>
+                      setMaterialien((prev) =>
+                        prev.map((item) =>
+                          item.id === m.id
+                            ? { ...item, bezeichnung: e.target.value }
+                            : item
+                        )
+                      )
+                    }
+                    placeholder="Bezeichnung..."
+                    className="flex-1"
+                  />
+                  <Input
+                    value={m.menge}
+                    onChange={(e) =>
+                      setMaterialien((prev) =>
+                        prev.map((item) =>
+                          item.id === m.id
+                            ? { ...item, menge: e.target.value }
+                            : item
+                        )
+                      )
+                    }
+                    placeholder="z.B. 5 Stk, 20m²"
+                    className="w-32"
+                  />
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="shrink-0 h-8 w-8 text-muted-foreground hover:text-destructive"
+                    onClick={() =>
+                      setMaterialien((prev) =>
+                        prev.filter((item) => item.id !== m.id)
+                      )
+                    }
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              ))}
+            </CardContent>
+          )}
+        </Card>
+
+        {/* ---------- ANMERKUNGEN ---------- */}
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-lg">Anmerkungen</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Textarea
+              rows={3}
+              value={anmerkungen}
+              onChange={(e) => setAnmerkungen(e.target.value)}
+              placeholder="Anmerkungen zum Leistungsbericht..."
+            />
+          </CardContent>
+        </Card>
+
+        {/* ---------- BAUVORHABEN FERTIGGESTELLT ---------- */}
+        <div className="flex items-center gap-2">
+          <Checkbox
+            id="fertiggestellt"
+            checked={fertiggestellt}
+            onCheckedChange={(v) => setFertiggestellt(v === true)}
+          />
+          <Label htmlFor="fertiggestellt" className="text-sm cursor-pointer font-medium">
+            Bauvorhaben fertiggestellt
+          </Label>
+        </div>
+
+        {/* ---------- SICHERHEITSHINWEIS ---------- */}
+        <Card className="bg-muted">
+          <CardContent className="pt-4">
+            <div className="flex items-start gap-3">
+              <Info className="h-5 w-5 text-muted-foreground shrink-0 mt-0.5" />
+              <p className="text-sm text-muted-foreground">
+                Maßnahmen gemäß § 14 ASchG &amp; BauV § 154 sowie Hinweis zur Verwendung von Persönlicher Schutzausrüstung zur Kenntnis genommen!
+              </p>
             </div>
           </CardContent>
         </Card>

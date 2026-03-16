@@ -21,6 +21,10 @@ export type LeistungsberichtPDFData = {
     summe: number;
   }[];
   gesamtstunden: number;
+  geraete: { geraet: string; stunden: number }[];
+  materialien: { bezeichnung: string; menge: string }[];
+  anmerkungen: string;
+  fertiggestellt: boolean;
 };
 
 const DARK_GREEN: [number, number, number] = [43, 91, 44];
@@ -409,19 +413,218 @@ export async function generateLeistungsberichtPDF(
   doc.setFontSize(11);
   doc.setFont("helvetica", "bold");
   doc.text(`Gesamtsumme Arbeitsstunden: ${formatNumber(data.gesamtstunden)}`, marginLeft, tY);
-  tY += 7;
+  tY += 8;
 
-  // Geraeteeinsatz line
-  doc.setTextColor(...BLACK);
-  doc.setFontSize(9);
-  doc.setFont("helvetica", "normal");
+  // ── Geräteeinsatz Table ──────────────────────────────────────────────
+  doc.setTextColor(...DARK_GREEN);
+  doc.setFontSize(10);
+  doc.setFont("helvetica", "bold");
   doc.text("Ger\u00e4teeinsatz:", marginLeft, tY);
+  tY += 4;
+
+  doc.setTextColor(...GRAY);
+  doc.setFontSize(7.5);
+  doc.setFont("helvetica", "normal");
+  doc.text("LKW, Kran (in Stunden)", marginLeft, tY);
+  tY += 4;
+
+  const geraeteTableX = marginLeft;
+  const geraeteColGeraet = 60;
+  const geraeteColStunden = 30;
+  const geraeteTableW = geraeteColGeraet + geraeteColStunden;
+  const geraeteRowH = 6;
+  const geraeteHeaderH = 7;
+
+  // Header background
+  doc.setFillColor(...HEADER_BG);
+  doc.rect(geraeteTableX, tY, geraeteTableW, geraeteHeaderH, "F");
+
+  // Header text
+  doc.setTextColor(...DARK_GREEN);
+  doc.setFontSize(7.5);
+  doc.setFont("helvetica", "bold");
+  doc.text("Ger\u00e4t", geraeteTableX + 2, tY + 5);
+  doc.text("Stunden", geraeteTableX + geraeteColGeraet + 2, tY + 5);
+
+  // Header border
+  doc.setDrawColor(80, 80, 80);
+  doc.setLineWidth(0.3);
+  doc.rect(geraeteTableX, tY, geraeteTableW, geraeteHeaderH);
+  doc.line(geraeteTableX + geraeteColGeraet, tY, geraeteTableX + geraeteColGeraet, tY + geraeteHeaderH);
+
+  tY += geraeteHeaderH;
+
+  // Rows
+  const geraeteRows = data.geraete.length > 0 ? data.geraete : [{ geraet: "", stunden: 0 }, { geraet: "", stunden: 0 }];
+  const geraeteDataStartY = tY;
+
+  doc.setTextColor(...BLACK);
+  doc.setFontSize(8);
+  doc.setFont("helvetica", "normal");
+
+  for (let i = 0; i < geraeteRows.length; i++) {
+    const g = geraeteRows[i];
+    if (i % 2 === 0) {
+      doc.setFillColor(248, 248, 248);
+      doc.rect(geraeteTableX, tY, geraeteTableW, geraeteRowH, "F");
+    }
+    doc.text(g.geraet, geraeteTableX + 2, tY + geraeteRowH * 0.7);
+    const stundenStr = g.stunden > 0 ? formatNumber(g.stunden) : "";
+    doc.text(stundenStr, geraeteTableX + geraeteColGeraet + 2, tY + geraeteRowH * 0.7);
+    tY += geraeteRowH;
+  }
+
+  // Grid lines for geraete rows
+  doc.setDrawColor(80, 80, 80);
+  doc.setLineWidth(0.3);
+  doc.rect(geraeteTableX, geraeteDataStartY, geraeteTableW, tY - geraeteDataStartY);
+  doc.line(geraeteTableX + geraeteColGeraet, geraeteDataStartY, geraeteTableX + geraeteColGeraet, tY);
+
+  // Row separators
+  doc.setDrawColor(...LIGHT_GRAY);
+  doc.setLineWidth(0.15);
+  let gry = geraeteDataStartY;
+  for (let i = 0; i < geraeteRows.length - 1; i++) {
+    gry += geraeteRowH;
+    doc.line(geraeteTableX, gry, geraeteTableX + geraeteTableW, gry);
+  }
+
+  tY += 6;
+
+  // ── Materialien & Anmerkungen side by side ──────────────────────────
+  const matAnmY = tY;
+  const halfW = contentW / 2 - 5;
+
+  // -- LEFT: Verbrauchte Materialien --
+  doc.setTextColor(...DARK_GREEN);
+  doc.setFontSize(10);
+  doc.setFont("helvetica", "bold");
+  doc.text("Verbrauchte Materialien f\u00fcr Regiearbeiten:", marginLeft, tY);
   tY += 5;
 
-  // LKW hours if present
-  if (data.lkwStunden > 0) {
-    doc.text(`LKW An+Abfahrt: ${formatNumber(data.lkwStunden)} Std.`, marginLeft + 30, tY - 5);
+  const matTableX = marginLeft;
+  const matColBez = halfW - 30;
+  const matColMenge = 30;
+  const matTableW = matColBez + matColMenge;
+  const matRowH = 6;
+  const matHeaderH = 7;
+
+  // Header
+  doc.setFillColor(...HEADER_BG);
+  doc.rect(matTableX, tY, matTableW, matHeaderH, "F");
+  doc.setTextColor(...DARK_GREEN);
+  doc.setFontSize(7.5);
+  doc.setFont("helvetica", "bold");
+  doc.text("Material", matTableX + 2, tY + 5);
+  doc.text("Menge", matTableX + matColBez + 2, tY + 5);
+
+  doc.setDrawColor(80, 80, 80);
+  doc.setLineWidth(0.3);
+  doc.rect(matTableX, tY, matTableW, matHeaderH);
+  doc.line(matTableX + matColBez, tY, matTableX + matColBez, tY + matHeaderH);
+
+  tY += matHeaderH;
+
+  const matRows = data.materialien.length > 0 ? data.materialien : [{ bezeichnung: "", menge: "" }, { bezeichnung: "", menge: "" }];
+  const matDataStartY = tY;
+
+  doc.setTextColor(...BLACK);
+  doc.setFontSize(8);
+  doc.setFont("helvetica", "normal");
+
+  for (let i = 0; i < matRows.length; i++) {
+    const mat = matRows[i];
+    if (i % 2 === 0) {
+      doc.setFillColor(248, 248, 248);
+      doc.rect(matTableX, tY, matTableW, matRowH, "F");
+    }
+    doc.text(mat.bezeichnung, matTableX + 2, tY + matRowH * 0.7);
+    doc.text(mat.menge, matTableX + matColBez + 2, tY + matRowH * 0.7);
+    tY += matRowH;
   }
+
+  // Grid
+  doc.setDrawColor(80, 80, 80);
+  doc.setLineWidth(0.3);
+  doc.rect(matTableX, matDataStartY, matTableW, tY - matDataStartY);
+  doc.line(matTableX + matColBez, matDataStartY, matTableX + matColBez, tY);
+
+  doc.setDrawColor(...LIGHT_GRAY);
+  doc.setLineWidth(0.15);
+  let mry = matDataStartY;
+  for (let i = 0; i < matRows.length - 1; i++) {
+    mry += matRowH;
+    doc.line(matTableX, mry, matTableX + matTableW, mry);
+  }
+
+  // -- RIGHT: Anmerkungen --
+  const anmX = marginLeft + halfW + 10;
+  let anmY = matAnmY;
+
+  doc.setTextColor(...DARK_GREEN);
+  doc.setFontSize(10);
+  doc.setFont("helvetica", "bold");
+  doc.text("Anmerkungen:", anmX, anmY);
+  anmY += 5;
+
+  doc.setTextColor(...BLACK);
+  doc.setFontSize(8);
+  doc.setFont("helvetica", "normal");
+  if (data.anmerkungen) {
+    const anmLines = doc.splitTextToSize(data.anmerkungen, halfW - 5);
+    doc.text(anmLines, anmX, anmY);
+    anmY += anmLines.length * 4;
+  }
+  anmY += 4;
+
+  // Safety notice
+  doc.setTextColor(...GRAY);
+  doc.setFontSize(7);
+  doc.setFont("helvetica", "italic");
+  doc.text("Ma\u00dfnahmen gem\u00e4\u00df \u00a7 14 ASchG & BauV \u00a7 154 sowie", anmX, anmY);
+  anmY += 3.5;
+  doc.text("Hinweis zur Verwendung von Pers\u00f6nlicher", anmX, anmY);
+  anmY += 3.5;
+  doc.text("Schutzausr\u00fcstung zur Kenntnis genommen!", anmX, anmY);
+
+  // Move tY past whichever side is taller
+  tY = Math.max(tY, anmY) + 6;
+
+  // ── Bauvorhaben fertiggestellt ──────────────────────────────────────
+  doc.setTextColor(...BLACK);
+  doc.setFontSize(9);
+  doc.setFont("helvetica", "bold");
+  doc.text(
+    `Bauvorhaben fertiggestellt (ja/nein): ${data.fertiggestellt ? "Ja" : "Nein"}`,
+    marginLeft,
+    tY
+  );
+  tY += 10;
+
+  // ── Signature Lines ─────────────────────────────────────────────────
+  const sigY = Math.max(tY, pageH - 28);
+  const sigLineW = 60;
+  const sigGap = (contentW - 3 * sigLineW) / 2;
+
+  const sig1X = marginLeft;
+  const sig2X = marginLeft + sigLineW + sigGap;
+  const sig3X = marginLeft + 2 * (sigLineW + sigGap);
+
+  doc.setDrawColor(80, 80, 80);
+  doc.setLineWidth(0.3);
+
+  // Signature lines
+  doc.line(sig1X, sigY, sig1X + sigLineW, sigY);
+  doc.line(sig2X, sigY, sig2X + sigLineW, sigY);
+  doc.line(sig3X, sigY, sig3X + sigLineW, sigY);
+
+  // Labels below lines
+  doc.setTextColor(...BLACK);
+  doc.setFontSize(8);
+  doc.setFont("helvetica", "normal");
+  doc.text("Partief\u00fchrer:", sig1X, sigY + 4);
+  doc.text("Kontrolliert:", sig2X, sigY + 4);
+  doc.text("Auftraggeber:in:", sig3X, sigY + 4);
 
   // ── Footer ────────────────────────────────────────────────────────────
   const footerY = pageH - 8;
