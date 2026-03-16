@@ -27,14 +27,17 @@ export type LeistungsberichtPDFData = {
   fertiggestellt: boolean;
 };
 
+// ── Color constants ──────────────────────────────────────────────────────────
 const DARK_GREEN: [number, number, number] = [43, 91, 44];
 const BLACK: [number, number, number] = [0, 0, 0];
-const GRAY: [number, number, number] = [100, 100, 100];
-const LIGHT_GRAY: [number, number, number] = [200, 200, 200];
+const GRAY: [number, number, number] = [120, 120, 120];
 const RED: [number, number, number] = [200, 0, 0];
 const WHITE: [number, number, number] = [255, 255, 255];
-const HEADER_BG: [number, number, number] = [230, 240, 230];
+const ORANGE_RED: [number, number, number] = [210, 80, 0];
+const HEADER_GREEN_BG: [number, number, number] = [220, 235, 220];
+const LINE_COLOR: [number, number, number] = [80, 80, 80];
 
+// ── Helper functions ─────────────────────────────────────────────────────────
 function formatGermanDate(dateStr: string): string {
   const date = new Date(dateStr + "T00:00:00");
   return date.toLocaleDateString("de-AT", {
@@ -67,581 +70,633 @@ async function loadLogoAsBase64(): Promise<string | null> {
   }
 }
 
+// ── Helpers for drawing ──────────────────────────────────────────────────────
+function drawRect(
+  doc: jsPDF,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  lineWidth = 0.3
+) {
+  doc.setDrawColor(...LINE_COLOR);
+  doc.setLineWidth(lineWidth);
+  doc.rect(x, y, w, h);
+}
+
+function drawLine(
+  doc: jsPDF,
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+  lineWidth = 0.3
+) {
+  doc.setDrawColor(...LINE_COLOR);
+  doc.setLineWidth(lineWidth);
+  doc.line(x1, y1, x2, y2);
+}
+
+// ── Main function ────────────────────────────────────────────────────────────
 export async function generateLeistungsberichtPDF(
   data: LeistungsberichtPDFData
 ): Promise<Blob> {
-  const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
-  const pageW = doc.internal.pageSize.getWidth();   // 297
-  const pageH = doc.internal.pageSize.getHeight();   // 210
+  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+  const pageW = 210;
+  const pageH = 297;
 
-  const sidebarW = 12;
-  const marginLeft = sidebarW + 8;
-  const marginRight = 10;
-  const marginTop = 10;
-  const contentW = pageW - marginLeft - marginRight;
+  // Layout constants
+  const sidebarW = 10;
+  const mL = sidebarW + 4; // left margin after sidebar
+  const mR = 6;
+  const contentW = pageW - mL - mR;
+  const contentRight = pageW - mR;
 
-  // ── Left sidebar ──────────────────────────────────────────────────────
+  // ════════════════════════════════════════════════════════════════════════════
+  // LEFT SIDEBAR (full height green bar)
+  // ════════════════════════════════════════════════════════════════════════════
   doc.setFillColor(...DARK_GREEN);
   doc.rect(0, 0, sidebarW, pageH, "F");
 
   doc.setTextColor(...WHITE);
-  doc.setFontSize(8);
   doc.setFont("helvetica", "bold");
+  doc.setFontSize(7);
+  const sidebarMain =
+    "\u25C7 Holzbau \u25C7 Tischlerei \u25C7 Planung \u25C7 Kulturwerkstatt";
+  doc.text(sidebarMain, sidebarW / 2 + 1.5, pageH - 20, { angle: 90 });
 
-  // Rotated text along the sidebar (bottom to top)
-  const sidebarText = "Holzbau  \u25C7  Tischlerei  \u25C7  Planung  \u25C7  Kulturwerkstatt";
-  doc.text(sidebarText, sidebarW / 2 + 1, pageH - 15, { angle: 90 });
-
-  doc.setFontSize(6);
   doc.setFont("helvetica", "normal");
-  doc.text("mail: office@holzbau-gasser.at", sidebarW / 2 + 1, pageH - 5, { angle: 90 });
+  doc.setFontSize(5);
+  const sidebarAddr =
+    "Holzbau Gasser GmbH, Edling 25, A-9072 Ludmannsdorf, Tel. 04228/2219-0, Fax 2750, e-mail: office@holzbau-gasser.at";
+  doc.text(sidebarAddr, sidebarW / 2 - 1, pageH - 10, { angle: 90 });
 
-  // ── Logo ──────────────────────────────────────────────────────────────
-  let yPos = marginTop;
+  // ════════════════════════════════════════════════════════════════════════════
+  // LOGO (top right)
+  // ════════════════════════════════════════════════════════════════════════════
   const logo = await loadLogoAsBase64();
   if (logo) {
     try {
-      doc.addImage(logo, "PNG", marginLeft, yPos, 50, 18);
+      doc.addImage(logo, "PNG", contentRight - 42, 5, 42, 15);
     } catch {
-      // logo load failed, continue without
+      // logo load failed
     }
   }
-  yPos += 22;
 
-  // ── Title ─────────────────────────────────────────────────────────────
+  // ════════════════════════════════════════════════════════════════════════════
+  // TITLE
+  // ════════════════════════════════════════════════════════════════════════════
+  let y = 12;
   doc.setTextColor(...DARK_GREEN);
-  doc.setFontSize(16);
+  doc.setFontSize(15);
   doc.setFont("helvetica", "bold");
-  doc.text("Leistungsbericht:", marginLeft, yPos);
+  doc.text("Leistungsbericht:", mL, y);
 
-  doc.setTextColor(...GRAY);
-  doc.setFontSize(9);
+  y += 5;
+  doc.setTextColor(...ORANGE_RED);
+  doc.setFontSize(8);
   doc.setFont("helvetica", "italic");
-  doc.text("Der Leistungsbericht ist t\u00e4glich abzugeben!", marginLeft + 52, yPos - 2);
-  yPos += 10;
+  doc.text("Der Leistungsbericht ist t\u00e4glich abzugeben!", mL, y);
 
-  // ── Bauvorhaben ───────────────────────────────────────────────────────
+  // ════════════════════════════════════════════════════════════════════════════
+  // BAUVORHABEN SECTION
+  // ════════════════════════════════════════════════════════════════════════════
+  y += 6;
   doc.setTextColor(...DARK_GREEN);
-  doc.setFontSize(12);
-  doc.setFont("helvetica", "bold");
-  doc.text("Bauvorhaben:", marginLeft, yPos);
-  yPos += 7;
-
-  const labelX = marginLeft + 2;
-  const valueX = marginLeft + 22;
-  const rightLabelX = marginLeft + contentW * 0.55;
-  const rightValueX = marginLeft + contentW * 0.55 + 22;
-
-  doc.setTextColor(...BLACK);
   doc.setFontSize(10);
-  doc.setFont("helvetica", "normal");
+  doc.setFont("helvetica", "bold");
+  doc.text("Bauvorhaben:", mL, y);
+  y += 5;
+
+  const labelX = mL + 2;
+  const valX = mL + 18;
+  const rightBlockX = mL + contentW * 0.56;
+  const rightValX = rightBlockX + 16;
+
+  doc.setFontSize(8.5);
 
   // Name + Datum
+  doc.setTextColor(...BLACK);
   doc.setFont("helvetica", "bold");
-  doc.text("Name:", labelX, yPos);
+  doc.text("Name:", labelX, y);
   doc.setFont("helvetica", "normal");
-  doc.text(data.projektName, valueX, yPos);
+  doc.text(data.projektName, valX, y);
+  drawLine(doc, valX, y + 0.8, rightBlockX - 4, y + 0.8, 0.15);
 
   doc.setFont("helvetica", "bold");
-  doc.text("Datum:", rightLabelX, yPos);
-  doc.setFont("helvetica", "normal");
-  doc.text(formatGermanDate(data.datum), rightValueX, yPos);
-  yPos += 6;
-
-  // Ort + Wetter
-  doc.setFont("helvetica", "bold");
-  doc.text("Ort:", labelX, yPos);
-  doc.setFont("helvetica", "normal");
-  doc.text(data.projektOrt, valueX, yPos);
-
-  doc.setFont("helvetica", "bold");
-  doc.text("Wetter:", rightLabelX, yPos);
-  doc.setFont("helvetica", "normal");
-  doc.text(data.wetter, rightValueX, yPos);
-  yPos += 6;
-
-  // Objekt
-  doc.setFont("helvetica", "bold");
-  doc.text("Objekt:", labelX, yPos);
-  doc.setFont("helvetica", "normal");
-  doc.text(data.objekt, valueX, yPos);
-  yPos += 10;
-
-  // ── Divider ───────────────────────────────────────────────────────────
-  doc.setDrawColor(...DARK_GREEN);
-  doc.setLineWidth(0.5);
-  doc.line(marginLeft, yPos, marginLeft + contentW, yPos);
-  yPos += 6;
-
-  // ── Taetigkeiten header ───────────────────────────────────────────────
-  doc.setTextColor(...DARK_GREEN);
-  doc.setFontSize(12);
-  doc.setFont("helvetica", "bold");
-  doc.text("T\u00e4tigkeiten:", marginLeft, yPos);
-
-  // Regie label on the right
-  doc.setFontSize(9);
-  doc.text("Regie", marginLeft + contentW - 5, yPos, { align: "right" });
-  yPos += 5;
-
-  // Normalarbeitszeit text in RED
+  doc.text("Datum:", rightBlockX, y);
   doc.setTextColor(...RED);
+  doc.setFont("helvetica", "bold");
+  doc.text(formatGermanDate(data.datum), rightValX, y);
+  doc.setTextColor(...BLACK);
+  drawLine(doc, rightValX, y + 0.8, contentRight, y + 0.8, 0.15);
+  y += 5;
+
+  // Ort
+  doc.setFont("helvetica", "bold");
+  doc.text("Ort:", labelX, y);
+  doc.setFont("helvetica", "normal");
+  doc.text(data.projektOrt, valX, y);
+  drawLine(doc, valX, y + 0.8, rightBlockX - 4, y + 0.8, 0.15);
+  y += 5;
+
+  // Objekt + Wetter
+  doc.setFont("helvetica", "bold");
+  doc.text("Objekt:", labelX, y);
+  doc.setFont("helvetica", "normal");
+  doc.text(data.objekt, valX, y);
+  drawLine(doc, valX, y + 0.8, rightBlockX - 4, y + 0.8, 0.15);
+
+  doc.setFont("helvetica", "bold");
+  doc.text("Wetter:", rightBlockX, y);
+  doc.setFont("helvetica", "normal");
+  doc.text(data.wetter, rightValX, y);
+  drawLine(doc, rightValX, y + 0.8, contentRight, y + 0.8, 0.15);
+  y += 6;
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // TAETIGKEITEN SECTION
+  // ════════════════════════════════════════════════════════════════════════════
+  drawLine(doc, mL, y, contentRight, y, 0.4);
+  y += 5;
+
+  doc.setTextColor(...DARK_GREEN);
+  doc.setFontSize(10);
+  doc.setFont("helvetica", "bold");
+  doc.text("T\u00e4tigkeiten:", mL, y);
+
+  doc.setFontSize(8);
+  doc.text("Regie", contentRight, y, { align: "right" });
+  y += 4;
+
+  // Red normalarbeitszeit text
+  doc.setTextColor(...RED);
+  doc.setFontSize(6);
+  doc.setFont("helvetica", "normal");
+  doc.text(
+    "Normalarbeitszeit Mo\u2013Do 7\u201316 Uhr = 9 Std. \u2013 1 Std. Pause = 8 Std.    Fr 7\u201315 Uhr = 8 Std. \u2013 1 Std. Pause = 7 Std.",
+    mL + 2,
+    y
+  );
+  y += 4;
+
+  // Build activity data
+  const activityTexts: string[] = [];
+  for (let i = 1; i <= 8; i++) {
+    const found = data.taetigkeiten.find((t) => t.position === i);
+    activityTexts.push(found ? found.bezeichnung : "");
+  }
+  // Row 1: Rüstzeit/Anfahrt with arrival time
+  if (!activityTexts[0]) {
+    activityTexts[0] = `R\u00fcstzeit/Anfahrt, Ankunftszeit Baustelle: ${data.ankunftZeit}`;
+  }
+
+  // Activity grid (8 rows)
+  const actRowH = 5.5;
+  const actTableX = mL;
+  const actNumW = 7;
+  const actTextW = contentW - actNumW;
+  const actGridTop = y;
+
+  for (let i = 0; i < 8; i++) {
+    const posNum = i + 1;
+    const rowY = y + i * actRowH;
+
+    // Number cell
+    doc.setTextColor(...BLACK);
+    doc.setFontSize(7.5);
+    doc.setFont("helvetica", "bold");
+    doc.text(`${posNum}.`, actTableX + 1.5, rowY + actRowH * 0.65);
+
+    // Activity text
+    doc.setFont("helvetica", "normal");
+    let text = activityTexts[i];
+    // Row 7 (index 6): LKW AN+ABFAHRT
+    if (posNum === 7 && !text) {
+      text = `LKW AN+ ABFAHRT`;
+    }
+    // Row 8 (index 7): Pause
+    if (posNum === 8) {
+      text = `Pause, Von: ${data.pauseVon}   Bis: ${data.pauseBis}`;
+    }
+    doc.text(text, actTableX + actNumW + 1, rowY + actRowH * 0.65);
+
+    // If row 7, show LKW hours on right
+    if (posNum === 7 && data.lkwStunden > 0) {
+      doc.text(
+        formatNumber(data.lkwStunden),
+        contentRight - 2,
+        rowY + actRowH * 0.65,
+        { align: "right" }
+      );
+    }
+  }
+
+  // Draw the activity grid lines
+  const actGridBottom = actGridTop + 8 * actRowH;
+
+  // Outer border
+  drawRect(doc, actTableX, actGridTop, contentW, 8 * actRowH, 0.3);
+
+  // Vertical line after number column
+  drawLine(
+    doc,
+    actTableX + actNumW,
+    actGridTop,
+    actTableX + actNumW,
+    actGridBottom,
+    0.3
+  );
+
+  // Horizontal row lines
+  for (let i = 1; i < 8; i++) {
+    const lineY = actGridTop + i * actRowH;
+    drawLine(doc, actTableX, lineY, contentRight, lineY, 0.2);
+  }
+
+  y = actGridBottom + 2;
+
+  // Abfahrtszeit below grid
+  doc.setTextColor(...BLACK);
   doc.setFontSize(7.5);
   doc.setFont("helvetica", "normal");
   doc.text(
-    "Normalarbeitszeit Mo\u2013Do 7\u201316 Uhr = 9 Std. \u2013 1 Std. Pause = 8 Std.   Fr 7\u201315 Uhr = 8 Std. \u2013 1 Std. Pause = 7 Std.",
-    marginLeft + 2,
-    yPos
+    `Abfahrtszeit Baustelle:  ${data.abfahrtZeit}`,
+    contentRight - 2,
+    y,
+    { align: "right" }
   );
-  yPos += 7;
+  y += 5;
 
-  // ── Activity lines ────────────────────────────────────────────────────
-  const regieX = marginLeft + contentW - 8;
-  doc.setTextColor(...BLACK);
-  doc.setFontSize(9);
+  // ════════════════════════════════════════════════════════════════════════════
+  // MITARBEITER TABLE
+  // ════════════════════════════════════════════════════════════════════════════
+  const minRows = 10;
+  const numWorkers = Math.max(data.mitarbeiter.length, minRows);
 
-  // Build the full 8-line activity list
-  const maxPositions = 8;
-  const activityLines: string[] = [];
-  for (let i = 1; i <= maxPositions; i++) {
-    const found = data.taetigkeiten.find((t) => t.position === i);
-    activityLines.push(found ? found.bezeichnung : "");
-  }
+  // Column widths
+  const colF = 5;
+  const colName = 30;
+  const colSum18 = 11;
+  const colAct = 10; // each activity column
+  const colSumme = 15;
+  const tableW = colF + colName + colSum18 + 8 * colAct + colSumme;
+  const tableX = mL;
+  const tableXEnd = tableX + tableW;
 
-  // Line 1: always prefixed with Ruestzeit/Anfahrt info
-  const line1Text = activityLines[0]
-    ? activityLines[0]
-    : `R\u00fcstzeit/Anfahrt, Ankunftszeit Baustelle: ${data.ankunftZeit}`;
-  if (!activityLines[0]) {
-    activityLines[0] = line1Text;
-  }
+  const headerH = 9;
+  const rowH = 5;
 
-  for (let i = 0; i < maxPositions; i++) {
-    const posNum = i + 1;
-    doc.setFont("helvetica", "bold");
-    doc.text(`${posNum}.`, marginLeft + 2, yPos);
-    doc.setFont("helvetica", "normal");
-    doc.text(activityLines[i], marginLeft + 8, yPos);
-
-    // Draw light dotted line
-    doc.setDrawColor(...LIGHT_GRAY);
-    doc.setLineWidth(0.15);
-    doc.line(marginLeft + 8, yPos + 1, regieX - 2, yPos + 1);
-
-    yPos += 5.5;
-  }
-
-  // Pause line
-  doc.setFontSize(8);
-  doc.setFont("helvetica", "normal");
-  doc.setTextColor(...GRAY);
-  doc.text(
-    `Pause, Von: ${data.pauseVon}   Bis: ${data.pauseBis}          Abfahrtszeit Baustelle: ${data.abfahrtZeit}`,
-    marginLeft + 8,
-    yPos
-  );
-  yPos += 8;
-
-  // ── Mitarbeiter table ─────────────────────────────────────────────────
-  doc.setTextColor(...BLACK);
-
-  // Table geometry
-  const tableX = marginLeft;
-  const tableW = contentW;
-
-  const colF = 6;            // F column
-  const colName = 40;        // Name column
-  const colSum18 = 14;       // "Sum 1-8" column
-  const colActivity = 14;    // each activity hour column
-  const colSumme = 22;       // final sum column
-
-  const numActivityCols = maxPositions;
-  const usedWidth = colF + colName + colSum18 + numActivityCols * colActivity + colSumme;
-  const tableXEnd = tableX + usedWidth;
-
-  const headerH = 12;
-  const rowH = 6.5;
-
-  let tY = yPos;
-
-  // ── Table header background ───────────────────────────────────────────
-  doc.setFillColor(...HEADER_BG);
-  doc.rect(tableX, tY, usedWidth, headerH, "F");
-
-  doc.setDrawColor(80, 80, 80);
-  doc.setLineWidth(0.3);
+  // Header background
+  doc.setFillColor(...HEADER_GREEN_BG);
+  doc.rect(tableX, y, tableW, headerH, "F");
 
   // Header text
-  doc.setFontSize(7);
+  doc.setFontSize(5.5);
   doc.setFont("helvetica", "bold");
   doc.setTextColor(...DARK_GREEN);
 
   let hx = tableX;
 
-  // F
-  doc.text("F", hx + colF / 2, tY + 4, { align: "center" });
-  doc.text("", hx + colF / 2, tY + 8, { align: "center" });
+  // F header
+  doc.text("F", hx + colF / 2, y + 6, { align: "center" });
   hx += colF;
 
-  // Mitarbeiter Name
-  doc.text("Mitarbeiter", hx + 2, tY + 4);
-  doc.text("Name:", hx + 2, tY + 8);
+  // Mitarbeiter header
+  doc.text("Mitarbeiter:", hx + 1, y + 3.5);
+  doc.text("Name:", hx + 1, y + 7);
   hx += colName;
 
-  // Sum 1-8
-  doc.text("Sum", hx + colSum18 / 2, tY + 4, { align: "center" });
-  doc.text("1-8", hx + colSum18 / 2, tY + 8, { align: "center" });
+  // Summe 1-8 header
+  doc.text("Summe", hx + colSum18 / 2, y + 3.5, { align: "center" });
+  doc.text("1.-8.", hx + colSum18 / 2, y + 7, { align: "center" });
   hx += colSum18;
 
-  // Activity columns header: "Geleist. Arbeitsstd. Nr.:"
-  const actColsStartX = hx;
-  doc.setFontSize(6.5);
-  doc.text("Geleist. Arbeitsstd. Nr.:", actColsStartX + 2, tY + 4);
+  // "Geleistete Arbeitsstunden" spanning header
+  const actColsStart = hx;
+  doc.setFontSize(5);
+  doc.text(
+    "Geleistete Arbeitsstunden f\u00fcr T\u00e4tigkeit Nr.:",
+    actColsStart + (8 * colAct) / 2,
+    y + 3.5,
+    { align: "center" }
+  );
 
-  for (let i = 0; i < numActivityCols; i++) {
-    doc.setFontSize(7);
-    doc.text(`${i + 1}`, hx + colActivity / 2, tY + 8, { align: "center" });
-    hx += colActivity;
+  // Number sub-headers
+  doc.setFontSize(5.5);
+  for (let i = 0; i < 8; i++) {
+    doc.text(`${i + 1}`, hx + colAct / 2, y + 7, { align: "center" });
+    hx += colAct;
   }
 
-  // Summe
-  doc.setFontSize(7);
-  doc.text("Summe", hx + 2, tY + 4);
-  doc.text("ohne Pause", hx + 1, tY + 8);
+  // Summe header
+  doc.text("Summe", hx + colSumme / 2, y + 3.5, { align: "center" });
+  doc.text("ohne Pause", hx + colSumme / 2, y + 7, { align: "center" });
 
-  tY += headerH;
+  const tableTop = y;
+  y += headerH;
 
-  // ── Table rows ────────────────────────────────────────────────────────
+  // Data rows
   doc.setTextColor(...BLACK);
-  doc.setFontSize(8);
+  doc.setFontSize(6);
 
-  for (let mi = 0; mi < data.mitarbeiter.length; mi++) {
-    const m = data.mitarbeiter[mi];
-
-    // Alternate row background
-    if (mi % 2 === 0) {
-      doc.setFillColor(248, 248, 248);
-      doc.rect(tableX, tY, usedWidth, rowH, "F");
-    }
-
+  for (let mi = 0; mi < numWorkers; mi++) {
+    const m =
+      mi < data.mitarbeiter.length ? data.mitarbeiter[mi] : null;
     let cx = tableX;
 
     // F column
-    doc.setFont("helvetica", "bold");
-    if (m.istFahrer) {
-      doc.text("F", cx + colF / 2, tY + rowH * 0.7, { align: "center" });
+    if (m && m.istFahrer) {
+      doc.setFont("helvetica", "bold");
+      doc.text("F", cx + colF / 2, y + rowH * 0.7, { align: "center" });
     }
     cx += colF;
 
     // Name
     doc.setFont("helvetica", "normal");
-    doc.text(m.name, cx + 2, tY + rowH * 0.7);
+    if (m) doc.text(m.name, cx + 1, y + rowH * 0.7);
     cx += colName;
 
-    // Sum 1-8 (same as summe for now)
-    doc.setFont("helvetica", "normal");
-    const sum18 = formatNumber(m.summe);
-    doc.text(sum18, cx + colSum18 - 2, tY + rowH * 0.7, { align: "right" });
+    // Sum 1-8
+    if (m) {
+      doc.text(formatNumber(m.summe), cx + colSum18 - 1.5, y + rowH * 0.7, {
+        align: "right",
+      });
+    }
     cx += colSum18;
 
     // Individual activity hours
-    for (let i = 1; i <= numActivityCols; i++) {
-      const entry = m.stunden.find((s) => s.position === i);
-      const val = entry ? formatNumber(entry.stunden) : "";
-      doc.text(val, cx + colActivity - 2, tY + rowH * 0.7, { align: "right" });
-      cx += colActivity;
+    for (let i = 1; i <= 8; i++) {
+      if (m) {
+        const entry = m.stunden.find((s) => s.position === i);
+        const val = entry ? formatNumber(entry.stunden) : "";
+        doc.text(val, cx + colAct - 1.5, y + rowH * 0.7, { align: "right" });
+      }
+      cx += colAct;
     }
 
     // Summe ohne Pause
-    doc.setFont("helvetica", "bold");
-    doc.text(formatNumber(m.summe), cx + colSumme - 4, tY + rowH * 0.7, { align: "right" });
+    if (m) {
+      doc.setFont("helvetica", "bold");
+      doc.text(formatNumber(m.summe), cx + colSumme - 2, y + rowH * 0.7, {
+        align: "right",
+      });
+    }
 
-    tY += rowH;
+    y += rowH;
   }
 
-  // ── Draw table grid ───────────────────────────────────────────────────
-  const tableYStart = yPos;
-  const tableYEnd = tY;
+  const tableBottom = y;
 
-  // Outer border (darker)
-  doc.setDrawColor(80, 80, 80);
-  doc.setLineWidth(0.4);
-  doc.rect(tableX, tableYStart, usedWidth, tableYEnd - tableYStart);
+  // ── Draw table grid ─────────────────────────────────────────────────────
+  // Outer border
+  drawRect(doc, tableX, tableTop, tableW, tableBottom - tableTop, 0.4);
 
   // Header bottom line
-  doc.line(tableX, tableYStart + headerH, tableXEnd, tableYStart + headerH);
+  drawLine(doc, tableX, tableTop + headerH, tableXEnd, tableTop + headerH, 0.4);
 
-  // Vertical column lines
-  doc.setDrawColor(...LIGHT_GRAY);
-  doc.setLineWidth(0.2);
-
+  // Vertical lines
   let vx = tableX + colF;
-  doc.setDrawColor(80, 80, 80);
-  doc.setLineWidth(0.3);
-  doc.line(vx, tableYStart, vx, tableYEnd);   // after F
+  drawLine(doc, vx, tableTop, vx, tableBottom, 0.3); // after F
   vx += colName;
-  doc.line(vx, tableYStart, vx, tableYEnd);   // after Name
+  drawLine(doc, vx, tableTop, vx, tableBottom, 0.3); // after Name
   vx += colSum18;
-  doc.line(vx, tableYStart, vx, tableYEnd);   // after Sum 1-8
+  drawLine(doc, vx, tableTop, vx, tableBottom, 0.3); // after Sum 1-8
 
-  // Activity column separators (lighter)
-  doc.setDrawColor(...LIGHT_GRAY);
-  doc.setLineWidth(0.15);
-  for (let i = 0; i < numActivityCols - 1; i++) {
-    vx += colActivity;
-    doc.line(vx, tableYStart, vx, tableYEnd);
+  // Activity column separators
+  for (let i = 0; i < 8; i++) {
+    if (i > 0) drawLine(doc, vx, tableTop, vx, tableBottom, 0.15);
+    vx += colAct;
   }
-  vx += colActivity;
-  // Summe column separator (darker)
-  doc.setDrawColor(80, 80, 80);
-  doc.setLineWidth(0.3);
-  doc.line(vx, tableYStart, vx, tableYEnd);
+  // Before Summe column
+  drawLine(doc, vx, tableTop, vx, tableBottom, 0.3);
 
   // Horizontal row lines
-  doc.setDrawColor(...LIGHT_GRAY);
-  doc.setLineWidth(0.15);
-  let ry = tableYStart + headerH;
-  for (let i = 0; i < data.mitarbeiter.length - 1; i++) {
-    ry += rowH;
-    doc.line(tableX, ry, tableXEnd, ry);
+  for (let i = 1; i < numWorkers; i++) {
+    const lineY = tableTop + headerH + i * rowH;
+    drawLine(doc, tableX, lineY, tableXEnd, lineY, 0.15);
   }
 
-  tY += 5;
+  y += 3;
 
-  // ── Gesamtsumme ───────────────────────────────────────────────────────
+  // ════════════════════════════════════════════════════════════════════════════
+  // GESAMTSUMME
+  // ════════════════════════════════════════════════════════════════════════════
   doc.setTextColor(...DARK_GREEN);
-  doc.setFontSize(11);
+  doc.setFontSize(9);
   doc.setFont("helvetica", "bold");
-  doc.text(`Gesamtsumme Arbeitsstunden: ${formatNumber(data.gesamtstunden)}`, marginLeft, tY);
-  tY += 8;
+  doc.text(
+    `Gesamtsumme Arbeitsstunden: ${formatNumber(data.gesamtstunden)}`,
+    mL,
+    y
+  );
+  y += 5;
 
-  // ── Geräteeinsatz Table ──────────────────────────────────────────────
+  // ════════════════════════════════════════════════════════════════════════════
+  // GERAETEEINSATZ
+  // ════════════════════════════════════════════════════════════════════════════
   doc.setTextColor(...DARK_GREEN);
-  doc.setFontSize(10);
+  doc.setFontSize(8);
   doc.setFont("helvetica", "bold");
-  doc.text("Ger\u00e4teeinsatz:", marginLeft, tY);
-  tY += 4;
+  doc.text("Ger\u00e4teeinsatz:", mL, y);
 
   doc.setTextColor(...GRAY);
-  doc.setFontSize(7.5);
+  doc.setFontSize(6);
   doc.setFont("helvetica", "normal");
-  doc.text("LKW, Kran (in Stunden)", marginLeft, tY);
-  tY += 4;
+  doc.text("LKW, Kran (in Stunden)", mL + 24, y);
+  y += 3;
 
-  const geraeteTableX = marginLeft;
-  const geraeteColGeraet = 60;
-  const geraeteColStunden = 30;
-  const geraeteTableW = geraeteColGeraet + geraeteColStunden;
-  const geraeteRowH = 6;
-  const geraeteHeaderH = 7;
-
-  // Header background
-  doc.setFillColor(...HEADER_BG);
-  doc.rect(geraeteTableX, tY, geraeteTableW, geraeteHeaderH, "F");
-
-  // Header text
-  doc.setTextColor(...DARK_GREEN);
-  doc.setFontSize(7.5);
-  doc.setFont("helvetica", "bold");
-  doc.text("Ger\u00e4t", geraeteTableX + 2, tY + 5);
-  doc.text("Stunden", geraeteTableX + geraeteColGeraet + 2, tY + 5);
-
-  // Header border
-  doc.setDrawColor(80, 80, 80);
-  doc.setLineWidth(0.3);
-  doc.rect(geraeteTableX, tY, geraeteTableW, geraeteHeaderH);
-  doc.line(geraeteTableX + geraeteColGeraet, tY, geraeteTableX + geraeteColGeraet, tY + geraeteHeaderH);
-
-  tY += geraeteHeaderH;
-
-  // Rows
-  const geraeteRows = data.geraete.length > 0 ? data.geraete : [{ geraet: "", stunden: 0 }, { geraet: "", stunden: 0 }];
-  const geraeteDataStartY = tY;
+  const geraeteRows =
+    data.geraete.length > 0
+      ? data.geraete
+      : [
+          { geraet: "", stunden: 0 },
+          { geraet: "", stunden: 0 },
+        ];
+  const geraeteColG = 50;
+  const geraeteColS = 20;
+  const geraeteW = geraeteColG + geraeteColS;
+  const geraeteRowH = 4.5;
+  const geraeteTop = y;
 
   doc.setTextColor(...BLACK);
-  doc.setFontSize(8);
+  doc.setFontSize(6);
   doc.setFont("helvetica", "normal");
 
   for (let i = 0; i < geraeteRows.length; i++) {
     const g = geraeteRows[i];
-    if (i % 2 === 0) {
-      doc.setFillColor(248, 248, 248);
-      doc.rect(geraeteTableX, tY, geraeteTableW, geraeteRowH, "F");
+    doc.text(g.geraet, mL + 1, y + geraeteRowH * 0.7);
+    if (g.stunden > 0) {
+      doc.text(
+        formatNumber(g.stunden),
+        mL + geraeteColG + geraeteColS - 2,
+        y + geraeteRowH * 0.7,
+        { align: "right" }
+      );
     }
-    doc.text(g.geraet, geraeteTableX + 2, tY + geraeteRowH * 0.7);
-    const stundenStr = g.stunden > 0 ? formatNumber(g.stunden) : "";
-    doc.text(stundenStr, geraeteTableX + geraeteColGeraet + 2, tY + geraeteRowH * 0.7);
-    tY += geraeteRowH;
+    y += geraeteRowH;
   }
 
-  // Grid lines for geraete rows
-  doc.setDrawColor(80, 80, 80);
-  doc.setLineWidth(0.3);
-  doc.rect(geraeteTableX, geraeteDataStartY, geraeteTableW, tY - geraeteDataStartY);
-  doc.line(geraeteTableX + geraeteColGeraet, geraeteDataStartY, geraeteTableX + geraeteColGeraet, tY);
+  const geraeteBottom = y;
 
-  // Row separators
-  doc.setDrawColor(...LIGHT_GRAY);
-  doc.setLineWidth(0.15);
-  let gry = geraeteDataStartY;
-  for (let i = 0; i < geraeteRows.length - 1; i++) {
-    gry += geraeteRowH;
-    doc.line(geraeteTableX, gry, geraeteTableX + geraeteTableW, gry);
+  // Grid
+  drawRect(doc, mL, geraeteTop, geraeteW, geraeteBottom - geraeteTop, 0.3);
+  drawLine(
+    doc,
+    mL + geraeteColG,
+    geraeteTop,
+    mL + geraeteColG,
+    geraeteBottom,
+    0.3
+  );
+  for (let i = 1; i < geraeteRows.length; i++) {
+    drawLine(
+      doc,
+      mL,
+      geraeteTop + i * geraeteRowH,
+      mL + geraeteW,
+      geraeteTop + i * geraeteRowH,
+      0.15
+    );
   }
 
-  tY += 6;
+  y += 4;
 
-  // ── Materialien & Anmerkungen side by side ──────────────────────────
-  const matAnmY = tY;
-  const halfW = contentW / 2 - 5;
+  // ════════════════════════════════════════════════════════════════════════════
+  // MATERIALIEN (left half) + ANMERKUNGEN (right half)
+  // ════════════════════════════════════════════════════════════════════════════
+  const matAnmY = y;
+  const halfW = (contentW - 4) / 2;
 
-  // -- LEFT: Verbrauchte Materialien --
+  // ── LEFT: Materialien ──────────────────────────────────────────────────
   doc.setTextColor(...DARK_GREEN);
-  doc.setFontSize(10);
+  doc.setFontSize(7);
   doc.setFont("helvetica", "bold");
-  doc.text("Verbrauchte Materialien f\u00fcr Regiearbeiten:", marginLeft, tY);
-  tY += 5;
+  doc.text("Verbrauchte Materialien f\u00fcr Regiearbeiten:", mL, y);
+  y += 3;
 
-  const matTableX = marginLeft;
-  const matColBez = halfW - 30;
-  const matColMenge = 30;
-  const matTableW = matColBez + matColMenge;
-  const matRowH = 6;
-  const matHeaderH = 7;
-
-  // Header
-  doc.setFillColor(...HEADER_BG);
-  doc.rect(matTableX, tY, matTableW, matHeaderH, "F");
-  doc.setTextColor(...DARK_GREEN);
-  doc.setFontSize(7.5);
-  doc.setFont("helvetica", "bold");
-  doc.text("Material", matTableX + 2, tY + 5);
-  doc.text("Menge", matTableX + matColBez + 2, tY + 5);
-
-  doc.setDrawColor(80, 80, 80);
-  doc.setLineWidth(0.3);
-  doc.rect(matTableX, tY, matTableW, matHeaderH);
-  doc.line(matTableX + matColBez, tY, matTableX + matColBez, tY + matHeaderH);
-
-  tY += matHeaderH;
-
-  const matRows = data.materialien.length > 0 ? data.materialien : [{ bezeichnung: "", menge: "" }, { bezeichnung: "", menge: "" }];
-  const matDataStartY = tY;
+  const matRows =
+    data.materialien.length > 0
+      ? data.materialien
+      : [
+          { bezeichnung: "", menge: "" },
+          { bezeichnung: "", menge: "" },
+        ];
+  const matColBez = halfW - 18;
+  const matColMen = 18;
+  const matW = matColBez + matColMen;
+  const matRowH = 4.5;
+  const matTop = y;
 
   doc.setTextColor(...BLACK);
-  doc.setFontSize(8);
+  doc.setFontSize(6);
   doc.setFont("helvetica", "normal");
 
   for (let i = 0; i < matRows.length; i++) {
     const mat = matRows[i];
-    if (i % 2 === 0) {
-      doc.setFillColor(248, 248, 248);
-      doc.rect(matTableX, tY, matTableW, matRowH, "F");
-    }
-    doc.text(mat.bezeichnung, matTableX + 2, tY + matRowH * 0.7);
-    doc.text(mat.menge, matTableX + matColBez + 2, tY + matRowH * 0.7);
-    tY += matRowH;
+    doc.text(mat.bezeichnung, mL + 1, y + matRowH * 0.7);
+    doc.text(mat.menge, mL + matColBez + 1, y + matRowH * 0.7);
+    y += matRowH;
   }
 
-  // Grid
-  doc.setDrawColor(80, 80, 80);
-  doc.setLineWidth(0.3);
-  doc.rect(matTableX, matDataStartY, matTableW, tY - matDataStartY);
-  doc.line(matTableX + matColBez, matDataStartY, matTableX + matColBez, tY);
+  const matBottom = y;
 
-  doc.setDrawColor(...LIGHT_GRAY);
-  doc.setLineWidth(0.15);
-  let mry = matDataStartY;
-  for (let i = 0; i < matRows.length - 1; i++) {
-    mry += matRowH;
-    doc.line(matTableX, mry, matTableX + matTableW, mry);
+  drawRect(doc, mL, matTop, matW, matBottom - matTop, 0.3);
+  drawLine(doc, mL + matColBez, matTop, mL + matColBez, matBottom, 0.3);
+  for (let i = 1; i < matRows.length; i++) {
+    drawLine(
+      doc,
+      mL,
+      matTop + i * matRowH,
+      mL + matW,
+      matTop + i * matRowH,
+      0.15
+    );
   }
 
-  // -- RIGHT: Anmerkungen --
-  const anmX = marginLeft + halfW + 10;
+  // ── RIGHT: Anmerkungen ────────────────────────────────────────────────
+  const anmX = mL + halfW + 4;
   let anmY = matAnmY;
 
   doc.setTextColor(...DARK_GREEN);
-  doc.setFontSize(10);
+  doc.setFontSize(7);
   doc.setFont("helvetica", "bold");
   doc.text("Anmerkungen:", anmX, anmY);
-  anmY += 5;
+  anmY += 3;
+
+  const anmBoxTop = anmY;
+  const anmBoxW = halfW;
+  const anmBoxH = Math.max(matBottom - matTop, 16);
+
+  // Draw anmerkungen box
+  drawRect(doc, anmX, anmBoxTop, anmBoxW, anmBoxH, 0.3);
 
   doc.setTextColor(...BLACK);
-  doc.setFontSize(8);
+  doc.setFontSize(6);
   doc.setFont("helvetica", "normal");
   if (data.anmerkungen) {
-    const anmLines = doc.splitTextToSize(data.anmerkungen, halfW - 5);
-    doc.text(anmLines, anmX, anmY);
-    anmY += anmLines.length * 4;
+    const anmLines = doc.splitTextToSize(data.anmerkungen, anmBoxW - 3);
+    doc.text(anmLines, anmX + 1.5, anmBoxTop + 3.5);
   }
-  anmY += 4;
 
-  // Safety notice
+  // Safety notice below anmerkungen box
+  const safetyY = anmBoxTop + anmBoxH + 2;
   doc.setTextColor(...GRAY);
-  doc.setFontSize(7);
+  doc.setFontSize(5);
   doc.setFont("helvetica", "italic");
-  doc.text("Ma\u00dfnahmen gem\u00e4\u00df \u00a7 14 ASchG & BauV \u00a7 154 sowie", anmX, anmY);
-  anmY += 3.5;
-  doc.text("Hinweis zur Verwendung von Pers\u00f6nlicher", anmX, anmY);
-  anmY += 3.5;
-  doc.text("Schutzausr\u00fcstung zur Kenntnis genommen!", anmX, anmY);
+  doc.text(
+    "Ma\u00dfnahmen gem\u00e4\u00df \u00a7 14 ASchG & BauV \u00a7 154 sowie",
+    anmX,
+    safetyY
+  );
+  doc.text(
+    "Hinweis zur Verwendung von Pers\u00f6nlicher",
+    anmX,
+    safetyY + 3
+  );
+  doc.text(
+    "Schutzausr\u00fcstung zur Kenntnis genommen!",
+    anmX,
+    safetyY + 6
+  );
 
-  // Move tY past whichever side is taller
-  tY = Math.max(tY, anmY) + 6;
+  // Move y past the taller side
+  y = Math.max(y, safetyY + 8) + 3;
 
-  // ── Bauvorhaben fertiggestellt ──────────────────────────────────────
+  // ════════════════════════════════════════════════════════════════════════════
+  // BAUVORHABEN FERTIGGESTELLT
+  // ════════════════════════════════════════════════════════════════════════════
   doc.setTextColor(...BLACK);
-  doc.setFontSize(9);
+  doc.setFontSize(7);
   doc.setFont("helvetica", "bold");
   doc.text(
     `Bauvorhaben fertiggestellt (ja/nein): ${data.fertiggestellt ? "Ja" : "Nein"}`,
-    marginLeft,
-    tY
+    mL,
+    y
   );
-  tY += 10;
+  y += 6;
 
-  // ── Signature Lines ─────────────────────────────────────────────────
-  const sigY = Math.max(tY, pageH - 28);
-  const sigLineW = 60;
+  // ════════════════════════════════════════════════════════════════════════════
+  // SIGNATURE LINES
+  // ════════════════════════════════════════════════════════════════════════════
+  const sigY = Math.max(y, pageH - 22);
+  const sigLineW = 50;
   const sigGap = (contentW - 3 * sigLineW) / 2;
 
-  const sig1X = marginLeft;
-  const sig2X = marginLeft + sigLineW + sigGap;
-  const sig3X = marginLeft + 2 * (sigLineW + sigGap);
+  const sig1X = mL;
+  const sig2X = mL + sigLineW + sigGap;
+  const sig3X = mL + 2 * (sigLineW + sigGap);
 
-  doc.setDrawColor(80, 80, 80);
-  doc.setLineWidth(0.3);
+  drawLine(doc, sig1X, sigY, sig1X + sigLineW, sigY, 0.3);
+  drawLine(doc, sig2X, sigY, sig2X + sigLineW, sigY, 0.3);
+  drawLine(doc, sig3X, sigY, sig3X + sigLineW, sigY, 0.3);
 
-  // Signature lines
-  doc.line(sig1X, sigY, sig1X + sigLineW, sigY);
-  doc.line(sig2X, sigY, sig2X + sigLineW, sigY);
-  doc.line(sig3X, sigY, sig3X + sigLineW, sigY);
-
-  // Labels below lines
   doc.setTextColor(...BLACK);
-  doc.setFontSize(8);
+  doc.setFontSize(7);
   doc.setFont("helvetica", "normal");
-  doc.text("Partief\u00fchrer:", sig1X, sigY + 4);
-  doc.text("Kontrolliert:", sig2X, sigY + 4);
-  doc.text("Auftraggeber:in:", sig3X, sigY + 4);
-
-  // ── Footer ────────────────────────────────────────────────────────────
-  const footerY = pageH - 8;
-  doc.setDrawColor(...DARK_GREEN);
-  doc.setLineWidth(0.3);
-  doc.line(marginLeft, footerY - 3, marginLeft + contentW, footerY - 3);
-
-  doc.setTextColor(...GRAY);
-  doc.setFontSize(8);
-  doc.setFont("helvetica", "normal");
-  doc.text("Holzbau Gasser  |  office@holzbau-gasser.at", marginLeft, footerY);
-  doc.text(
-    `Erstellt am: ${new Date().toLocaleDateString("de-AT")}`,
-    marginLeft + contentW,
-    footerY,
-    { align: "right" }
-  );
+  doc.text("Partief\u00fchrer:", sig1X, sigY + 3.5);
+  doc.text("Kontrolliert:", sig2X, sigY + 3.5);
+  doc.text("Auftraggeber:in:", sig3X, sigY + 3.5);
 
   return doc.output("blob");
 }
