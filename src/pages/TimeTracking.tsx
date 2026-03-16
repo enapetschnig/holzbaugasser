@@ -1,5 +1,6 @@
-import { useState, useEffect } from "react";
-import { Clock, Plus, AlertTriangle, CheckCircle2, Calendar, Sun, Trash2 } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { useSearchParams, useNavigate } from "react-router-dom";
+import { Clock, Plus, AlertTriangle, CheckCircle2, Calendar, Sun, Trash2, Pencil, Package, ChevronDown, ChevronUp } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { PageHeader } from "@/components/PageHeader";
 import { format, startOfWeek } from "date-fns";
@@ -38,8 +39,11 @@ type ExistingEntry = {
   stunden: number;
   taetigkeit: string;
   project_name: string | null;
+  project_id: string | null;
   plz: string | null;
   pause_start: string | null;
+  pause_end: string | null;
+  location_type: string | null;
 };
 
 interface TimeBlock {
@@ -49,25 +53,33 @@ interface TimeBlock {
   taetigkeit: string;
   startTime: string;
   endTime: string;
+  manualHours: string;
   pauseStart: string;
   pauseEnd: string;
-  manualHours: string;
 }
 
-const createDefaultBlock = (startTime = "", endTime = "", pauseStart = "", pauseEnd = ""): TimeBlock => ({
+const createDefaultBlock = (startTime = "", endTime = ""): TimeBlock => ({
   id: crypto.randomUUID(),
   locationType: "baustelle",
   projectId: "",
   taetigkeit: "",
   startTime,
   endTime,
-  pauseStart,
-  pauseEnd,
   manualHours: "",
+  pauseStart: "",
+  pauseEnd: "",
 });
 
 const TimeTracking = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
   const { toast } = useToast();
+
+  // Admin editing another user's entries
+  const targetUserId = searchParams.get("user_id");
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [targetUserName, setTargetUserName] = useState("");
+
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -84,7 +96,7 @@ const TimeTracking = () => {
   
   const [showAbsenceDialog, setShowAbsenceDialog] = useState(false);
   const [showFillDialog, setShowFillDialog] = useState(false);
-  
+
   const [absenceData, setAbsenceData] = useState({
     date: new Date().toISOString().split('T')[0],
     type: "urlaub" as "urlaub" | "krankenstand" | "weiterbildung" | "feiertag" | "za",
@@ -95,10 +107,59 @@ const TimeTracking = () => {
     absenceEndTime: "16:00",
     absencePauseMinutes: "30",
   });
-  
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+
+  const [editMode, setEditMode] = useState(false);
+  const [editingEntryIds, setEditingEntryIds] = useState<string[]>([]);
+  const [selectedDate, setSelectedDate] = useState(() => {
+    return searchParams.get("date") || new Date().toISOString().split('T')[0];
+  });
+
+  // Datum im Abwesenheits-Dialog auf selectedDate setzen wenn Dialog geöffnet wird
+  useEffect(() => {
+    if (showAbsenceDialog) {
+      setAbsenceData(prev => ({ ...prev, date: selectedDate }));
+    }
+  }, [showAbsenceDialog, selectedDate]);
   const [timeBlocks, setTimeBlocks] = useState<TimeBlock[]>([createDefaultBlock()]);
   const entryMode = "zeitraum" as const;
+
+  // Material catalog
+  type MaterialCatalogItem = { id: string; name: string; einheit: string };
+  type BlockMaterial = { material: string; menge: string };
+  const [materialCatalog, setMaterialCatalog] = useState<MaterialCatalogItem[]>([]);
+  const [blockMaterials, setBlockMaterials] = useState<Record<string, BlockMaterial[]>>({});
+  const [expandedMaterialBlocks, setExpandedMaterialBlocks] = useState<Record<string, boolean>>({});
+
+  const fetchMaterialCatalog = useCallback(async () => {
+    const { data } = await supabase.from("materials").select("id, name, einheit").order("name");
+    if (data) setMaterialCatalog(data);
+  }, []);
+
+  useEffect(() => { fetchMaterialCatalog(); }, [fetchMaterialCatalog]);
+
+  const updateBlockMaterial = (blockId: string, index: number, field: keyof BlockMaterial, value: string) => {
+    setBlockMaterials(prev => {
+      const items = [...(prev[blockId] || [])];
+      items[index] = { ...items[index], [field]: value };
+      return { ...prev, [blockId]: items };
+    });
+  };
+
+  const addBlockMaterial = (blockId: string) => {
+    setBlockMaterials(prev => ({
+      ...prev,
+      [blockId]: [...(prev[blockId] || []), { material: "", menge: "" }],
+    }));
+    setExpandedMaterialBlocks(prev => ({ ...prev, [blockId]: true }));
+  };
+
+  const removeBlockMaterial = (blockId: string, index: number) => {
+    setBlockMaterials(prev => {
+      const items = [...(prev[blockId] || [])];
+      items.splice(index, 1);
+      return { ...prev, [blockId]: items };
+    });
+  };
 
   // Fetch existing entries for selected date
   const fetchExistingDayEntries = async (date: string) => {
@@ -118,9 +179,12 @@ const TimeTracking = () => {
         stunden,
         taetigkeit,
         pause_start,
+        pause_end,
+        location_type,
+        project_id,
         projects (name, plz)
       `)
-      .eq("user_id", user.id)
+      .eq("user_id", targetUserId || user.id)
       .eq("datum", date)
       .order("start_time");
 
@@ -132,8 +196,11 @@ const TimeTracking = () => {
         stunden: entry.stunden,
         taetigkeit: entry.taetigkeit,
         project_name: entry.projects?.name || null,
+        project_id: entry.project_id || null,
         plz: entry.projects?.plz || null,
         pause_start: entry.pause_start || null,
+        pause_end: entry.pause_end || null,
+        location_type: entry.location_type || null,
       }));
       setExistingDayEntries(entries);
       
@@ -150,7 +217,7 @@ const TimeTracking = () => {
         const dateObj = new Date(date);
         const defaults = getDefaultWorkTimes(dateObj);
         if (defaults) {
-          setTimeBlocks([createDefaultBlock(defaults.startTime, defaults.endTime, defaults.pauseStart, defaults.pauseEnd)]);
+          setTimeBlocks([createDefaultBlock(defaults.startTime, defaults.endTime)]);
         } else {
           setTimeBlocks([createDefaultBlock()]);
         }
@@ -165,8 +232,57 @@ const TimeTracking = () => {
 
   // Load existing entries when date changes
   useEffect(() => {
+    setEditMode(false);
+    setEditingEntryIds([]);
     fetchExistingDayEntries(selectedDate);
   }, [selectedDate]);
+
+  // Auto-enter edit mode when navigated with ?date= and entries exist
+  useEffect(() => {
+    const dateParam = searchParams.get("date");
+    if (dateParam && existingDayEntries.length > 0 && !editMode && !loadingDayEntries) {
+      const hasNormalEntries = existingDayEntries.some(
+        e => !["Urlaub", "Krankenstand", "Weiterbildung", "Feiertag", "Zeitausgleich"].includes(e.taetigkeit)
+      );
+      if (hasNormalEntries) {
+        enterEditMode();
+        // Clear the date param so refreshing doesn't re-enter edit mode
+        // Keep user_id if present (admin mode)
+        const newParams: Record<string, string> = {};
+        if (targetUserId) newParams.user_id = targetUserId;
+        setSearchParams(newParams, { replace: true });
+      }
+    }
+  }, [existingDayEntries, loadingDayEntries]);
+
+  // Check admin status and fetch target user name
+  useEffect(() => {
+    const checkAdmin = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const { data } = await supabase
+        .from("user_roles")
+        .select("role")
+        .eq("user_id", user.id)
+        .eq("role", "administrator")
+        .maybeSingle();
+      setIsAdmin(!!data);
+    };
+    checkAdmin();
+  }, []);
+
+  useEffect(() => {
+    if (targetUserId) {
+      supabase
+        .from("profiles")
+        .select("vorname, nachname")
+        .eq("id", targetUserId)
+        .single()
+        .then(({ data }) => {
+          if (data) setTargetUserName(`${data.vorname} ${data.nachname}`);
+        });
+    }
+  }, [targetUserId]);
 
   useEffect(() => {
     fetchProjects();
@@ -274,25 +390,48 @@ const TimeTracking = () => {
     setTimeBlocks(prev => prev.filter(block => block.id !== blockId));
   };
 
-  // Calculate pause minutes for a block
+  // Enter edit mode: load existing entries as editable time blocks
+  const enterEditMode = () => {
+    const blocks: TimeBlock[] = existingDayEntries
+      .filter(e => !["Urlaub", "Krankenstand", "Weiterbildung", "Feiertag", "Zeitausgleich"].includes(e.taetigkeit))
+      .map(entry => ({
+        id: crypto.randomUUID(),
+        locationType: (entry.location_type === "werkstatt" ? "werkstatt" : "baustelle") as "baustelle" | "werkstatt",
+        projectId: entry.project_id || "",
+        taetigkeit: entry.taetigkeit || "",
+        startTime: entry.start_time?.substring(0, 5) || "",
+        endTime: entry.end_time?.substring(0, 5) || "",
+        manualHours: "",
+        pauseStart: entry.pause_start?.substring(0, 5) || "",
+        pauseEnd: entry.pause_end?.substring(0, 5) || "",
+      }));
+    if (blocks.length === 0) blocks.push(createDefaultBlock());
+    setTimeBlocks(blocks);
+    setEditingEntryIds(existingDayEntries.map(e => e.id));
+    setEditMode(true);
+  };
+
+  const cancelEditMode = () => {
+    setEditMode(false);
+    setEditingEntryIds([]);
+    fetchExistingDayEntries(selectedDate);
+  };
+
   const calculateBlockPauseMinutes = (block: TimeBlock): number => {
     if (!block.pauseStart || !block.pauseEnd) return 0;
-    
-    const [pauseStartH, pauseStartM] = block.pauseStart.split(':').map(Number);
-    const [pauseEndH, pauseEndM] = block.pauseEnd.split(':').map(Number);
-    
-    const pauseMinutes = (pauseEndH * 60 + pauseEndM) - (pauseStartH * 60 + pauseStartM);
-    return Math.max(0, pauseMinutes);
+    const [sh, sm] = block.pauseStart.split(':').map(Number);
+    const [eh, em] = block.pauseEnd.split(':').map(Number);
+    return Math.max(0, (eh * 60 + em) - (sh * 60 + sm));
   };
 
   // Calculate hours for a single block
   const calculateBlockHours = (block: TimeBlock): number => {
     if (!block.startTime || !block.endTime) return 0;
-    
+
     const [startH, startM] = block.startTime.split(':').map(Number);
     const [endH, endM] = block.endTime.split(':').map(Number);
     const pauseMinutes = calculateBlockPauseMinutes(block);
-    
+
     const totalMinutes = (endH * 60 + endM) - (startH * 60 + startM) - pauseMinutes;
     return Math.max(0, totalMinutes / 60);
   };
@@ -321,8 +460,6 @@ const TimeTracking = () => {
       updateBlock(timeBlocks[0].id, {
         startTime: defaultTimes.startTime,
         endTime: defaultTimes.endTime,
-        pauseStart: defaultTimes.pauseStart,
-        pauseEnd: defaultTimes.pauseEnd,
       });
     }
   };
@@ -539,47 +676,62 @@ const TimeTracking = () => {
       }
     }
 
-    // Check for overlaps with existing entries
-    const { data: existingEntries } = await supabase
-      .from("time_entries")
-      .select("id, start_time, end_time, taetigkeit")
-      .eq("user_id", user.id)
-      .eq("datum", selectedDate);
+    // Check for overlaps with existing entries (skip entries being edited)
+    if (!editMode) {
+      const { data: existingEntries } = await supabase
+        .from("time_entries")
+        .select("id, start_time, end_time, taetigkeit")
+        .eq("user_id", targetUserId || user.id)
+        .eq("datum", selectedDate);
 
-    if (existingEntries && existingEntries.length > 0) {
-      for (const entry of existingEntries) {
-        if (["Urlaub", "Krankenstand", "Weiterbildung", "Feiertag", "Zeitausgleich"].includes(entry.taetigkeit)) {
-          toast({ 
-            variant: "destructive", 
-            title: "Tag bereits blockiert", 
-            description: `Für diesen Tag ist bereits ${entry.taetigkeit} eingetragen.` 
-          });
-          setSaving(false);
-          return;
-        }
-        
-        const existingStart = timeToMinutes(entry.start_time);
-        const existingEnd = timeToMinutes(entry.end_time);
-        
-        for (let i = 0; i < timeBlocks.length; i++) {
-          const block = timeBlocks[i];
-          const blockStart = timeToMinutes(block.startTime);
-          const blockEnd = timeToMinutes(block.endTime);
-          
-          if (blockStart < existingEnd && blockEnd > existingStart) {
-            toast({ 
-              variant: "destructive", 
-              title: "Zeitüberschneidung", 
-              description: `Block ${i + 1} überschneidet mit bestehendem Eintrag (${entry.start_time.substring(0, 5)} - ${entry.end_time.substring(0, 5)})` 
+      if (existingEntries && existingEntries.length > 0) {
+        for (const entry of existingEntries) {
+          if (["Urlaub", "Krankenstand", "Weiterbildung", "Feiertag", "Zeitausgleich"].includes(entry.taetigkeit)) {
+            toast({
+              variant: "destructive",
+              title: "Tag bereits blockiert",
+              description: `Für diesen Tag ist bereits ${entry.taetigkeit} eingetragen.`
             });
             setSaving(false);
             return;
+          }
+
+          const existingStart = timeToMinutes(entry.start_time);
+          const existingEnd = timeToMinutes(entry.end_time);
+
+          for (let i = 0; i < timeBlocks.length; i++) {
+            const block = timeBlocks[i];
+            const blockStart = timeToMinutes(block.startTime);
+            const blockEnd = timeToMinutes(block.endTime);
+
+            if (blockStart < existingEnd && blockEnd > existingStart) {
+              toast({
+                variant: "destructive",
+                title: "Zeitüberschneidung",
+                description: `Block ${i + 1} überschneidet mit bestehendem Eintrag (${entry.start_time.substring(0, 5)} - ${entry.end_time.substring(0, 5)})`
+              });
+              setSaving(false);
+              return;
+            }
           }
         }
       }
     }
 
-    // Insert all blocks with team members via Edge Function
+    // In edit mode, delete old entries first
+    if (editMode && editingEntryIds.length > 0) {
+      const { error: deleteError } = await supabase
+        .from("time_entries")
+        .delete()
+        .in("id", editingEntryIds);
+      if (deleteError) {
+        toast({ variant: "destructive", title: "Fehler", description: "Alte Einträge konnten nicht gelöscht werden" });
+        setSaving(false);
+        return;
+      }
+    }
+
+    // Insert all blocks
     let totalEntriesCreated = 0;
     let hasError = false;
 
@@ -588,7 +740,7 @@ const TimeTracking = () => {
       const pauseMinutes = calculateBlockPauseMinutes(block);
 
       const { error: insertError } = await supabase.from("time_entries").insert({
-        user_id: user.id,
+        user_id: targetUserId || user.id,
         datum: selectedDate,
         project_id: block.locationType === "werkstatt" ? null : (block.projectId || null),
         taetigkeit: block.taetigkeit,
@@ -610,11 +762,50 @@ const TimeTracking = () => {
       }
 
       totalEntriesCreated += 1;
+
+      // Save material entries for this block
+      const mats = blockMaterials[block.id]?.filter(m => m.material.trim());
+      if (mats && mats.length > 0 && block.projectId) {
+        const materialRows = mats.map(m => ({
+          user_id: targetUserId || user.id,
+          project_id: block.projectId,
+          material: m.material.trim(),
+          menge: m.menge || null,
+        }));
+        const { error: matError } = await supabase.from("material_entries").insert(materialRows);
+        if (matError) console.error("Error saving materials:", matError);
+      }
     }
 
     if (!hasError) {
-      toast({ title: "Erfolg", description: `${totalEntriesCreated} Eintrag/Einträge gespeichert` });
-      
+      toast({ title: "Erfolg", description: editMode
+        ? `${totalEntriesCreated} Eintrag/Einträge aktualisiert`
+        : `${totalEntriesCreated} Eintrag/Einträge gespeichert`
+      });
+
+      // Admin mode: navigate back to hours report with filters
+      if (targetUserId) {
+        const returnMonth = searchParams.get("return_month");
+        const returnYear = searchParams.get("return_year");
+        const params = new URLSearchParams();
+        if (returnMonth) params.set("month", returnMonth);
+        if (returnYear) params.set("year", returnYear);
+        params.set("user", targetUserId);
+        navigate(`/hours-report?${params.toString()}`);
+        setSaving(false);
+        return;
+      }
+
+      // Exit edit mode
+      if (editMode) {
+        setEditMode(false);
+        setEditingEntryIds([]);
+      }
+
+      // Reset material state
+      setBlockMaterials({});
+      setExpandedMaterialBlocks({});
+
       // Refresh existing entries
       await fetchExistingDayEntries(selectedDate);
     } else {
@@ -634,19 +825,39 @@ const TimeTracking = () => {
       <div className="p-4">
         <Card className="max-w-2xl mx-auto">
           <CardHeader>
+            {targetUserId && targetUserName && (
+              <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 mb-3 flex items-center justify-between">
+                <span className="text-sm font-medium text-blue-800">
+                  Bearbeitung für <strong>{targetUserName}</strong>
+                </span>
+                <Button variant="ghost" size="sm" onClick={() => {
+                  const returnMonth = searchParams.get("return_month");
+                  const returnYear = searchParams.get("return_year");
+                  const params = new URLSearchParams();
+                  if (returnMonth) params.set("month", returnMonth);
+                  if (returnYear) params.set("year", returnYear);
+                  if (targetUserId) params.set("user", targetUserId);
+                  navigate(`/hours-report?${params.toString()}`);
+                }} className="text-blue-600 h-7">
+                  Zurück
+                </Button>
+              </div>
+            )}
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Clock className="h-5 w-5" />
                 <CardTitle>Zeiterfassung</CardTitle>
               </div>
-              <Button 
-                variant="outline" 
-                onClick={() => { setAbsenceData(prev => ({ ...prev, date: selectedDate })); setShowAbsenceDialog(true); }}
-                className="gap-2"
-              >
-                <Calendar className="h-4 w-4" />
-                Abwesenheit
-              </Button>
+              {!targetUserId && (
+                <Button
+                  variant="outline"
+                  onClick={() => setShowAbsenceDialog(true)}
+                  className="gap-2"
+                >
+                  <Calendar className="h-4 w-4" />
+                  Abwesenheit
+                </Button>
+              )}
             </div>
           </CardHeader>
           <CardContent>
@@ -654,12 +865,13 @@ const TimeTracking = () => {
               {/* Date picker */}
               <div className="space-y-2">
                 <Label htmlFor="date">Datum</Label>
-                <Input 
-                  id="date" 
-                  type="date" 
-                  value={selectedDate} 
-                  onChange={(e) => setSelectedDate(e.target.value)} 
-                  required 
+                <Input
+                  id="date"
+                  type="date"
+                  value={selectedDate}
+                  onChange={(e) => { if (!editMode && !targetUserId) setSelectedDate(e.target.value); }}
+                  disabled={editMode || !!targetUserId}
+                  required
                 />
                 {selectedDate && (
                   <p className="text-sm text-muted-foreground">
@@ -680,8 +892,19 @@ const TimeTracking = () => {
                 </div>
               </div>
 
+              {/* Edit mode banner */}
+              {editMode && (
+                <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg p-3 flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-sm font-medium text-blue-700 dark:text-blue-300">
+                    <Pencil className="w-4 h-4" />
+                    Bearbeitungsmodus — Änderungen an bestehenden Einträgen
+                  </div>
+                  <Button variant="ghost" size="sm" onClick={cancelEditMode}>Abbrechen</Button>
+                </div>
+              )}
+
               {/* Existing entries info box */}
-              {loadingDayEntries ? (
+              {!editMode && (loadingDayEntries ? (
                 <div className="bg-muted/50 rounded-lg p-3 text-sm text-muted-foreground flex items-center gap-2">
                   <Calendar className="w-4 h-4 animate-pulse" />
                   Lade Tageseinträge...
@@ -730,6 +953,17 @@ const TimeTracking = () => {
                       {existingDayEntries.reduce((sum, e) => sum + Number(e.stunden), 0).toFixed(2)} Stunden
                     </span>
                   </div>
+                  {!isDayBlocked && !editMode && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="w-full gap-2"
+                      onClick={enterEditMode}
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                      Einträge bearbeiten
+                    </Button>
+                  )}
                 </div>
               ) : (
                 <div className="bg-primary/5 border border-primary/20 rounded-lg p-3 text-sm text-muted-foreground">
@@ -738,7 +972,7 @@ const TimeTracking = () => {
                     Noch keine Einträge für diesen Tag
                   </p>
                 </div>
-              )}
+              ))}
 
               {/* Remaining hours banner */}
               {!isDayBlocked && existingDayEntries.length > 0 && (() => {
@@ -809,7 +1043,7 @@ const TimeTracking = () => {
                             <div>
                               <RadioGroupItem value="werkstatt" id={`werkstatt-${block.id}`} className="peer sr-only" />
                               <Label htmlFor={`werkstatt-${block.id}`} className="flex h-12 cursor-pointer items-center justify-center rounded-md border-2 border-muted bg-popover p-4 hover:bg-accent peer-data-[state=checked]:border-primary text-sm">
-                                🔧 Werkstatt
+                                🏭 Lager
                               </Label>
                             </div>
                           </RadioGroup>
@@ -853,45 +1087,125 @@ const TimeTracking = () => {
                           />
                         </div>
 
-                        {/* Start/End/Pause time inputs */}
-                        <div className="grid grid-cols-2 gap-3">
-                          <div className="space-y-1.5">
-                            <Label>Beginn</Label>
+                        {/* Time inputs */}
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="space-y-1">
+                            <Label className="text-xs">Beginn</Label>
                             <Input
                               type="time"
                               value={block.startTime}
                               onChange={(e) => updateBlock(block.id, { startTime: e.target.value })}
                               required
+                              className="h-10"
                             />
                           </div>
-                          <div className="space-y-1.5">
-                            <Label>Ende</Label>
+                          <div className="space-y-1">
+                            <Label className="text-xs">Ende</Label>
                             <Input
                               type="time"
                               value={block.endTime}
                               onChange={(e) => updateBlock(block.id, { endTime: e.target.value })}
                               required
+                              className="h-10"
                             />
                           </div>
                         </div>
-                        <div className="grid grid-cols-2 gap-3">
-                          <div className="space-y-1.5">
-                            <Label>Pause von <span className="text-muted-foreground font-normal">(optional)</span></Label>
+                        <div className="grid grid-cols-2 gap-3 mt-2">
+                          <div className="space-y-1">
+                            <Label className="text-xs">Pause von</Label>
                             <Input
                               type="time"
                               value={block.pauseStart}
                               onChange={(e) => updateBlock(block.id, { pauseStart: e.target.value })}
+                              className="h-10"
                             />
                           </div>
-                          <div className="space-y-1.5">
-                            <Label>Pause bis <span className="text-muted-foreground font-normal">(optional)</span></Label>
+                          <div className="space-y-1">
+                            <Label className="text-xs">Pause bis</Label>
                             <Input
                               type="time"
                               value={block.pauseEnd}
                               onChange={(e) => updateBlock(block.id, { pauseEnd: e.target.value })}
+                              className="h-10"
                             />
                           </div>
                         </div>
+                        {calculateBlockPauseMinutes(block) > 0 && (
+                          <p className="text-xs text-muted-foreground">{calculateBlockPauseMinutes(block)} Min. Pause werden abgezogen</p>
+                        )}
+
+                        {/* Material section - only for Baustelle with project */}
+                        {block.locationType === "baustelle" && block.projectId && (
+                          <div className="border rounded-lg p-3 space-y-2">
+                            <button
+                              type="button"
+                              className="flex items-center gap-2 text-sm font-medium w-full"
+                              onClick={() => setExpandedMaterialBlocks(prev => ({ ...prev, [block.id]: !prev[block.id] }))}
+                            >
+                              <Package className="w-4 h-4" />
+                              Material
+                              {(blockMaterials[block.id]?.length || 0) > 0 && (
+                                <Badge variant="secondary" className="ml-auto mr-2">{blockMaterials[block.id].length}</Badge>
+                              )}
+                              {expandedMaterialBlocks[block.id] ? <ChevronUp className="w-4 h-4 ml-auto" /> : <ChevronDown className="w-4 h-4 ml-auto" />}
+                            </button>
+                            {expandedMaterialBlocks[block.id] && (
+                              <div className="space-y-2 pt-1">
+                                {(blockMaterials[block.id] || []).map((mat, matIdx) => {
+                                  const isFromCatalog = materialCatalog.some(c => c.name === mat.material);
+                                  return (
+                                  <div key={matIdx} className="space-y-1">
+                                    <div className="flex gap-2 items-end">
+                                      <div className="flex-1">
+                                        <Select
+                                          value={isFromCatalog ? mat.material : (mat.material !== "" ? "__custom__" : "")}
+                                          onValueChange={(val) => {
+                                            updateBlockMaterial(block.id, matIdx, "material", val === "__custom__" ? "" : val);
+                                          }}
+                                        >
+                                          <SelectTrigger className="h-9">
+                                            <SelectValue placeholder="Material" />
+                                          </SelectTrigger>
+                                          <SelectContent>
+                                            {materialCatalog.map(c => (
+                                              <SelectItem key={c.id} value={c.name}>{c.name} ({c.einheit})</SelectItem>
+                                            ))}
+                                            <SelectItem value="__custom__" className="font-medium">Anderes...</SelectItem>
+                                          </SelectContent>
+                                        </Select>
+                                      </div>
+                                      <div className="w-20">
+                                        <Input
+                                          placeholder="Menge"
+                                          value={mat.menge}
+                                          onChange={(e) => updateBlockMaterial(block.id, matIdx, "menge", e.target.value)}
+                                          className="h-9"
+                                        />
+                                      </div>
+                                      <Button type="button" variant="ghost" size="sm" onClick={() => removeBlockMaterial(block.id, matIdx)} className="h-9 px-2">
+                                        <Trash2 className="w-3 h-3" />
+                                      </Button>
+                                    </div>
+                                    {!isFromCatalog && (
+                                      <Input
+                                        placeholder="Material eingeben"
+                                        value={mat.material}
+                                        onChange={(e) => updateBlockMaterial(block.id, matIdx, "material", e.target.value)}
+                                        className="h-9"
+                                        autoFocus
+                                      />
+                                    )}
+                                  </div>
+                                  );
+                                })}
+                                <Button type="button" variant="outline" size="sm" onClick={() => addBlockMaterial(block.id)} className="w-full text-xs">
+                                  <Plus className="w-3 h-3 mr-1" /> Material hinzufügen
+                                </Button>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
                         {/* Regelarbeitszeit button */}
                         <Button
                           type="button"
@@ -904,8 +1218,8 @@ const TimeTracking = () => {
                               updateBlock(block.id, {
                                 startTime: defaults.startTime,
                                 endTime: defaults.endTime,
-                                pauseStart: defaults.pauseStart,
-                                pauseEnd: defaults.pauseEnd,
+                                pauseStart: "12:00",
+                                pauseEnd: "13:00",
                               });
                             }
                           }}
@@ -941,9 +1255,21 @@ const TimeTracking = () => {
                     <span className="text-2xl font-bold">{calculateTotalHours()} h</span>
                   </div>
 
-                  <Button type="submit" className="w-full" disabled={saving}>
-                    {saving ? "Wird gespeichert..." : `${timeBlocks.length > 1 ? 'Alle Einträge' : 'Stunden'} erfassen`}
-                  </Button>
+                  <div className="flex gap-2">
+                    {editMode && (
+                      <Button type="button" variant="outline" className="flex-1" onClick={cancelEditMode} disabled={saving}>
+                        Abbrechen
+                      </Button>
+                    )}
+                    <Button type="submit" className="flex-1" disabled={saving}>
+                      {saving
+                        ? "Wird gespeichert..."
+                        : editMode
+                          ? "Änderungen speichern"
+                          : `${timeBlocks.length > 1 ? 'Alle Einträge' : 'Stunden'} erfassen`
+                      }
+                    </Button>
+                  </div>
                 </>
               )}
             </form>
@@ -1222,7 +1548,7 @@ const TimeTracking = () => {
             const hours = Math.max(0, totalMinutes / 60);
 
             const { error } = await supabase.from("time_entries").insert({
-              user_id: user.id,
+              user_id: targetUserId || user.id,
               datum: selectedDate,
               project_id: projectId,
               taetigkeit: description || "",

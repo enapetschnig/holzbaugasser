@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Clock, Building2, Hammer, Pencil, Trash2 } from "lucide-react";
+import { ArrowLeft, Clock, Building2, Warehouse, Pencil, Trash2, Palmtree } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -8,7 +8,9 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -42,10 +44,13 @@ const MyHours = () => {
   const [showEditDialog, setShowEditDialog] = useState(false);
   const [savingEdit, setSavingEdit] = useState(false);
   const [projectOptions, setProjectOptions] = useState<ProjectOption[]>([]);
+  const [vacationBalance, setVacationBalance] = useState<{ total: number; used: number } | null>(null);
+  const [vacationHistory, setVacationHistory] = useState<{ datum: string; stunden: number }[]>([]);
 
   useEffect(() => {
     fetchEntries();
     fetchProjects();
+    fetchVacationData();
   }, [selectedMonth]);
 
   const fetchProjects = async () => {
@@ -55,6 +60,39 @@ const MyHours = () => {
       .eq("status", "aktiv")
       .order("name");
     if (data) setProjectOptions(data);
+  };
+
+  const fetchVacationData = async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    const currentYear = new Date().getFullYear();
+
+    // Fetch leave balance from admin settings
+    const { data: balanceData } = await supabase
+      .from("leave_balances")
+      .select("total_days, used_days")
+      .eq("user_id", user.id)
+      .eq("year", currentYear)
+      .maybeSingle();
+
+    // Count actual vacation days from time_entries
+    const yearStart = `${currentYear}-01-01`;
+    const yearEnd = `${currentYear}-12-31`;
+    const { data: vacEntries } = await supabase
+      .from("time_entries")
+      .select("datum, stunden")
+      .eq("user_id", user.id)
+      .eq("taetigkeit", "Urlaub")
+      .gte("datum", yearStart)
+      .lte("datum", yearEnd)
+      .order("datum", { ascending: false });
+
+    const usedDays = vacEntries?.length || 0;
+    const totalDays = balanceData?.total_days || 25;
+
+    setVacationBalance({ total: totalDays, used: usedDays });
+    setVacationHistory(vacEntries || []);
   };
 
   const fetchEntries = async () => {
@@ -100,10 +138,13 @@ const MyHours = () => {
     return hasPause(entry) ? "12:00 - 13:00" : '-';
   };
 
-  const isCurrentMonth = (datum: string) => {
+  const isEditable = (datum: string) => {
     const entryDate = new Date(datum);
-    const [year, month] = selectedMonth.split('-').map(Number);
-    return entryDate.getFullYear() === year && entryDate.getMonth() + 1 === month;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const diffMs = today.getTime() - entryDate.getTime();
+    const diffDays = diffMs / (1000 * 60 * 60 * 24);
+    return diffDays <= 7;
   };
 
   const handleUpdateEntry = async () => {
@@ -133,7 +174,8 @@ const MyHours = () => {
         pause_minutes: editingEntry.pause_minutes || 0,
         notizen: editingEntry.notizen,
         stunden: Math.max(0, calculatedHours),
-        project_id: editingEntry.project_id,
+        project_id: editingEntry.location_type === "werkstatt" ? null : editingEntry.project_id,
+        location_type: editingEntry.location_type,
       })
       .eq("id", editingEntry.id);
 
@@ -193,8 +235,8 @@ const MyHours = () => {
               <ArrowLeft className="h-4 w-4 mr-2" />Zurück
             </Button>
             <img 
-              src="/holzknecht-logo.jpg"
-              alt="Holzknecht Natursteine"
+              src="/gasser-logo.png"
+              alt="Holzbau Gasser"
               className="h-10 w-10 sm:h-14 sm:w-14 cursor-pointer hover:opacity-80 transition-opacity object-contain"
               onClick={() => navigate("/")}
             />
@@ -270,8 +312,8 @@ const MyHours = () => {
                           <div className="flex items-center gap-2 whitespace-nowrap">
                             {entry.location_type === 'werkstatt' ? (
                               <>
-                                <Hammer className="w-4 h-4 text-muted-foreground" />
-                                <span>Werkstatt</span>
+                                <Warehouse className="w-4 h-4 text-muted-foreground" />
+                                <span>Lager</span>
                               </>
                             ) : (
                               <>
@@ -307,11 +349,8 @@ const MyHours = () => {
                           <Button
                             size="sm"
                             variant="ghost"
-                            onClick={() => {
-                              setEditingEntry(entry);
-                              setShowEditDialog(true);
-                            }}
-                            disabled={!isCurrentMonth(entry.datum)}
+                            onClick={() => navigate(`/time-tracking?date=${entry.datum}`)}
+                            disabled={!isEditable(entry.datum)}
                             className="h-8"
                           >
                             <Pencil className="h-4 w-4" />
@@ -335,6 +374,55 @@ const MyHours = () => {
             )}
           </CardContent>
         </Card>
+
+        {/* Urlaubskonto */}
+        {vacationBalance && (
+          <Card className="mt-6">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Palmtree className="h-5 w-5" />
+                Urlaubskonto {new Date().getFullYear()}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="flex flex-wrap gap-4 mb-4">
+                <div className="bg-muted/50 rounded-lg p-3 flex-1 min-w-[120px]">
+                  <p className="text-sm text-muted-foreground">Gesamt</p>
+                  <p className="text-2xl font-bold">{vacationBalance.total}</p>
+                  <p className="text-xs text-muted-foreground">Tage</p>
+                </div>
+                <div className="bg-muted/50 rounded-lg p-3 flex-1 min-w-[120px]">
+                  <p className="text-sm text-muted-foreground">Verbraucht</p>
+                  <p className="text-2xl font-bold">{vacationBalance.used}</p>
+                  <p className="text-xs text-muted-foreground">Tage</p>
+                </div>
+                <div className="bg-primary/10 rounded-lg p-3 flex-1 min-w-[120px]">
+                  <p className="text-sm text-muted-foreground">Verbleibend</p>
+                  <p className="text-2xl font-bold text-primary">{vacationBalance.total - vacationBalance.used}</p>
+                  <p className="text-xs text-muted-foreground">Tage</p>
+                </div>
+              </div>
+
+              {vacationHistory.length > 0 && (
+                <div>
+                  <h4 className="text-sm font-medium mb-2">Urlaubsverlauf</h4>
+                  <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                    {vacationHistory.map((v, i) => (
+                      <div key={i} className="flex items-center justify-between py-1.5 px-3 rounded bg-muted/30 text-sm">
+                        <span>{new Date(v.datum).toLocaleDateString("de-DE", { weekday: "short", day: "2-digit", month: "long", year: "numeric" })}</span>
+                        <Badge variant="secondary">-1 Tag</Badge>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {vacationHistory.length === 0 && (
+                <p className="text-sm text-muted-foreground text-center py-2">Noch kein Urlaub genommen in {new Date().getFullYear()}</p>
+              )}
+            </CardContent>
+          </Card>
+        )}
       </main>
 
       {/* Edit Dialog */}
@@ -360,6 +448,58 @@ const MyHours = () => {
           </DialogHeader>
           {editingEntry && (
             <div className="space-y-4">
+              {/* Ort */}
+              <div>
+                <Label className="mb-2 block">Ort</Label>
+                <RadioGroup
+                  value={editingEntry.location_type || "baustelle"}
+                  onValueChange={(value) => setEditingEntry({...editingEntry, location_type: value, project_id: value === "werkstatt" ? null : editingEntry.project_id})}
+                  className="grid grid-cols-2 gap-2"
+                >
+                  <div>
+                    <RadioGroupItem value="baustelle" id="edit-baustelle" className="peer sr-only" />
+                    <Label
+                      htmlFor="edit-baustelle"
+                      className="flex h-10 cursor-pointer items-center justify-center rounded-md border-2 border-muted bg-popover hover:bg-accent peer-data-[state=checked]:border-primary text-sm"
+                    >
+                      🏗️ Baustelle
+                    </Label>
+                  </div>
+                  <div>
+                    <RadioGroupItem value="werkstatt" id="edit-werkstatt" className="peer sr-only" />
+                    <Label
+                      htmlFor="edit-werkstatt"
+                      className="flex h-10 cursor-pointer items-center justify-center rounded-md border-2 border-muted bg-popover hover:bg-accent peer-data-[state=checked]:border-primary text-sm"
+                    >
+                      🏭 Lager
+                    </Label>
+                  </div>
+                </RadioGroup>
+              </div>
+
+              {/* Projekt - nur bei Baustelle */}
+              {editingEntry.location_type !== "werkstatt" && (
+                <div>
+                  <Label>Projekt</Label>
+                  <Select
+                    value={editingEntry.project_id || "none"}
+                    onValueChange={(v) => setEditingEntry({...editingEntry, project_id: v === "none" ? null : v})}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Projekt auswählen" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Kein Projekt</SelectItem>
+                      {projectOptions.map((p) => (
+                        <SelectItem key={p.id} value={p.id}>
+                          {p.name}{p.plz ? ` (${p.plz})` : ""}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+
               <div>
                 <Label htmlFor="edit-taetigkeit">Tätigkeit</Label>
                 <Input
@@ -368,26 +508,6 @@ const MyHours = () => {
                   onChange={(e) => setEditingEntry({...editingEntry, taetigkeit: e.target.value})}
                   placeholder="z.B. Dachstuhl montieren"
                 />
-              </div>
-
-              <div>
-                <Label>Projekt</Label>
-                <Select
-                  value={editingEntry.project_id || "none"}
-                  onValueChange={(v) => setEditingEntry({...editingEntry, project_id: v === "none" ? null : v})}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Projekt auswählen" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Kein Projekt</SelectItem>
-                    {projectOptions.map((p) => (
-                      <SelectItem key={p.id} value={p.id}>
-                        {p.name}{p.plz ? ` (${p.plz})` : ""}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
               </div>
 
               {/* Vormittag */}

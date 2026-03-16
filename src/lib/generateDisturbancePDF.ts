@@ -88,7 +88,7 @@ export async function generateDisturbancePDF(
   doc.setFontSize(24);
   doc.setFont("helvetica", "bold");
   doc.setTextColor(61, 63, 71);
-  doc.text("HOLZKNECHT NATURSTEINE", margin, yPos);
+  doc.text("HOLZBAU GASSER", margin, yPos);
   yPos += 8;
 
   doc.setDrawColor(61, 63, 71);
@@ -234,7 +234,7 @@ export async function generateDisturbancePDF(
   doc.setFontSize(8);
   doc.setTextColor(150, 150, 150);
   const footerY = doc.internal.pageSize.getHeight() - 15;
-  doc.text(`Erstellt am: ${new Date().toLocaleDateString("de-AT")} | Holzknecht Natursteine`, margin, footerY);
+  doc.text(`Erstellt am: ${new Date().toLocaleDateString("de-AT")} | Holzbau Gasser`, margin, footerY);
 
   const pdfBase64 = doc.output("datauristring").split(",")[1];
   const dateForFilename = formatDateShort(disturbance.datum).replace(/\./g, "-");
@@ -258,7 +258,7 @@ export function generateEmailHtml(
       .info-box { background: #f5f5f5; padding: 15px; border-radius: 8px; margin: 15px 0; }
     </style></head>
     <body><div class="container">
-      <div class="header">HOLZKNECHT NATURSTEINE</div>
+      <div class="header">HOLZBAU GASSER</div>
       <h2>Regiebericht</h2>
       <p>Sehr geehrte Damen und Herren,</p>
       <p>im Anhang finden Sie den Regiebericht für den Einsatz bei <strong>${disturbance.kunde_name}</strong>.</p>
@@ -269,7 +269,7 @@ export function generateEmailHtml(
         Gesamtstunden: ${disturbance.stunden.toFixed(2)} h
       </div>
       <p>Der vollständige Bericht befindet sich im angehängten PDF-Dokument.</p>
-      <p>Mit freundlichen Grüßen,<br>Holzknecht Natursteine</p>
+      <p>Mit freundlichen Grüßen,<br>Holzbau Gasser</p>
     </div></body></html>
   `;
 }

@@ -69,11 +69,11 @@ Deno.serve(async (req) => {
     }
 
     // Generate registration link
-    const appUrl = 'https://elektro-brodnig.app';
+    const appUrl = 'https://app.holzbau-gasser.at';
     const registrationLink = `${appUrl}/auth`;
-    
+
     // Compose SMS message
-    const smsText = `Willkommen bei Elektro Brodnig! Bitte registriere dich in unserer Mitarbeiter-App:\n${registrationLink}`;
+    const smsText = `Holzbau Gasser: Bitte registriere dich in unserer Mitarbeiter-App:\n${registrationLink}`;
 
     console.log('Sending SMS via Twilio...');
 

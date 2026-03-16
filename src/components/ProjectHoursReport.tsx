@@ -215,7 +215,7 @@ export default function ProjectHoursReport() {
 
     projectData.forEach((entry) => {
       const dateFormatted = format(parseISO(entry.datum), "dd.MM.yyyy", { locale: de });
-      const ortText = entry.locationType === "werkstatt" ? "Werkstatt" : "Baustelle";
+      const ortText = entry.locationType === "werkstatt" ? "Lager" : "Baustelle";
       
       worksheetData.push([
         dateFormatted,
@@ -451,7 +451,7 @@ export default function ProjectHoursReport() {
                         {entry.locationType === "werkstatt" ? (
                           <Badge variant="secondary" className="gap-1">
                             <Wrench className="w-3 h-3" />
-                            Werkstatt
+                            Lager
                           </Badge>
                         ) : (
                           <Badge variant="outline" className="gap-1">

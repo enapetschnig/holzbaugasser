@@ -5,10 +5,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ArrowLeft, Shield, User as UserIcon, Send, Mail, Phone, MapPin, Shirt, FileText, Clock, Trash2, Settings, Save, Calendar } from "lucide-react";
+import { ArrowLeft, Shield, User as UserIcon, Send, Mail, Phone, MapPin, Shirt, FileText, Clock, Trash2, Settings, Save, Calendar, Package, Plus } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -16,6 +15,7 @@ import { Separator } from "@/components/ui/separator";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
+import * as XLSX from "xlsx-js-style";
 import EmployeeDocumentsManager from "@/components/EmployeeDocumentsManager";
 import LeaveManagement from "@/components/LeaveManagement";
 import TimeAccountManagement from "@/components/TimeAccountManagement";
@@ -94,6 +94,7 @@ export default function Admin() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [userToDelete, setUserToDelete] = useState<Profile | null>(null);
+  const [exportingBeforeDelete, setExportingBeforeDelete] = useState(false);
 
   // Employee save state
   const [savingEmployee, setSavingEmployee] = useState(false);
@@ -102,6 +103,12 @@ export default function Admin() {
   const [regiereportEmail, setRegiereportEmail] = useState("");
   const [savingSettings, setSavingSettings] = useState(false);
   const [loadingSettings, setLoadingSettings] = useState(true);
+
+  // Material catalog states
+  const [materials, setMaterials] = useState<{ id: string; name: string; einheit: string }[]>([]);
+  const [newMaterialName, setNewMaterialName] = useState("");
+  const [newMaterialUnit, setNewMaterialUnit] = useState("Stück");
+  const [addingMaterial, setAddingMaterial] = useState(false);
 
   const fetchAppSettings = useCallback(async () => {
     setLoadingSettings(true);
@@ -123,6 +130,40 @@ export default function Admin() {
       setLoadingSettings(false);
     }
   }, []);
+
+  const fetchMaterials = useCallback(async () => {
+    const { data, error } = await supabase
+      .from("materials")
+      .select("id, name, einheit")
+      .order("name");
+    if (!error && data) setMaterials(data);
+  }, []);
+
+  const addMaterial = async () => {
+    if (!newMaterialName.trim()) return;
+    setAddingMaterial(true);
+    const { error } = await supabase
+      .from("materials")
+      .insert({ name: newMaterialName.trim(), einheit: newMaterialUnit });
+    if (error) {
+      toast({ variant: "destructive", title: "Fehler", description: error.message });
+    } else {
+      setNewMaterialName("");
+      setNewMaterialUnit("Stück");
+      fetchMaterials();
+      toast({ title: "Material hinzugefügt" });
+    }
+    setAddingMaterial(false);
+  };
+
+  const deleteMaterial = async (id: string) => {
+    const { error } = await supabase.from("materials").delete().eq("id", id);
+    if (error) {
+      toast({ variant: "destructive", title: "Fehler", description: error.message });
+    } else {
+      fetchMaterials();
+    }
+  };
 
   const saveRegiereportEmail = async () => {
     if (!regiereportEmail.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) {
@@ -167,7 +208,8 @@ export default function Admin() {
     fetchEmployees();
     fetchSickNotes();
     fetchAppSettings();
-  }, [fetchAppSettings]);
+    fetchMaterials();
+  }, [fetchAppSettings, fetchMaterials]);
 
   const checkAdminAccess = async () => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -263,6 +305,114 @@ export default function Admin() {
 
     // If activated, jump to the user in the "Registrierte Benutzer" list
     if (activate) scrollToRegisteredUser(userId);
+  };
+
+  const exportUserTimeEntries = async (userId: string, userName: string): Promise<boolean> => {
+    try {
+      const { data: entries } = await supabase
+        .from("time_entries")
+        .select("datum, start_time, end_time, stunden, taetigkeit, location_type, pause_minutes, projects(name, plz)")
+        .eq("user_id", userId)
+        .order("datum")
+        .order("start_time");
+
+      if (!entries || entries.length === 0) {
+        return false;
+      }
+
+      const toMin = (t: string) => {
+        const [h, m] = (t || "00:00").substring(0, 5).split(":").map(Number);
+        return h * 60 + m;
+      };
+
+      const monthNames = ["Jänner", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Dezember"];
+
+      // Group entries by month
+      const byMonth: Record<string, typeof entries> = {};
+      for (const e of entries) {
+        const [y, m] = e.datum.split("-");
+        const key = `${y}-${m}`;
+        if (!byMonth[key]) byMonth[key] = [];
+        byMonth[key].push(e);
+      }
+
+      const wb = XLSX.utils.book_new();
+
+      // Generate months from March 2026 to current month
+      const startYear = 2026;
+      const startMonth = 3;
+      const now = new Date();
+      const endYear = now.getFullYear();
+      const endMonth = now.getMonth() + 1;
+
+      for (let y = startYear; y <= endYear; y++) {
+        const mStart = y === startYear ? startMonth : 1;
+        const mEnd = y === endYear ? endMonth : 12;
+        for (let m = mStart; m <= mEnd; m++) {
+          const key = `${y}-${m.toString().padStart(2, "0")}`;
+          const monthEntries = byMonth[key];
+          if (!monthEntries || monthEntries.length === 0) continue;
+
+          const wsData: any[][] = [
+            [`${monthNames[m - 1]} ${y} — ${userName}`],
+            [""],
+            ["Datum", "Beginn", "Ende", "Pause", "Stunden", "Ort", "Projekt", "PLZ", "Tätigkeit"],
+          ];
+
+          for (const e of monthEntries) {
+            const startMin = toMin(e.start_time);
+            const endMin = toMin(e.end_time);
+            const pauseMins = e.pause_minutes || 0;
+            const hours = Math.max(0, (endMin - startMin - pauseMins) / 60);
+            const proj = (e as any).projects;
+
+            wsData.push([
+              e.datum,
+              e.start_time?.substring(0, 5) || "",
+              e.end_time?.substring(0, 5) || "",
+              pauseMins > 0 ? `${pauseMins} Min.` : "",
+              hours.toFixed(2),
+              e.location_type === "baustelle" ? "Baustelle" : "Lager",
+              proj?.name || "",
+              proj?.plz || "",
+              e.taetigkeit || "",
+            ]);
+          }
+
+          const ws = XLSX.utils.aoa_to_sheet(wsData);
+          ws["!cols"] = [
+            { wch: 12 }, { wch: 8 }, { wch: 8 }, { wch: 12 },
+            { wch: 8 }, { wch: 10 }, { wch: 20 }, { wch: 8 }, { wch: 30 },
+          ];
+          const sheetName = `${monthNames[m - 1]} ${y}`.substring(0, 31);
+          XLSX.utils.book_append_sheet(wb, ws, sheetName);
+        }
+      }
+
+      if (wb.SheetNames.length === 0) return false;
+
+      const fileName = `Arbeitszeitdaten_${userName.replace(/\s/g, "_")}.xlsx`;
+
+      // Download locally
+      XLSX.writeFile(wb, fileName);
+
+      // Also save to Supabase Storage as backup
+      try {
+        const xlsxBuffer = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+        const blob = new Blob([xlsxBuffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+        const storagePath = `${userId}/${fileName}`;
+        await supabase.storage
+          .from("deleted-users")
+          .upload(storagePath, blob, { upsert: true });
+      } catch {
+        // Storage backup is best-effort, don't block deletion
+      }
+
+      return true;
+    } catch (err) {
+      toast({ variant: "destructive", title: "Fehler", description: "Export fehlgeschlagen." });
+      return false;
+    }
   };
 
   const fetchEmployees = async () => {
@@ -583,8 +733,8 @@ export default function Admin() {
               <span className="hidden sm:inline">Zurück</span>
             </Button>
             <img 
-              src="/holzknecht-logo.jpg"
-              alt="Holzknecht Natursteine"
+              src="/gasser-logo.png"
+              alt="Holzbau Gasser"
               className="h-10 w-10 sm:h-14 sm:w-14 cursor-pointer hover:opacity-80 transition-opacity object-contain"
               onClick={() => navigate("/")}
             />
@@ -910,6 +1060,78 @@ export default function Admin() {
             Urlaubsverwaltung
           </h2>
           <LeaveManagement profiles={profiles.filter(p => p.is_active)} />
+        </section>
+
+        {/* ===== MATERIALKATALOG ===== */}
+        <section>
+          <h2 className="text-2xl font-bold mb-4 flex items-center gap-2">
+            <Package className="h-6 w-6" />
+            Materialkatalog
+          </h2>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Materialien verwalten</CardTitle>
+              <CardDescription>
+                Materialien, die Mitarbeiter bei der Zeitbuchung zuordnen können
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex gap-2">
+                <Input
+                  placeholder="Materialname"
+                  value={newMaterialName}
+                  onChange={(e) => setNewMaterialName(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && addMaterial()}
+                  className="flex-1"
+                />
+                <Select value={newMaterialUnit} onValueChange={setNewMaterialUnit}>
+                  <SelectTrigger className="w-[120px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Stück">Stück</SelectItem>
+                    <SelectItem value="kg">kg</SelectItem>
+                    <SelectItem value="m²">m²</SelectItem>
+                    <SelectItem value="m">m</SelectItem>
+                    <SelectItem value="Liter">Liter</SelectItem>
+                    <SelectItem value="Sack">Sack</SelectItem>
+                    <SelectItem value="Palette">Palette</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Button onClick={addMaterial} disabled={addingMaterial || !newMaterialName.trim()}>
+                  <Plus className="h-4 w-4 mr-1" />
+                  Hinzufügen
+                </Button>
+              </div>
+
+              <Separator />
+
+              {materials.length === 0 ? (
+                <p className="text-muted-foreground text-center py-4">
+                  Noch keine Materialien angelegt
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {materials.map((mat) => (
+                    <div key={mat.id} className="flex items-center justify-between p-3 rounded-lg border">
+                      <div>
+                        <span className="font-medium">{mat.name}</span>
+                        <span className="text-muted-foreground ml-2 text-sm">({mat.einheit})</span>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => deleteMaterial(mat.id)}
+                      >
+                        <Trash2 className="h-4 w-4 text-destructive" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </section>
 
         {/* Zeitkonto vorerst deaktiviert */}
@@ -1341,81 +1563,109 @@ export default function Admin() {
       </Dialog>
 
       {/* Delete User Dialog - Step 2: Bestätigung */}
-      <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Sind Sie sicher?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Möchten Sie {userToDelete?.vorname} {userToDelete?.nachname} wirklich löschen?
-              <br /><br />
-              <strong>Hinweis:</strong> Alle Arbeitszeiterfassungen und Dokumente bleiben vorerst gespeichert.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => {
-              setDeleteConfirmOpen(false);
-              setUserToDelete(null);
-            }}>
-              Abbrechen
-            </AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={async () => {
-                if (!userToDelete) return;
-                
-                try {
-                  // Delete the employee record if exists
-                  const { error: empError } = await supabase
-                    .from("employees")
-                    .delete()
-                    .eq("user_id", userToDelete.id);
-                  
-                  if (empError) {
-                    console.error("Employee delete error:", empError);
+      <Dialog open={deleteConfirmOpen} onOpenChange={(open) => {
+        setDeleteConfirmOpen(open);
+        if (!open) setUserToDelete(null);
+      }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Benutzer löschen</DialogTitle>
+            <DialogDescription>
+              Möchten Sie <strong>{userToDelete?.vorname} {userToDelete?.nachname}</strong> wirklich löschen?
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-800">
+              Alle Arbeitszeitdaten werden automatisch als Excel heruntergeladen bevor der Benutzer gelöscht wird.
+              Projektbuchungen bleiben erhalten.
+            </div>
+
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                className="flex-1"
+                disabled={exportingBeforeDelete}
+                onClick={() => {
+                  setDeleteConfirmOpen(false);
+                  setUserToDelete(null);
+                }}
+              >
+                Abbrechen
+              </Button>
+              <Button
+                variant="destructive"
+                className="flex-1"
+                disabled={exportingBeforeDelete}
+                onClick={async () => {
+                  if (!userToDelete) return;
+                  setExportingBeforeDelete(true);
+
+                  try {
+                    const userName = `${userToDelete.vorname} ${userToDelete.nachname}`;
+
+                    // 1. Auto-export Excel before deletion
+                    await exportUserTimeEntries(userToDelete.id, userName);
+
+                    // 2. Anonymize time entries: keep project data, mark deleted user
+                    await supabase
+                      .from("time_entries")
+                      .update({ notizen: `[Gelöschter Benutzer: ${userName}]` })
+                      .eq("user_id", userToDelete.id);
+
+                    // 3. Delete disturbances (Regieberichte) for this user
+                    await supabase.from("disturbances").delete().eq("user_id", userToDelete.id);
+
+                    // 4. Delete employee record
+                    await supabase.from("employees").delete().eq("user_id", userToDelete.id);
+
+                    // 5. Delete user roles
+                    await supabase.from("user_roles").delete().eq("user_id", userToDelete.id);
+
+                    // 6. Delete notifications
+                    await supabase.from("notifications").delete().eq("user_id", userToDelete.id);
+
+                    // 7. Deactivate user (blocks app access)
+                    await supabase
+                      .from("profiles")
+                      .update({ is_active: false })
+                      .eq("id", userToDelete.id);
+
+                    // 8. Delete profile (time_entries.user_id becomes NULL via SET NULL FK)
+                    const { error: profileError } = await supabase
+                      .from("profiles")
+                      .delete()
+                      .eq("id", userToDelete.id);
+
+                    if (profileError) throw profileError;
+
+                    toast({
+                      title: "Benutzer gelöscht",
+                      description: `${userName} wurde gelöscht. Excel wurde heruntergeladen.`,
+                    });
+
+                    fetchUsers({ silent: true });
+                    fetchEmployees();
+                  } catch (error: any) {
+                    toast({
+                      variant: "destructive",
+                      title: "Fehler",
+                      description: error.message || "Benutzer konnte nicht gelöscht werden",
+                    });
                   }
 
-                  // Delete user roles
-                  const { error: roleError } = await supabase
-                    .from("user_roles")
-                    .delete()
-                    .eq("user_id", userToDelete.id);
-                  
-                  if (roleError) {
-                    console.error("Role delete error:", roleError);
-                  }
-
-                  // Delete the profile
-                  const { error: profileError } = await supabase
-                    .from("profiles")
-                    .delete()
-                    .eq("id", userToDelete.id);
-                  
-                  if (profileError) throw profileError;
-
-                  toast({
-                    title: "Benutzer gelöscht",
-                    description: `${userToDelete.vorname} ${userToDelete.nachname} wurde erfolgreich gelöscht.`,
-                  });
-
-                  fetchUsers({ silent: true });
-                  fetchEmployees();
-                } catch (error: any) {
-                  toast({
-                    variant: "destructive",
-                    title: "Fehler",
-                    description: error.message || "Benutzer konnte nicht gelöscht werden",
-                  });
-                }
-                
-                setDeleteConfirmOpen(false);
-                setUserToDelete(null);
-              }}
-            >
-              Ja, löschen
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+                  setExportingBeforeDelete(false);
+                  setDeleteConfirmOpen(false);
+                  setUserToDelete(null);
+                }}
+              >
+                <Trash2 className="w-4 h-4 mr-1" />
+                {exportingBeforeDelete ? "Wird gelöscht..." : "Endgültig löschen"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
     </div>
   );

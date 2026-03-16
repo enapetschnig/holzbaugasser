@@ -6,6 +6,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { useNavigate } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
@@ -61,9 +62,48 @@ const Projects = () => {
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [showStatusDialog, setShowStatusDialog] = useState(false);
 
+  // Material dialog state
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [materialCatalog, setMaterialCatalog] = useState<{ id: string; name: string; einheit: string }[]>([]);
+  const [materialDialogProject, setMaterialDialogProject] = useState<string | null>(null);
+  const [selectedMaterial, setSelectedMaterial] = useState("");
+  const [customMaterial, setCustomMaterial] = useState("");
+  const [newMenge, setNewMenge] = useState("");
+  const [submittingMaterial, setSubmittingMaterial] = useState(false);
+
+  const fetchMaterialCatalog = async () => {
+    const { data } = await supabase.from("materials").select("id, name, einheit").order("name");
+    if (data) setMaterialCatalog(data);
+  };
+
+  const handleAddMaterial = async () => {
+    const materialName = selectedMaterial === "__custom__" ? customMaterial.trim() : selectedMaterial;
+    if (!materialDialogProject || !currentUserId || !materialName) return;
+
+    setSubmittingMaterial(true);
+    const { error } = await supabase.from("material_entries").insert({
+      project_id: materialDialogProject,
+      user_id: currentUserId,
+      material: materialName,
+      menge: newMenge.trim() || null,
+    });
+
+    if (error) {
+      toast({ variant: "destructive", title: "Fehler", description: "Material konnte nicht gespeichert werden" });
+    } else {
+      toast({ title: "Gespeichert", description: "Material wurde hinzugefügt" });
+      setMaterialDialogProject(null);
+      setSelectedMaterial("");
+      setCustomMaterial("");
+      setNewMenge("");
+    }
+    setSubmittingMaterial(false);
+  };
+
   useEffect(() => {
     checkAdminStatus();
     fetchProjects();
+    fetchMaterialCatalog();
 
     // Realtime subscription
     const channel = supabase
@@ -82,7 +122,7 @@ const Projects = () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
-    // Base role only determines admin actions (no overrides)
+    setCurrentUserId(user.id);
 
     const { data } = await supabase
       .from("user_roles")
@@ -370,8 +410,8 @@ const Projects = () => {
                 <Home className="h-5 w-5" />
               </Button>
               <img 
-                src="/holzknecht-logo.jpg"
-                alt="Holzknecht Natursteine"
+                src="/gasser-logo.png"
+                alt="Holzbau Gasser"
                 className="h-10 w-10 sm:h-14 sm:w-14 cursor-pointer hover:opacity-80 transition-opacity object-contain"
                 onClick={() => navigate("/")}
               />
@@ -613,7 +653,20 @@ const Projects = () => {
                   </DropdownMenuContent>
                 </DropdownMenu>
 
-                <div 
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full gap-2 mt-2"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setMaterialDialogProject(project.id);
+                  }}
+                >
+                  <Package className="w-4 h-4" />
+                  + Material hinzufügen
+                </Button>
+
+                <div
                   className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2 border-t mt-3"
                   onClick={(e) => e.stopPropagation()}
                 >
@@ -848,6 +901,75 @@ const Projects = () => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Material Dialog */}
+      <Dialog open={!!materialDialogProject} onOpenChange={(open) => { if (!open) { setMaterialDialogProject(null); setSelectedMaterial(""); setCustomMaterial(""); setNewMenge(""); } }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Package className="h-5 w-5" />
+              Material hinzufügen
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 pt-2">
+            <div className="space-y-2">
+              <Label>Material</Label>
+              <Select value={selectedMaterial} onValueChange={(val) => { setSelectedMaterial(val); if (val !== "__custom__") setCustomMaterial(""); }}>
+                <SelectTrigger className="h-12 text-base">
+                  <SelectValue placeholder="Material auswählen" />
+                </SelectTrigger>
+                <SelectContent>
+                  {materialCatalog.map(c => (
+                    <SelectItem key={c.id} value={c.name} className="text-base py-3">
+                      {c.name} ({c.einheit})
+                    </SelectItem>
+                  ))}
+                  <SelectItem value="__custom__" className="text-base py-3 font-medium">
+                    Anderes Material...
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+              {selectedMaterial === "__custom__" && (
+                <Input
+                  placeholder="Material eingeben"
+                  value={customMaterial}
+                  onChange={(e) => setCustomMaterial(e.target.value)}
+                  autoFocus
+                  className="h-12 text-base"
+                />
+              )}
+            </div>
+            <div className="space-y-2">
+              <Label>Menge</Label>
+              <Input
+                placeholder={(() => {
+                  const item = materialCatalog.find(c => c.name === selectedMaterial);
+                  return item ? `z.B. 10 ${item.einheit}` : "z.B. 10 Stück";
+                })()}
+                value={newMenge}
+                onChange={(e) => setNewMenge(e.target.value)}
+                className="h-12 text-base"
+              />
+            </div>
+            <div className="flex gap-2 pt-2">
+              <Button
+                className="flex-1 h-12 text-base"
+                onClick={handleAddMaterial}
+                disabled={submittingMaterial || !(selectedMaterial === "__custom__" ? customMaterial.trim() : selectedMaterial)}
+              >
+                {submittingMaterial ? "Speichert..." : "Speichern"}
+              </Button>
+              <Button
+                className="flex-1 h-12 text-base"
+                variant="outline"
+                onClick={() => { setMaterialDialogProject(null); setSelectedMaterial(""); setCustomMaterial(""); setNewMenge(""); }}
+              >
+                Abbrechen
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

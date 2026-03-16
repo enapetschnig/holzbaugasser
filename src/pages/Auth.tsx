@@ -117,8 +117,8 @@ export default function Auth() {
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
-          <img src="/holzknecht-logo.jpg" alt="Holzknecht Natursteine" className="h-24 mx-auto mb-4" />
-          <CardTitle>Holzknecht Natursteine</CardTitle>
+          <img src="/gasser-logo.png" alt="Holzbau Gasser" className="h-24 mx-auto mb-4" />
+          <CardTitle>Holzbau Gasser</CardTitle>
           <CardDescription>Projektdokumentation</CardDescription>
         </CardHeader>
         <CardContent>

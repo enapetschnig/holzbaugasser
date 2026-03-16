@@ -27,7 +27,7 @@ export function WelcomeVideoDialog({
           <DialogTitle>
             {isReplay 
               ? "App zum Startbildschirm hinzufügen" 
-              : "Willkommen bei der Holzknecht Natursteine App"}
+              : "Willkommen bei der Holzbau Gasser App"}
           </DialogTitle>
           <DialogDescription>
             In diesem Video zeigen wir Ihnen, wie Sie die App auf Ihrem 

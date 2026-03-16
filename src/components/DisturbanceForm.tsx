@@ -26,6 +26,8 @@ type DisturbanceFormProps = {
     start_time: string;
     end_time: string;
     pause_minutes: number;
+    pause_start: string | null;
+    pause_end: string | null;
     kunde_name: string;
     kunde_email: string | null;
     kunde_adresse: string | null;
@@ -44,7 +46,8 @@ export const DisturbanceForm = ({ open, onOpenChange, onSuccess, editData }: Dis
     datum: format(new Date(), "yyyy-MM-dd"),
     startTime: "08:00",
     endTime: "10:00",
-    pauseMinutes: 0,
+    pauseStart: "",
+    pauseEnd: "",
     kundeName: "",
     kundeEmail: "",
     kundeAdresse: "",
@@ -61,7 +64,8 @@ export const DisturbanceForm = ({ open, onOpenChange, onSuccess, editData }: Dis
         datum: editData.datum,
         startTime: editData.start_time.slice(0, 5),
         endTime: editData.end_time.slice(0, 5),
-        pauseMinutes: editData.pause_minutes,
+        pauseStart: editData.pause_start?.slice(0, 5) || "",
+        pauseEnd: editData.pause_end?.slice(0, 5) || "",
         kundeName: editData.kunde_name,
         kundeEmail: editData.kunde_email || "",
         kundeAdresse: editData.kunde_adresse || "",
@@ -77,7 +81,8 @@ export const DisturbanceForm = ({ open, onOpenChange, onSuccess, editData }: Dis
         datum: format(new Date(), "yyyy-MM-dd"),
         startTime: "08:00",
         endTime: "10:00",
-        pauseMinutes: 0,
+        pauseStart: "",
+        pauseEnd: "",
         kundeName: "",
         kundeEmail: "",
         kundeAdresse: "",
@@ -104,10 +109,17 @@ export const DisturbanceForm = ({ open, onOpenChange, onSuccess, editData }: Dis
     }
   };
 
+  const calculatePauseMinutes = (): number => {
+    if (!formData.pauseStart || !formData.pauseEnd) return 0;
+    const [sh, sm] = formData.pauseStart.split(":").map(Number);
+    const [eh, em] = formData.pauseEnd.split(":").map(Number);
+    return Math.max(0, (eh * 60 + em) - (sh * 60 + sm));
+  };
+
   const calculateHours = (): number => {
     const [startH, startM] = formData.startTime.split(":").map(Number);
     const [endH, endM] = formData.endTime.split(":").map(Number);
-    const totalMinutes = (endH * 60 + endM) - (startH * 60 + startM) - formData.pauseMinutes;
+    const totalMinutes = (endH * 60 + endM) - (startH * 60 + startM) - calculatePauseMinutes();
     return Math.max(0, totalMinutes / 60);
   };
 
@@ -195,7 +207,7 @@ export const DisturbanceForm = ({ open, onOpenChange, onSuccess, editData }: Dis
       datum: formData.datum,
       start_time: formData.startTime,
       end_time: formData.endTime,
-      pause_minutes: formData.pauseMinutes,
+      pause_minutes: calculatePauseMinutes(),
       stunden,
       kunde_name: formData.kundeName.trim(),
       kunde_email: formData.kundeEmail.trim() || null,
@@ -247,7 +259,7 @@ export const DisturbanceForm = ({ open, onOpenChange, onSuccess, editData }: Dis
         datum: formData.datum,
         start_time: formData.startTime,
         end_time: formData.endTime,
-        pause_minutes: formData.pauseMinutes,
+        pause_minutes: calculatePauseMinutes(),
         stunden,
         project_id: null,
         disturbance_id: newDisturbance.id,
@@ -311,7 +323,7 @@ export const DisturbanceForm = ({ open, onOpenChange, onSuccess, editData }: Dis
         datum: formData.datum,
         start_time: formData.startTime,
         end_time: formData.endTime,
-        pause_minutes: formData.pauseMinutes,
+        pause_minutes: calculatePauseMinutes(),
         stunden,
         taetigkeit: `Regiebericht: ${formData.kundeName.trim()}`,
       })
@@ -404,15 +416,28 @@ export const DisturbanceForm = ({ open, onOpenChange, onSuccess, editData }: Dis
                 />
               </div>
               <div>
-                <Label htmlFor="pauseMinutes">Pause (Minuten)</Label>
+                <Label htmlFor="pauseStart">Pause von</Label>
                 <Input
-                  id="pauseMinutes"
-                  type="number"
-                  min="0"
-                  value={formData.pauseMinutes}
-                  onChange={(e) => setFormData({ ...formData, pauseMinutes: parseInt(e.target.value) || 0 })}
+                  id="pauseStart"
+                  type="time"
+                  value={formData.pauseStart}
+                  onChange={(e) => setFormData({ ...formData, pauseStart: e.target.value })}
                 />
               </div>
+              <div>
+                <Label htmlFor="pauseEnd">Pause bis</Label>
+                <Input
+                  id="pauseEnd"
+                  type="time"
+                  value={formData.pauseEnd}
+                  onChange={(e) => setFormData({ ...formData, pauseEnd: e.target.value })}
+                />
+              </div>
+              {calculatePauseMinutes() > 0 && (
+                <div className="flex items-end">
+                  <p className="text-xs text-muted-foreground py-2">{calculatePauseMinutes()} Min. Pause</p>
+                </div>
+              )}
               <div className="flex items-end">
                 <div className="bg-muted rounded-md px-3 py-2 w-full text-center">
                   <span className="text-sm text-muted-foreground">Stunden: </span>
