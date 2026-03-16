@@ -102,7 +102,7 @@ function createEmptyMitarbeiterRow(): MitarbeiterRow {
     werkstattStunden: "",
     schmutzzulageStunden: "",
     regenStunden: "",
-    stunden: {},
+    stunden: { 1: 0.5 },  // Rüstzeit/Anfahrt immer 0,5h
   };
 }
 
@@ -137,7 +137,7 @@ const TimeTracking = () => {
 
   // Form: Taetigkeiten
   const [taetigkeiten, setTaetigkeiten] = useState<Taetigkeit[]>([
-    { position: 1, bezeichnung: "" },
+    { position: 1, bezeichnung: "Rüstzeit/Anfahrt, Ankunftszeit Baustelle" },
     { position: 2, bezeichnung: "" },
     { position: 3, bezeichnung: "" },
     { position: 4, bezeichnung: "" },
@@ -572,7 +572,7 @@ const TimeTracking = () => {
       // 2. Build final taetigkeiten list with auto-fills
       const finalTaetigkeiten: { position: number; bezeichnung: string }[] = [];
       for (const t of taetigkeiten) {
-        const bez = t.position === 1 && !t.bezeichnung.trim()
+        const bez = t.position === 1
           ? pos1Text
           : t.bezeichnung.trim();
         if (bez) {
@@ -763,7 +763,7 @@ const TimeTracking = () => {
     setAnmerkungen("");
     setFertiggestellt(false);
     setTaetigkeiten([
-      { position: 1, bezeichnung: "" },
+      { position: 1, bezeichnung: "Rüstzeit/Anfahrt, Ankunftszeit Baustelle" },
       { position: 2, bezeichnung: "" },
       { position: 3, bezeichnung: "" },
       { position: 4, bezeichnung: "" },
@@ -822,7 +822,7 @@ const TimeTracking = () => {
         setTaetigkeiten(
           mapped.length > 0
             ? mapped
-            : [{ position: 1, bezeichnung: "" }]
+            : [{ position: 1, bezeichnung: "Rüstzeit/Anfahrt, Ankunftszeit Baustelle" }]
         );
       }
 
@@ -1155,10 +1155,9 @@ const TimeTracking = () => {
                 </span>
                 {t.position === 1 ? (
                   <Input
-                    value={t.bezeichnung}
-                    onChange={(e) => updateTaetigkeit(t.position, e.target.value)}
-                    placeholder={pos1Text}
-                    className="flex-1"
+                    value={pos1Text}
+                    readOnly
+                    className="flex-1 bg-muted/50"
                   />
                 ) : (
                   <Input
