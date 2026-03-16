@@ -98,18 +98,15 @@ export default function HoursReport() {
       .eq("user_id", user.id)
       .single();
 
-    const admin = data?.role === "administrator";
-    setIsAdmin(admin);
+    if (data?.role !== "administrator") {
+      navigate("/");
+      return;
+    }
+    setIsAdmin(true);
 
-    // Wenn nicht Admin, eigene User ID setzen
-    if (!admin) {
-      setSelectedUserId(user.id);
-    } else {
-      // Check for employee query param
-      const employeeParam = searchParams.get("employee");
-      if (employeeParam) {
-        setSelectedUserId(employeeParam);
-      }
+    const employeeParam = searchParams.get("employee");
+    if (employeeParam) {
+      setSelectedUserId(employeeParam);
     }
   };
 

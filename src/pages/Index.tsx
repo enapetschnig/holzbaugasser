@@ -92,7 +92,7 @@ export default function Index() {
       .order("datum", { ascending: false })
       .limit(5);
 
-    if (role === "mitarbeiter") {
+    if (role !== "administrator" && role !== "vorarbeiter") {
       query = query.eq("user_id", userId);
     }
 
@@ -272,6 +272,9 @@ export default function Index() {
   }
 
   const isAdmin = userRole === "administrator";
+  const isVorarbeiter = userRole === "vorarbeiter";
+  const canManageTime = isAdmin || isVorarbeiter;
+  const canCreateProjects = isAdmin || isVorarbeiter;
 
   return (
     <div className="min-h-screen bg-background">
@@ -323,12 +326,14 @@ export default function Index() {
       <main className="container mx-auto px-3 sm:px-4 lg:px-6 py-4 sm:py-6 lg:py-8">
         <div className="mb-6 sm:mb-8">
           <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold mb-2">
-            {isAdmin ? "Admin Dashboard" : "Mein Dashboard"}
+            {isAdmin ? "Admin Dashboard" : isVorarbeiter ? "Vorarbeiter Dashboard" : "Mein Dashboard"}
           </h1>
           <p className="text-sm sm:text-base text-muted-foreground">
-            {isAdmin 
-              ? "Verwaltung aller Projekte und Mitarbeiter" 
-              : "Zeiterfassung und Projektdokumentation"}
+            {isAdmin
+              ? "Verwaltung aller Projekte und Mitarbeiter"
+              : isVorarbeiter
+              ? "Zeiterfassung und Projektverwaltung"
+              : "Urlaub und Projektdokumentation"}
           </p>
         </div>
 
@@ -368,24 +373,26 @@ export default function Index() {
 
         {/* Main Actions Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 lg:gap-6">
-          {/* Zeiterfassung - Für alle */}
-          <Card 
-            className="cursor-pointer hover:shadow-lg transition-all hover:border-primary/50" 
-            onClick={() => navigate("/time-tracking")}
-          >
-            <CardHeader className="space-y-2 pb-3">
-              <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center">
-                <Clock className="h-6 w-6 text-primary" />
-              </div>
-              <CardTitle className="text-lg sm:text-xl">Zeiterfassung</CardTitle>
-              <CardDescription className="text-sm">
-                Stunden auf Projekte buchen
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Button className="w-full" size="sm">Stunden erfassen</Button>
-            </CardContent>
-          </Card>
+          {/* Zeiterfassung - Nur für Admin + Vorarbeiter */}
+          {canManageTime && (
+            <Card
+              className="cursor-pointer hover:shadow-lg transition-all hover:border-primary/50"
+              onClick={() => navigate("/time-tracking")}
+            >
+              <CardHeader className="space-y-2 pb-3">
+                <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center">
+                  <Clock className="h-6 w-6 text-primary" />
+                </div>
+                <CardTitle className="text-lg sm:text-xl">Zeiterfassung</CardTitle>
+                <CardDescription className="text-sm">
+                  Stunden auf Projekte buchen
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Button className="w-full" size="sm">Stunden erfassen</Button>
+              </CardContent>
+            </Card>
+          )}
 
           {/* Projekte - Für alle */}
           <Card 
@@ -398,7 +405,7 @@ export default function Index() {
               </div>
               <CardTitle className="text-lg sm:text-xl">Projekte</CardTitle>
               <CardDescription className="text-sm">
-                {isAdmin ? "Bauvorhaben & Dokumentation" : "Pläne, Bilder, Berichte, etc. hochladen"}
+                {isAdmin ? "Bauvorhaben & Dokumentation" : canCreateProjects ? "Projekte & Dokumentation" : "Fotos & Dokumente hochladen"}
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -406,46 +413,71 @@ export default function Index() {
             </CardContent>
           </Card>
 
-          {/* Meine Stunden - Für alle */}
-          <Card 
-            className="cursor-pointer hover:shadow-lg transition-all hover:border-primary/50" 
-            onClick={() => navigate("/my-hours")}
-          >
-            <CardHeader className="space-y-2 pb-3">
-              <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center">
-                <BarChart3 className="h-6 w-6 text-primary" />
-              </div>
-              <CardTitle className="text-lg sm:text-xl">Meine Stunden</CardTitle>
-              <CardDescription className="text-sm">
-                {isAdmin ? "Eigene gebuchte Zeiten anzeigen & bearbeiten" : "Übersicht gebuchter Zeiten"}
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Button className="w-full" size="sm" variant="outline">Anzeigen</Button>
-            </CardContent>
-          </Card>
+          {/* Meine Stunden - Für Admin + Vorarbeiter */}
+          {canManageTime && (
+            <Card
+              className="cursor-pointer hover:shadow-lg transition-all hover:border-primary/50"
+              onClick={() => navigate("/my-hours")}
+            >
+              <CardHeader className="space-y-2 pb-3">
+                <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center">
+                  <BarChart3 className="h-6 w-6 text-primary" />
+                </div>
+                <CardTitle className="text-lg sm:text-xl">Meine Stunden</CardTitle>
+                <CardDescription className="text-sm">
+                  Übersicht gebuchter Zeiten
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Button className="w-full" size="sm" variant="outline">Anzeigen</Button>
+              </CardContent>
+            </Card>
+          )}
 
-          {/* Regieberichte - Für alle */}
-          <Card 
-            className="cursor-pointer hover:shadow-lg transition-all hover:border-primary/50" 
-            onClick={() => navigate("/disturbances")}
-          >
-            <CardHeader className="space-y-2 pb-3">
-              <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center">
-                <Zap className="h-6 w-6 text-primary" />
-              </div>
-              <CardTitle className="text-lg sm:text-xl">Regiearbeiten</CardTitle>
-              <CardDescription className="text-sm">
-                Service-Einsätze dokumentieren
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Button className="w-full" size="sm" variant="outline">Regiearbeiten öffnen</Button>
-            </CardContent>
-          </Card>
+          {/* Regieberichte - Nur Admin */}
+          {isAdmin && (
+            <Card
+              className="cursor-pointer hover:shadow-lg transition-all hover:border-primary/50"
+              onClick={() => navigate("/disturbances")}
+            >
+              <CardHeader className="space-y-2 pb-3">
+                <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center">
+                  <Zap className="h-6 w-6 text-primary" />
+                </div>
+                <CardTitle className="text-lg sm:text-xl">Regiearbeiten</CardTitle>
+                <CardDescription className="text-sm">
+                  Service-Einsätze dokumentieren
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Button className="w-full" size="sm" variant="outline">Regiearbeiten öffnen</Button>
+              </CardContent>
+            </Card>
+          )}
 
 
-          {/* Meine Dokumente - Für Mitarbeiter */}
+          {/* Urlaub beantragen - Für Mitarbeiter (die keine Zeiterfassung haben) */}
+          {!canManageTime && (
+            <Card
+              className="cursor-pointer hover:shadow-lg transition-all hover:border-primary/50"
+              onClick={() => navigate("/time-tracking?absence=true")}
+            >
+              <CardHeader className="space-y-2 pb-3">
+                <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center">
+                  <Clock className="h-6 w-6 text-primary" />
+                </div>
+                <CardTitle className="text-lg sm:text-xl">Urlaub / Abwesenheit</CardTitle>
+                <CardDescription className="text-sm">
+                  Urlaub, Krankenstand oder ZA eintragen
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Button className="w-full" size="sm">Abwesenheit melden</Button>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Meine Dokumente - Für Mitarbeiter + Vorarbeiter */}
           {!isAdmin && (
             <Card 
               className="cursor-pointer hover:shadow-lg transition-all hover:border-primary/50" 
@@ -514,7 +546,7 @@ export default function Index() {
         {recentEntries.length > 0 && (
           <div className="mt-6">
             <h2 className="text-xl sm:text-2xl font-bold mb-4">
-              {isAdmin ? 'Letzte Projektbuchungen (Alle Mitarbeiter)' : 'Meine letzten Buchungen'}
+              {canManageTime ? 'Letzte Projektbuchungen (Alle Mitarbeiter)' : 'Meine letzten Buchungen'}
             </h2>
             <div className="space-y-2">
               {recentEntries.map((entry) => (
@@ -564,15 +596,15 @@ export default function Index() {
           </div>
         )}
 
-        {!isAdmin && (
+        {!isAdmin && !isVorarbeiter && (
           <Card className="mt-6 bg-primary/5 border-primary/20">
             <CardHeader>
               <CardTitle className="text-lg">Schnellhilfe</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2 text-sm">
-              <p>✓ <strong>Zeiterfassung:</strong> Täglich Stunden auf Projekte buchen</p>
-              <p>✓ <strong>Projekte:</strong> Fotos, Regieberichte & Dokumente hochladen</p>
-              <p>✓ <strong>Meine Stunden:</strong> Übersicht aller gebuchten Zeiten</p>
+              <p>✓ <strong>Projekte:</strong> Fotos & Dokumente auf Projekte hochladen</p>
+              <p>✓ <strong>Urlaub:</strong> Urlaub oder Abwesenheit beantragen</p>
+              <p>✓ <strong>Dokumente:</strong> Lohnzettel & Krankmeldungen einsehen</p>
             </CardContent>
           </Card>
         )}

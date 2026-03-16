@@ -35,6 +35,27 @@ const MyHours = () => {
   const { toast } = useToast();
   const [entries, setEntries] = useState<TimeEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [roleChecked, setRoleChecked] = useState(false);
+
+  // Role check: redirect mitarbeiter
+  useEffect(() => {
+    const checkRole = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const { data } = await supabase
+        .from("user_roles")
+        .select("role")
+        .eq("user_id", user.id)
+        .single();
+      if (data?.role === "mitarbeiter") {
+        toast({ variant: "destructive", title: "Kein Zugriff", description: "Diese Seite ist nur für Administratoren und Vorarbeiter zugänglich." });
+        navigate("/");
+        return;
+      }
+      setRoleChecked(true);
+    };
+    checkRole();
+  }, []);
   const [totalHours, setTotalHours] = useState(0);
   const [selectedMonth, setSelectedMonth] = useState(() => {
     const now = new Date();
@@ -222,7 +243,7 @@ const MyHours = () => {
     }
   };
 
-  if (loading) {
+  if (loading || !roleChecked) {
     return <div className="min-h-screen flex items-center justify-center"><p>Lädt...</p></div>;
   }
 

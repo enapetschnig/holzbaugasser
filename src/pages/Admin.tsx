@@ -914,6 +914,7 @@ export default function Admin() {
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="administrator">Administrator</SelectItem>
+                          <SelectItem value="vorarbeiter">Vorarbeiter</SelectItem>
                           <SelectItem value="mitarbeiter">Mitarbeiter</SelectItem>
                         </SelectContent>
                       </Select>

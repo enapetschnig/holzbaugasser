@@ -62,7 +62,11 @@ const Disturbances = () => {
       .eq("user_id", session.user.id)
       .single();
 
-    setIsAdmin(roleData?.role === "administrator");
+    if (roleData?.role !== "administrator") {
+      navigate("/");
+      return;
+    }
+    setIsAdmin(true);
     fetchDisturbances();
   };
 

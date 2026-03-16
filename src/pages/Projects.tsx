@@ -42,6 +42,8 @@ const Projects = () => {
   const [loading, setLoading] = useState(true);
   const [showNewDialog, setShowNewDialog] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [isVorarbeiter, setIsVorarbeiter] = useState(false);
+  const canCreateProjects = isAdmin || isVorarbeiter;
   const [searchQuery, setSearchQuery] = useState("");
   const [newProject, setNewProject] = useState({
     name: "",
@@ -131,6 +133,7 @@ const Projects = () => {
       .single();
 
     setIsAdmin(data?.role === "administrator");
+    setIsVorarbeiter(data?.role === "vorarbeiter");
   };
 
   const fetchProjects = async () => {
@@ -417,13 +420,15 @@ const Projects = () => {
               />
             </div>
             <Dialog open={showNewDialog} onOpenChange={setShowNewDialog}>
-              <DialogTrigger asChild>
-                <Button size="sm" className="gap-1 sm:gap-2">
-                  <Plus className="h-3 w-3 sm:h-4 sm:w-4" />
-                  <span className="hidden sm:inline">Neues Projekt</span>
-                  <span className="sm:hidden">Neu</span>
-                </Button>
-              </DialogTrigger>
+              {canCreateProjects && (
+                <DialogTrigger asChild>
+                  <Button size="sm" className="gap-1 sm:gap-2">
+                    <Plus className="h-3 w-3 sm:h-4 sm:w-4" />
+                    <span className="hidden sm:inline">Neues Projekt</span>
+                    <span className="sm:hidden">Neu</span>
+                  </Button>
+                </DialogTrigger>
+              )}
               <DialogContent className="max-w-sm sm:max-w-md">
                 <DialogHeader>
                   <DialogTitle>Neues Projekt erstellen</DialogTitle>
@@ -696,10 +701,12 @@ const Projects = () => {
                 <p className="text-sm text-muted-foreground mb-4">
                   Erstelle dein erstes Projekt
                 </p>
-                <Button onClick={() => setShowNewDialog(true)}>
-                  <Plus className="w-4 h-4 mr-2" />
-                  Neues Projekt
-                </Button>
+                {canCreateProjects && (
+                  <Button onClick={() => setShowNewDialog(true)}>
+                    <Plus className="w-4 h-4 mr-2" />
+                    Neues Projekt
+                  </Button>
+                )}
               </CardContent>
             </Card>
           )}

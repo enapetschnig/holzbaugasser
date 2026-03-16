@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { Plus, Trash2, Package, Edit2, Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -25,6 +25,7 @@ type MaterialEntry = {
 
 const MaterialList = () => {
   const { projectId } = useParams<{ projectId: string }>();
+  const navigate = useNavigate();
   const { toast } = useToast();
   const [entries, setEntries] = useState<MaterialEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -63,7 +64,11 @@ const MaterialList = () => {
       .eq("user_id", user.id)
       .single();
 
-    setIsAdmin(roleData?.role === "administrator");
+    if (roleData?.role !== "administrator") {
+      navigate("/");
+      return;
+    }
+    setIsAdmin(true);
 
     await Promise.all([fetchProjectName(), fetchEntries()]);
     setLoading(false);

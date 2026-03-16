@@ -75,9 +75,11 @@ const TimeTracking = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
 
-  // Admin editing another user's entries
+  // Admin/Vorarbeiter editing another user's entries
   const targetUserId = searchParams.get("user_id");
   const [isAdmin, setIsAdmin] = useState(false);
+  const [isVorarbeiter, setIsVorarbeiter] = useState(false);
+  const canManageTime = isAdmin || isVorarbeiter;
   const [targetUserName, setTargetUserName] = useState("");
 
   const [projects, setProjects] = useState<Project[]>([]);
@@ -255,20 +257,26 @@ const TimeTracking = () => {
     }
   }, [existingDayEntries, loadingDayEntries]);
 
-  // Check admin status and fetch target user name
+  // Check role and redirect mitarbeiter
   useEffect(() => {
-    const checkAdmin = async () => {
+    const checkRole = async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
       const { data } = await supabase
         .from("user_roles")
         .select("role")
         .eq("user_id", user.id)
-        .eq("role", "administrator")
-        .maybeSingle();
-      setIsAdmin(!!data);
+        .single();
+      const role = data?.role;
+      if (role === "mitarbeiter") {
+        toast({ variant: "destructive", title: "Kein Zugriff", description: "Diese Seite ist nur für Administratoren und Vorarbeiter zugänglich." });
+        navigate("/");
+        return;
+      }
+      setIsAdmin(role === "administrator");
+      setIsVorarbeiter(role === "vorarbeiter");
     };
-    checkAdmin();
+    checkRole();
   }, []);
 
   useEffect(() => {
