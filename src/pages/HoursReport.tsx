@@ -231,6 +231,9 @@ export default function HoursReport() {
   const [gridLoading, setGridLoading] = useState(false);
   const [showWithZA, setShowWithZA] = useState(false);
 
+  // Employee Soll override map
+  const [employeeSollMap, setEmployeeSollMap] = useState<Record<string, number | null>>({});
+
   // Tab 2: Leistungsberichte state
   const [berichte, setBerichte] = useState<ExistingBericht[]>([]);
   const [berichteLoading, setBerichteLoading] = useState(false);
@@ -292,6 +295,19 @@ export default function HoursReport() {
         map[p.id] = p;
       });
       setProfileMap(map);
+    }
+
+    // Load employee monats_soll_stunden overrides
+    const { data: employeesData } = await supabase
+      .from("employees")
+      .select("user_id, monats_soll_stunden");
+
+    if (employeesData) {
+      const sollMap: Record<string, number | null> = {};
+      employeesData.forEach((e: any) => {
+        if (e.user_id) sollMap[e.user_id] = e.monats_soll_stunden;
+      });
+      setEmployeeSollMap(sollMap);
     }
   };
 
@@ -541,10 +557,10 @@ export default function HoursReport() {
   // -------------------------------------------------------------------------
 
   const exportToExcel = () => {
-    const monthlyTarget = getMonthlyTargetHours(gridYear, gridMonth);
+    const defaultMonthlyTarget = getMonthlyTargetHours(gridYear, gridMonth);
 
     let html = '<html><head><meta charset="utf-8"></head><body>';
-    html += `<h2>MONAT: ${monthNames[gridMonth - 1]} ${gridYear} = ${monthlyTarget} Std. Regelarbeitszeit</h2>`;
+    html += `<h2>MONAT: ${monthNames[gridMonth - 1]} ${gridYear} = ${defaultMonthlyTarget} Std. Regelarbeitszeit</h2>`;
     html += '<table border="1" cellpadding="4" style="border-collapse:collapse;font-size:11px;">';
 
     // Header row 1: Day numbers
@@ -604,7 +620,7 @@ export default function HoursReport() {
         }
       }
 
-      const soll = monthlyTarget;
+      const soll = employeeSollMap[employee.id] ?? defaultMonthlyTarget;
       const diff = istHours - soll;
       const diffColor = diff >= 0 ? 'color:#16A34A;' : 'color:#DC2626;';
       const diffSign = diff >= 0 ? '+' : '';
@@ -844,7 +860,7 @@ export default function HoursReport() {
                             const employeeDays = gridDataMap[employee.id] || {};
                             let totalHours = 0;
                             let istHours = 0;
-                            const monthlyTarget = getMonthlyTargetHours(gridYear, gridMonth);
+                            const monthlyTarget = employeeSollMap[employee.id] ?? getMonthlyTargetHours(gridYear, gridMonth);
                             for (let d = 1; d <= daysInMonth; d++) {
                               const dd = employeeDays[d];
                               if (dd) {

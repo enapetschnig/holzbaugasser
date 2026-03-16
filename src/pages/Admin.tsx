@@ -67,6 +67,7 @@ interface Employee {
   schuhgroesse: string | null;
   notizen: string | null;
   land: string | null;
+  monats_soll_stunden: number | null;
 }
 
 export default function Admin() {
@@ -1063,77 +1064,6 @@ export default function Admin() {
           <LeaveManagement profiles={profiles.filter(p => p.is_active)} />
         </section>
 
-        {/* ===== MATERIALKATALOG ===== */}
-        <section>
-          <h2 className="text-2xl font-bold mb-4 flex items-center gap-2">
-            <Package className="h-6 w-6" />
-            Materialkatalog
-          </h2>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Materialien verwalten</CardTitle>
-              <CardDescription>
-                Materialien, die Mitarbeiter bei der Zeitbuchung zuordnen können
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex gap-2">
-                <Input
-                  placeholder="Materialname"
-                  value={newMaterialName}
-                  onChange={(e) => setNewMaterialName(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && addMaterial()}
-                  className="flex-1"
-                />
-                <Select value={newMaterialUnit} onValueChange={setNewMaterialUnit}>
-                  <SelectTrigger className="w-[120px]">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Stück">Stück</SelectItem>
-                    <SelectItem value="kg">kg</SelectItem>
-                    <SelectItem value="m²">m²</SelectItem>
-                    <SelectItem value="m">m</SelectItem>
-                    <SelectItem value="Liter">Liter</SelectItem>
-                    <SelectItem value="Sack">Sack</SelectItem>
-                    <SelectItem value="Palette">Palette</SelectItem>
-                  </SelectContent>
-                </Select>
-                <Button onClick={addMaterial} disabled={addingMaterial || !newMaterialName.trim()}>
-                  <Plus className="h-4 w-4 mr-1" />
-                  Hinzufügen
-                </Button>
-              </div>
-
-              <Separator />
-
-              {materials.length === 0 ? (
-                <p className="text-muted-foreground text-center py-4">
-                  Noch keine Materialien angelegt
-                </p>
-              ) : (
-                <div className="space-y-2">
-                  {materials.map((mat) => (
-                    <div key={mat.id} className="flex items-center justify-between p-3 rounded-lg border">
-                      <div>
-                        <span className="font-medium">{mat.name}</span>
-                        <span className="text-muted-foreground ml-2 text-sm">({mat.einheit})</span>
-                      </div>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => deleteMaterial(mat.id)}
-                      >
-                        <Trash2 className="h-4 w-4 text-destructive" />
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </section>
 
         {/* Zeitkonto vorerst deaktiviert */}
         {false && (
@@ -1146,48 +1076,6 @@ export default function Admin() {
         </section>
         )}
 
-        {/* ===== EINSTELLUNGEN SEKTION ===== */}
-        <section>
-          <h2 className="text-2xl font-bold mb-4 flex items-center gap-2">
-            <Settings className="h-6 w-6" />
-            Einstellungen
-          </h2>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>E-Mail-Einstellungen</CardTitle>
-              <CardDescription>
-                Konfigurieren Sie die E-Mail-Adressen für automatische Benachrichtigungen
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="disturbance-email">Regiebericht E-Mail-Empfänger</Label>
-                <div className="flex gap-2">
-                  <Input
-                    id="disturbance-email"
-                    type="email"
-                    placeholder="office@example.com"
-                    value={regiereportEmail}
-                    onChange={(e) => setRegiereportEmail(e.target.value)}
-                    disabled={loadingSettings}
-                    className="flex-1"
-                  />
-                  <Button
-                    onClick={saveRegiereportEmail}
-                    disabled={savingSettings || loadingSettings}
-                  >
-                    <Save className="h-4 w-4 mr-2" />
-                    {savingSettings ? "Speichert..." : "Speichern"}
-                  </Button>
-                </div>
-                <p className="text-sm text-muted-foreground">
-                  Diese E-Mail-Adresse erhält alle Regieberichte als Kopie.
-                </p>
-              </div>
-            </CardContent>
-          </Card>
-        </section>
 
       </main>
 
@@ -1323,6 +1211,19 @@ export default function Admin() {
                             <SelectItem value="geringfuegig">Geringfügig</SelectItem>
                           </SelectContent>
                         </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Beschäftigungsausmaß (Monatsstunden)</Label>
+                        <Input
+                          type="number"
+                          step="0.5"
+                          placeholder="Leer = Standard"
+                          value={formData.monats_soll_stunden ?? ""}
+                          onChange={(e) => setFormData({ ...formData, monats_soll_stunden: e.target.value ? parseFloat(e.target.value) : null })}
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Leer = Standard (Mo–Do 8h, Fr 7h). Für Teilzeit z.B. 80h eintragen.
+                        </p>
                       </div>
                       <div>
                         <Label>Eintrittsdatum</Label>
