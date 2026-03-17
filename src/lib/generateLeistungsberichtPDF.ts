@@ -42,14 +42,14 @@ export type LeistungsberichtPDFData = {
 
 // ── Color constants ──────────────────────────────────────────────────────────
 const DARK_GREEN: [number, number, number] = [43, 91, 44]; // Only for sidebar + logo
-const TITLE_COLOR: [number, number, number] = [30, 30, 30]; // Section titles - dark like paper
+const TITLE_COLOR: [number, number, number] = [0, 0, 0]; // Section titles - pure black like paper
 const BLACK: [number, number, number] = [0, 0, 0];
 const GRAY: [number, number, number] = [120, 120, 120];
 const RED: [number, number, number] = [200, 0, 0];
 const WHITE: [number, number, number] = [255, 255, 255];
 const ORANGE_RED: [number, number, number] = [210, 80, 0];
-const HEADER_GREEN_BG: [number, number, number] = [245, 245, 245]; // Light gray like paper original
-const LINE_COLOR: [number, number, number] = [80, 80, 80];
+const HEADER_BG: [number, number, number] = [255, 255, 255]; // White like paper original
+const LINE_COLOR: [number, number, number] = [0, 0, 0]; // Black lines like paper original
 
 // ── Helper functions ─────────────────────────────────────────────────────────
 function formatGermanDate(dateStr: string): string {
@@ -363,7 +363,7 @@ export async function generateLeistungsberichtPDF(
   const rowH = 5;
 
   // Header background
-  doc.setFillColor(...HEADER_GREEN_BG);
+  doc.setFillColor(...HEADER_BG);
   doc.rect(tableX, y, tableW, headerH, "F");
 
   // Header text
