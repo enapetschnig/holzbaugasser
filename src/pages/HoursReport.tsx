@@ -492,16 +492,16 @@ export default function HoursReport() {
       if (!map[uid]) map[uid] = {};
 
       if (map[uid][day] && !map[uid][day].isAbsence) {
-        // Overlay flags from bericht onto existing time entry data
+        // Set flags from bericht (replace, don't OR - so edits take effect)
         const d = map[uid][day];
-        d.istFahrer = d.istFahrer || bm.ist_fahrer;
-        d.istWerkstatt = d.istWerkstatt || bm.ist_werkstatt;
-        d.schmutzzulage = d.schmutzzulage || bm.schmutzzulage;
-        d.regenSchicht = d.regenSchicht || bm.regen_schicht;
-        if (bm.fahrer_stunden !== null) d.fahrerStunden = bm.fahrer_stunden;
-        if (bm.werkstatt_stunden !== null) d.werkstattStunden = bm.werkstatt_stunden;
-        if (bm.schmutzzulage_stunden !== null) d.schmutzzulageStunden = bm.schmutzzulage_stunden;
-        if (bm.regen_stunden !== null) d.regenStunden = bm.regen_stunden;
+        d.istFahrer = bm.ist_fahrer;
+        d.istWerkstatt = bm.ist_werkstatt;
+        d.schmutzzulage = bm.schmutzzulage;
+        d.regenSchicht = bm.regen_schicht;
+        d.fahrerStunden = bm.fahrer_stunden;
+        d.werkstattStunden = bm.werkstatt_stunden;
+        d.schmutzzulageStunden = bm.schmutzzulage_stunden;
+        d.regenStunden = bm.regen_stunden;
       } else if (!map[uid][day]) {
         // Bericht exists but no time_entry - use bericht summe_stunden
         map[uid][day] = {
