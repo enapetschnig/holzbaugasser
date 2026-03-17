@@ -1096,7 +1096,29 @@ export default function HoursReport() {
                     <span className="text-muted-foreground">Lade Daten...</span>
                   </div>
                 ) : (
-                  <div className="overflow-x-auto border rounded-lg">
+                  <div className="relative">
+                    {/* Scroll buttons */}
+                    <div className="flex justify-between mb-2">
+                      <Button
+                        variant="outline" size="sm" className="h-8 text-xs"
+                        onClick={() => {
+                          const el = document.getElementById("monats-grid");
+                          if (el) el.scrollBy({ left: -300, behavior: "smooth" });
+                        }}
+                      >
+                        ← Links scrollen
+                      </Button>
+                      <Button
+                        variant="outline" size="sm" className="h-8 text-xs"
+                        onClick={() => {
+                          const el = document.getElementById("monats-grid");
+                          if (el) el.scrollBy({ left: 300, behavior: "smooth" });
+                        }}
+                      >
+                        Rechts scrollen →
+                      </Button>
+                    </div>
+                  <div id="monats-grid" className="overflow-x-auto border rounded-lg" style={{ scrollbarWidth: "auto", WebkitOverflowScrolling: "touch" }}>
                     <table
                       className="text-xs border-collapse"
                       style={{ minWidth: `${120 + daysInMonth * 64 + 200}px` }}
@@ -1250,6 +1272,7 @@ export default function HoursReport() {
                         )}
                       </tbody>
                     </table>
+                  </div>
                   </div>
                 )}
 

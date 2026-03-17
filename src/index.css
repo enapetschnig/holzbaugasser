@@ -114,3 +114,23 @@ All colors MUST be HSL.
     @apply bg-background text-foreground;
   }
 }
+
+/* Always show scrollbar on the monthly grid */
+#monats-grid {
+  scrollbar-width: auto;
+  -webkit-overflow-scrolling: touch;
+}
+#monats-grid::-webkit-scrollbar {
+  height: 12px;
+}
+#monats-grid::-webkit-scrollbar-track {
+  background: hsl(var(--muted));
+  border-radius: 6px;
+}
+#monats-grid::-webkit-scrollbar-thumb {
+  background: hsl(var(--primary) / 0.3);
+  border-radius: 6px;
+}
+#monats-grid::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--primary) / 0.5);
+}
