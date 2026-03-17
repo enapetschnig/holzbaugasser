@@ -104,6 +104,10 @@ export default function Admin() {
   // Employee save state
   const [savingEmployee, setSavingEmployee] = useState(false);
 
+  // Lohnzettel upload
+  const [lohnzettelMonat, setLohnzettelMonat] = useState(String(new Date().getMonth() + 1));
+  const [lohnzettelJahr, setLohnzettelJahr] = useState(String(new Date().getFullYear()));
+
 
 
   useEffect(() => {
@@ -1019,47 +1023,78 @@ export default function Admin() {
                 Lohnzettel für Mitarbeiter hochladen (Push-Benachrichtigung wird gesendet)
               </CardDescription>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-4">
+              {/* Monatsauswahl */}
+              <div className="flex gap-3">
+                <Select
+                  value={lohnzettelMonat}
+                  onValueChange={setLohnzettelMonat}
+                >
+                  <SelectTrigger className="w-[160px]">
+                    <SelectValue placeholder="Monat" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {["Jänner","Feber","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember"].map((m, i) => (
+                      <SelectItem key={i} value={String(i + 1)}>{m}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select
+                  value={lohnzettelJahr}
+                  onValueChange={setLohnzettelJahr}
+                >
+                  <SelectTrigger className="w-[100px]">
+                    <SelectValue placeholder="Jahr" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {[new Date().getFullYear() - 1, new Date().getFullYear(), new Date().getFullYear() + 1].map((y) => (
+                      <SelectItem key={y} value={String(y)}>{y}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              {/* Mitarbeiter-Liste */}
               <div className="space-y-3">
-                {profiles.filter(p => p.is_active).map((p) => (
-                  <div key={p.id} className="flex items-center justify-between p-3 rounded-lg border bg-card">
-                    <div className="flex items-center gap-3">
-                      <Avatar>
-                        <AvatarFallback>{p.vorname[0]}{p.nachname[0]}</AvatarFallback>
-                      </Avatar>
-                      <span className="font-medium text-sm">{p.vorname} {p.nachname}</span>
+                {profiles.filter(p => p.is_active).map((p) => {
+                  const monatLabel = ["Jänner","Feber","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember"][parseInt(lohnzettelMonat) - 1] || "";
+                  return (
+                    <div key={p.id} className="flex items-center justify-between p-3 rounded-lg border bg-card">
+                      <div className="flex items-center gap-3">
+                        <Avatar>
+                          <AvatarFallback>{p.vorname[0]}{p.nachname[0]}</AvatarFallback>
+                        </Avatar>
+                        <span className="font-medium text-sm">{p.vorname} {p.nachname}</span>
+                      </div>
+                      <div>
+                        <Input
+                          type="file"
+                          accept=".pdf,image/*"
+                          className="w-auto text-xs"
+                          onChange={async (e) => {
+                            const file = e.target.files?.[0];
+                            if (!file) return;
+                            const filePath = `${p.id}/lohnzettel/${lohnzettelJahr}-${lohnzettelMonat.padStart(2, "0")}_${file.name}`;
+                            const { error: uploadError } = await supabase.storage
+                              .from("employee-documents")
+                              .upload(filePath, file);
+                            if (uploadError) {
+                              toast({ variant: "destructive", title: "Upload fehlgeschlagen", description: uploadError.message });
+                              return;
+                            }
+                            await supabase.from("notifications").insert({
+                              user_id: p.id,
+                              type: "lohnzettel_upload",
+                              title: "Neuer Lohnzettel verfügbar",
+                              message: `Lohnzettel für ${monatLabel} ${lohnzettelJahr} wurde hochgeladen.`,
+                            });
+                            toast({ title: `Lohnzettel ${monatLabel} ${lohnzettelJahr} für ${p.vorname} ${p.nachname} hochgeladen` });
+                            e.target.value = "";
+                          }}
+                        />
+                      </div>
                     </div>
-                    <div>
-                      <Input
-                        type="file"
-                        accept=".pdf,image/*"
-                        className="w-auto text-xs"
-                        onChange={async (e) => {
-                          const file = e.target.files?.[0];
-                          if (!file) return;
-                          const timestamp = Date.now();
-                          const filePath = `${p.id}/lohnzettel/${timestamp}_${file.name}`;
-                          const { error: uploadError } = await supabase.storage
-                            .from("employee-documents")
-                            .upload(filePath, file);
-                          if (uploadError) {
-                            toast({ variant: "destructive", title: "Upload fehlgeschlagen", description: uploadError.message });
-                            return;
-                          }
-                          // Notify employee
-                          await supabase.from("notifications").insert({
-                            user_id: p.id,
-                            type: "lohnzettel_upload",
-                            title: "Neuer Lohnzettel verfügbar",
-                            message: "Ihr Lohnzettel wurde hochgeladen.",
-                          });
-                          toast({ title: `Lohnzettel für ${p.vorname} ${p.nachname} hochgeladen` });
-                          e.target.value = "";
-                        }}
-                      />
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </CardContent>
           </Card>
