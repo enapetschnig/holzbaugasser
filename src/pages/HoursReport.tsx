@@ -24,6 +24,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { getMonthlyTargetHours, getWorkingDaysInMonth, getTargetHoursForDate } from "@/lib/workingHours";
 import { generateStundenauswertungPDF, StundenauswertungPDFData } from "@/lib/generateStundenauswertungPDF";
+import { generateLeistungsberichtPDF, LeistungsberichtPDFData } from "@/lib/generateLeistungsberichtPDF";
 import { format, parseISO } from "date-fns";
 import { de } from "date-fns/locale";
 
@@ -178,56 +179,67 @@ function formatCell(dayData: DayData | null): { text: string; className: string 
   const h = dayData.stunden;
   if (h === 0) return { text: "", className: "" };
 
-  // Build tagged hour segments (e.g., 4F, 2SCH, 3W)
-  const segments: string[] = [];
-  let accountedHours = 0;
+  // Collect all flags with their specific hours
+  const flagParts: string[] = [];
+  const wholeDayFlags: string[] = []; // flags that apply to the whole day (no specific hours)
 
+  // Fahrer
   if (dayData.fahrerStunden !== null && dayData.fahrerStunden > 0) {
-    segments.push(`${formatNumber(dayData.fahrerStunden)}F`);
-    accountedHours += dayData.fahrerStunden;
+    flagParts.push(`${formatNumber(dayData.fahrerStunden)}F`);
   } else if (dayData.istFahrer) {
-    segments.push(`${formatNumber(h)}F`);
-    accountedHours = h;
+    wholeDayFlags.push("F");
   }
 
+  // Werkstatt
   if (dayData.werkstattStunden !== null && dayData.werkstattStunden > 0) {
-    segments.push(`${formatNumber(dayData.werkstattStunden)}W`);
-    accountedHours += dayData.werkstattStunden;
-  } else if (dayData.istWerkstatt && accountedHours === 0) {
-    segments.push(`${formatNumber(h)}W`);
-    accountedHours = h;
+    flagParts.push(`${formatNumber(dayData.werkstattStunden)}W`);
+  } else if (dayData.istWerkstatt) {
+    wholeDayFlags.push("W");
   }
 
+  // Schmutzzulage
   if (dayData.schmutzzulageStunden !== null && dayData.schmutzzulageStunden > 0) {
-    segments.push(`${formatNumber(dayData.schmutzzulageStunden)}SCH`);
-    accountedHours += dayData.schmutzzulageStunden;
-  } else if (dayData.schmutzzulage && accountedHours === 0) {
-    segments.push(`${formatNumber(h)}SCH`);
-    accountedHours = h;
+    flagParts.push(`${formatNumber(dayData.schmutzzulageStunden)}SCH`);
+  } else if (dayData.schmutzzulage) {
+    wholeDayFlags.push("SCH");
   }
 
+  // Regen
   if (dayData.regenStunden !== null && dayData.regenStunden > 0) {
-    segments.push(`${formatNumber(dayData.regenStunden)}R`);
-    accountedHours += dayData.regenStunden;
-  } else if (dayData.regenSchicht && accountedHours === 0) {
-    segments.push(`${formatNumber(h)}R`);
-    accountedHours = h;
+    flagParts.push(`${formatNumber(dayData.regenStunden)}R`);
+  } else if (dayData.regenSchicht) {
+    wholeDayFlags.push("R");
   }
 
-  // If there are tagged segments but remaining untagged hours, add them
-  if (segments.length > 0 && accountedHours < h) {
-    const remaining = h - accountedHours;
-    if (remaining > 0) {
-      segments.push(formatNumber(remaining));
+  // No flags at all → just show hours
+  if (flagParts.length === 0 && wholeDayFlags.length === 0) {
+    return { text: formatNumber(h), className: "" };
+  }
+
+  // Build display: "8/F/SCH" or "4R/4SCH" or "8/F"
+  const parts: string[] = [];
+
+  if (flagParts.length > 0) {
+    // Has specific hour splits (e.g., 4R, 4SCH)
+    parts.push(...flagParts);
+    // Add remaining normal hours if any
+    const accountedHours = flagParts.reduce((sum, p) => {
+      const num = parseFloat(p);
+      return sum + (isNaN(num) ? 0 : num);
+    }, 0);
+    if (accountedHours < h) {
+      const remaining = h - accountedHours;
+      if (remaining > 0) parts.push(formatNumber(remaining));
     }
+    // Append whole-day flags
+    parts.push(...wholeDayFlags);
+  } else {
+    // Only whole-day flags → "8/F/SCH"
+    parts.push(formatNumber(h));
+    parts.push(...wholeDayFlags);
   }
 
-  // If no segments at all, just show total hours
-  if (segments.length === 0) {
-    segments.push(formatNumber(h));
-  }
-
-  return { text: segments.join("/"), className: "" };
+  return { text: parts.join("/"), className: "" };
 }
 
 // ---------------------------------------------------------------------------
@@ -672,6 +684,96 @@ export default function HoursReport() {
       toast({ variant: "destructive", title: "Fehler", description: err.message });
     } finally {
       setSavingCell(false);
+    }
+  };
+
+  // -------------------------------------------------------------------------
+  // Leistungsbericht PDF anzeigen
+  // -------------------------------------------------------------------------
+
+  const handleViewBerichtPDF = async (berichtId: string) => {
+    try {
+      // Load bericht data
+      const { data: bericht } = await supabase
+        .from("leistungsberichte" as any)
+        .select("*")
+        .eq("id", berichtId)
+        .single();
+      if (!bericht) throw new Error("Bericht nicht gefunden");
+
+      const { data: projekt } = await supabase
+        .from("projects")
+        .select("name, plz, adresse")
+        .eq("id", (bericht as any).projekt_id)
+        .single();
+
+      const { data: taetigkeitenData } = await supabase
+        .from("leistungsbericht_taetigkeiten" as any)
+        .select("position, bezeichnung")
+        .eq("bericht_id", berichtId)
+        .order("position");
+
+      const { data: mitarbeiterData } = await supabase
+        .from("leistungsbericht_mitarbeiter" as any)
+        .select("mitarbeiter_id, ist_fahrer, ist_werkstatt, schmutzzulage, regen_schicht, summe_stunden")
+        .eq("bericht_id", berichtId);
+
+      const { data: stundenData } = await supabase
+        .from("leistungsbericht_stunden" as any)
+        .select("mitarbeiter_id, position, stunden")
+        .eq("bericht_id", berichtId);
+
+      const { data: geraeteData } = await supabase
+        .from("leistungsbericht_geraete" as any)
+        .select("geraet, stunden")
+        .eq("bericht_id", berichtId);
+
+      const { data: materialienData } = await supabase
+        .from("leistungsbericht_materialien" as any)
+        .select("bezeichnung, menge")
+        .eq("bericht_id", berichtId);
+
+      const b: any = bericht;
+      const pdfData: LeistungsberichtPDFData = {
+        projektName: projekt?.name || "-",
+        projektOrt: `${projekt?.plz || ""} ${projekt?.adresse || ""}`.trim(),
+        objekt: b.objekt || "",
+        datum: b.datum,
+        wetter: b.wetter || "",
+        ankunftZeit: b.ankunft_zeit || "",
+        abfahrtZeit: b.abfahrt_zeit || "",
+        pauseVon: b.pause_von || "",
+        pauseBis: b.pause_bis || "",
+        lkwStunden: b.lkw_stunden || 0,
+        taetigkeiten: (taetigkeitenData || []).map((t: any) => ({ position: t.position, bezeichnung: t.bezeichnung })),
+        mitarbeiter: (mitarbeiterData || []).map((m: any) => {
+          const p = profileMap[m.mitarbeiter_id];
+          const mStunden = (stundenData || [])
+            .filter((s: any) => s.mitarbeiter_id === m.mitarbeiter_id)
+            .map((s: any) => ({ position: s.position, stunden: s.stunden }));
+          return {
+            name: p ? `${p.nachname} ${p.vorname}` : "?",
+            istFahrer: m.ist_fahrer || false,
+            istWerkstatt: m.ist_werkstatt || false,
+            schmutzzulage: m.schmutzzulage || false,
+            regenSchicht: m.regen_schicht || false,
+            stunden: mStunden,
+            summe: m.summe_stunden || 0,
+          };
+        }),
+        gesamtstunden: (mitarbeiterData || []).reduce((s: number, m: any) => s + (m.summe_stunden || 0), 0),
+        geraete: (geraeteData || []).map((g: any) => ({ geraet: g.geraet, stunden: g.stunden })),
+        materialien: (materialienData || []).map((m: any) => ({ bezeichnung: m.bezeichnung, menge: m.menge || "" })),
+        anmerkungen: b.anmerkungen || "",
+        fertiggestellt: b.fertiggestellt || false,
+      };
+
+      const blob = await generateLeistungsberichtPDF(pdfData);
+      const url = URL.createObjectURL(blob);
+      window.open(url, "_blank");
+    } catch (err: any) {
+      console.error("PDF generation failed:", err);
+      toast({ variant: "destructive", title: "Fehler", description: "PDF konnte nicht erstellt werden." });
     }
   };
 
@@ -1246,9 +1348,7 @@ export default function HoursReport() {
                           <tr
                             key={b.id}
                             className="hover:bg-muted/30 cursor-pointer transition-colors"
-                            onClick={() =>
-                              navigate(`/time-tracking?edit=${b.id}`)
-                            }
+                            onClick={() => handleViewBerichtPDF(b.id)}
                           >
                             <td className="border-b px-3 py-2 whitespace-nowrap">
                               {format(parseISO(b.datum), "dd.MM.yyyy", {
