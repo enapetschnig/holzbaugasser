@@ -1423,14 +1423,11 @@ const TimeTracking = () => {
                             {t.bezeichnung || (t.position === 1 ? pos1Text : `Tätigkeit ${t.position}`)}
                           </span>
                           <Input
-                            type="text" inputMode="decimal"
+                            type="number" step="any" min="0" max="24"
                             className="h-10 w-20 text-center text-base font-medium"
-                            value={row.stunden[t.position] || ""}
+                            value={row.stunden[t.position] ?? ""}
                             onChange={(e) => {
-                              const v = e.target.value.replace(",", ".");
-                              if (v === "" || v === "." || /^\d*\.?\d*$/.test(v)) {
-                                updateMitarbeiterStunden(row.id, t.position, v);
-                              }
+                              updateMitarbeiterStunden(row.id, t.position, e.target.value === "" ? "" : e.target.value);
                             }}
                             placeholder="–"
                           />
@@ -1630,15 +1627,11 @@ const TimeTracking = () => {
                         {taetigkeiten.map((t) => (
                           <td key={t.position} className="px-1 py-1.5 text-center">
                             <Input
-                              type="text"
-                              inputMode="decimal"
+                              type="number" step="any" min="0" max="24"
                               className="h-9 w-16 text-center text-sm px-1"
-                              value={row.stunden[t.position] || ""}
+                              value={row.stunden[t.position] ?? ""}
                               onChange={(e) => {
-                                const v = e.target.value.replace(",", ".");
-                                if (v === "" || v === "." || /^\d*\.?\d*$/.test(v)) {
-                                  updateMitarbeiterStunden(row.id, t.position, v === "" || v === "." ? 0 : parseFloat(v) || 0);
-                                }
+                                updateMitarbeiterStunden(row.id, t.position, e.target.value === "" ? "" : e.target.value);
                               }}
                               placeholder="–"
                             />
