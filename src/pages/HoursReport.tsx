@@ -679,7 +679,12 @@ export default function HoursReport() {
 
       if (stunden > 0 || editType === "absenz") {
         const isFriday = new Date(gridYear, gridMonth - 1, day).getDay() === 5;
-        const defaultHours = isFriday ? 7 : 8;
+        const standardDefault = isFriday ? 7 : 8;
+        // Use employee weekly hours for absence default
+        const empWeekly = employeeSollMap[userId];
+        const defaultHours = empWeekly != null
+          ? Math.round((empWeekly / 39) * standardDefault * 10) / 10
+          : standardDefault;
         const absenzStunden = editType === "absenz" ? (stunden > 0 ? stunden : defaultHours) : stunden;
 
         await supabase.from("time_entries").insert({

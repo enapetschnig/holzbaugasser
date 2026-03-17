@@ -66,6 +66,7 @@ export default function Absence() {
   const [leaveBalance, setLeaveBalance] = useState<{ total_days: number; used_days: number } | null>(null);
   const [existingAbsences, setExistingAbsences] = useState<ExistingAbsence[]>([]);
   const [currentUserId, setCurrentUserId] = useState("");
+  const [weeklyHours, setWeeklyHours] = useState<number | null>(null); // null = standard 39h
 
   useEffect(() => {
     const init = async () => {
@@ -75,6 +76,15 @@ export default function Absence() {
         return;
       }
       setCurrentUserId(user.id);
+      // Load employee weekly hours
+      const { data: empData } = await supabase
+        .from("employees")
+        .select("monats_soll_stunden")
+        .eq("user_id", user.id)
+        .maybeSingle();
+      if (empData?.monats_soll_stunden) {
+        setWeeklyHours(empData.monats_soll_stunden);
+      }
       await Promise.all([
         loadLeaveBalance(user.id),
         loadExistingAbsences(user.id),
@@ -154,7 +164,11 @@ export default function Absence() {
       while (d <= endD) {
         const day = d.getDay();
         if (day !== 0 && day !== 6) {
-          const targetHours = getTargetHoursForDate(d);
+          // Berechne Tages-Soll basierend auf Wochenstunden
+          const standardTarget = getTargetHoursForDate(d); // 8h Mo-Do, 7h Fr
+          const targetHours = weeklyHours != null
+            ? Math.round((weeklyHours / 39) * standardTarget * 10) / 10
+            : standardTarget;
           const isFriday = day === 5;
           const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
           entries.push({
