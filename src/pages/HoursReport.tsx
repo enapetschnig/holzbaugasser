@@ -280,6 +280,9 @@ export default function HoursReport() {
   const [editWerkstatt, setEditWerkstatt] = useState(false);
   const [editSchmutz, setEditSchmutz] = useState(false);
   const [editRegen, setEditRegen] = useState(false);
+  const [editWerkstattStunden, setEditWerkstattStunden] = useState("");
+  const [editSchmutzStunden, setEditSchmutzStunden] = useState("");
+  const [editRegenStunden, setEditRegenStunden] = useState("");
   const [savingCell, setSavingCell] = useState(false);
 
   // Tab 2: Leistungsberichte state
@@ -631,6 +634,9 @@ export default function HoursReport() {
       setEditWerkstatt(dd?.istWerkstatt ?? false);
       setEditSchmutz(dd?.schmutzzulage ?? false);
       setEditRegen(dd?.regenSchicht ?? false);
+      setEditWerkstattStunden(dd?.werkstattStunden != null ? dd.werkstattStunden.toString() : "");
+      setEditSchmutzStunden(dd?.schmutzzulageStunden != null ? dd.schmutzzulageStunden.toString() : "");
+      setEditRegenStunden(dd?.regenStunden != null ? dd.regenStunden.toString() : "");
     }
     setEditingCell({ userId, day, name });
   };
@@ -684,6 +690,9 @@ export default function HoursReport() {
                   ist_werkstatt: editWerkstatt,
                   schmutzzulage: editSchmutz,
                   regen_schicht: editRegen,
+                  werkstatt_stunden: editWerkstattStunden ? parseFloat(editWerkstattStunden) : null,
+                  schmutzzulage_stunden: editSchmutzStunden ? parseFloat(editSchmutzStunden) : null,
+                  regen_stunden: editRegenStunden ? parseFloat(editRegenStunden) : null,
                 })
                 .eq("bericht_id", (b as any).id)
                 .eq("mitarbeiter_id", userId);
@@ -1464,23 +1473,44 @@ export default function HoursReport() {
                     autoFocus
                   />
                 </div>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-2">
                   <label className="flex items-center gap-2 text-sm cursor-pointer">
                     <Checkbox checked={editFahrer} onCheckedChange={(v) => setEditFahrer(v === true)} />
                     F (Fahrer)
                   </label>
-                  <label className="flex items-center gap-2 text-sm cursor-pointer">
-                    <Checkbox checked={editWerkstatt} onCheckedChange={(v) => setEditWerkstatt(v === true)} />
-                    W (Werkstatt)
-                  </label>
-                  <label className="flex items-center gap-2 text-sm cursor-pointer">
-                    <Checkbox checked={editSchmutz} onCheckedChange={(v) => setEditSchmutz(v === true)} />
-                    SCH (Schmutz)
-                  </label>
-                  <label className="flex items-center gap-2 text-sm cursor-pointer">
-                    <Checkbox checked={editRegen} onCheckedChange={(v) => setEditRegen(v === true)} />
-                    R (Regen)
-                  </label>
+                  <div className="flex items-center gap-2">
+                    <label className="flex items-center gap-2 text-sm cursor-pointer">
+                      <Checkbox checked={editWerkstatt} onCheckedChange={(v) => setEditWerkstatt(v === true)} />
+                      W (Werkstatt)
+                    </label>
+                    {editWerkstatt && (
+                      <Input type="number" step="0.5" min="0" className="h-8 w-16 text-sm"
+                        value={editWerkstattStunden} onChange={(e) => setEditWerkstattStunden(e.target.value)}
+                        placeholder="alle" />
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <label className="flex items-center gap-2 text-sm cursor-pointer">
+                      <Checkbox checked={editSchmutz} onCheckedChange={(v) => setEditSchmutz(v === true)} />
+                      SCH (Schmutz)
+                    </label>
+                    {editSchmutz && (
+                      <Input type="number" step="0.5" min="0" className="h-8 w-16 text-sm"
+                        value={editSchmutzStunden} onChange={(e) => setEditSchmutzStunden(e.target.value)}
+                        placeholder="alle" />
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <label className="flex items-center gap-2 text-sm cursor-pointer">
+                      <Checkbox checked={editRegen} onCheckedChange={(v) => setEditRegen(v === true)} />
+                      R (Regen)
+                    </label>
+                    {editRegen && (
+                      <Input type="number" step="0.5" min="0" className="h-8 w-16 text-sm"
+                        value={editRegenStunden} onChange={(e) => setEditRegenStunden(e.target.value)}
+                        placeholder="alle" />
+                    )}
+                  </div>
                 </div>
               </>
             ) : (
