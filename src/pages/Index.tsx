@@ -272,13 +272,38 @@ export default function Index() {
   if (isActivated === false) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center p-4">
-        <div className="text-center space-y-4 max-w-md">
+        <div className="text-center space-y-6 max-w-md">
           <img src="/gasser-logo.png" alt="Holzbau Gasser" className="h-20 mx-auto" />
           <h1 className="text-xl font-bold">Freischaltung ausstehend</h1>
           <p className="text-muted-foreground">
             Ihr Konto wartet auf Freischaltung durch den Administrator.
             Sie werden benachrichtigt, sobald Ihr Zugang aktiviert wurde.
           </p>
+
+          {/* App Installation Guide */}
+          <div className="bg-muted/50 rounded-xl p-5 text-left space-y-4 border">
+            <h2 className="font-semibold text-base text-center">App zum Startbildschirm hinzufügen</h2>
+            <div className="space-y-3">
+              <div className="flex items-start gap-3">
+                <span className="bg-primary text-primary-foreground rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold shrink-0">1</span>
+                <p className="text-sm">Tippen Sie auf das <strong>Teilen-Symbol</strong> (Quadrat mit Pfeil nach oben) in der Safari-Leiste.</p>
+              </div>
+              <div className="flex items-start gap-3">
+                <span className="bg-primary text-primary-foreground rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold shrink-0">2</span>
+                <p className="text-sm">Scrollen Sie nach unten und tippen Sie auf <strong>"Mehr anzeigen"</strong> (falls die Option nicht direkt sichtbar ist).</p>
+              </div>
+              <div className="flex items-start gap-3">
+                <span className="bg-primary text-primary-foreground rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold shrink-0">3</span>
+                <p className="text-sm">Wählen Sie <strong>"Zum Home-Bildschirm"</strong> aus.</p>
+              </div>
+              <div className="flex items-start gap-3">
+                <span className="bg-primary text-primary-foreground rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold shrink-0">4</span>
+                <p className="text-sm">Tippen Sie oben rechts auf <strong>"Hinzufügen"</strong>. Die App erscheint als Icon auf Ihrem Startbildschirm.</p>
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground text-center">Android: Menü (3 Punkte) → "App installieren" oder "Zum Startbildschirm hinzufügen"</p>
+          </div>
+
           <Button variant="outline" onClick={() => supabase.auth.signOut()}>Abmelden</Button>
         </div>
       </div>

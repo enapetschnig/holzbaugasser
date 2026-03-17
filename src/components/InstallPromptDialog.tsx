@@ -224,8 +224,9 @@ export function InstallPromptDialog({ open, onClose }: InstallPromptDialogProps)
                       <h3 className="font-semibold mb-1">Für iPhone/iPad (Safari):</h3>
                       <ol className="list-decimal pl-5 space-y-2 text-sm">
                         <li className="flex items-center gap-2">Tippe unten (oder rechts oben) auf das Teilen Symbol <SquareArrowUp className="inline h-4 w-4" /> (Quadrat mit Pfeil nach oben)</li>
-                        <li className="flex items-center gap-2">Scrolle nach unten und wähle "Zum Home-Bildschirm" <Plus className="inline h-4 w-4" /></li>
-                        <li>Tippe oben rechts auf "Hinzufügen"</li>
+                        <li className="flex items-center gap-2">Scrolle nach unten und tippe auf <strong>"Mehr anzeigen"</strong></li>
+                        <li className="flex items-center gap-2">Wähle <strong>"Zum Home-Bildschirm"</strong> <Plus className="inline h-4 w-4" /></li>
+                        <li>Tippe oben rechts auf <strong>"Hinzufügen"</strong></li>
                       </ol>
                     </div>
                   </div>
