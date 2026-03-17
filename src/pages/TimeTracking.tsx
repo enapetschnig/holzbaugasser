@@ -1320,30 +1320,6 @@ const TimeTracking = () => {
             </div>
           </CardHeader>
           <CardContent>
-            {/* Schmutzzulage & Regen toggles */}
-            <div className="flex flex-wrap items-center gap-4 mb-4">
-              <div className="flex items-center gap-2">
-                <Checkbox
-                  id="schmutzzulage-alle"
-                  checked={schmutzzulageAlle}
-                  onCheckedChange={(v) => setSchmutzzulageAlle(v === true)}
-                />
-                <Label htmlFor="schmutzzulage-alle" className="text-sm cursor-pointer">
-                  Schmutzzulage für alle
-                </Label>
-              </div>
-              <div className="flex items-center gap-2">
-                <Checkbox
-                  id="regen-alle"
-                  checked={regenSchichtAlle}
-                  onCheckedChange={(v) => setRegenSchichtAlle(v === true)}
-                />
-                <Label htmlFor="regen-alle" className="text-sm cursor-pointer">
-                  Regen für alle
-                </Label>
-              </div>
-            </div>
-
             {/* Gleiche Stunden toggle */}
             <div className="flex items-center gap-3 mb-4">
               <Switch
@@ -1354,14 +1330,6 @@ const TimeTracking = () => {
               <Label htmlFor="gleiche-stunden" className="text-sm cursor-pointer">
                 Stunden für alle Mitarbeiter gleich übernehmen
               </Label>
-            </div>
-
-            {/* F/W/S/R Legende */}
-            <div className="flex flex-wrap gap-3 text-xs text-muted-foreground mt-2 mb-4">
-              <span><strong>F</strong> = Fahrer</span>
-              <span><strong>W</strong> = Werkstatt</span>
-              <span><strong>S</strong> = Schmutzzulage</span>
-              <span><strong>R</strong> = Regen/Wetterschicht</span>
             </div>
 
             {/* ===== MOBILE: Card-Layout (< sm) ===== */}
@@ -1415,7 +1383,7 @@ const TimeTracking = () => {
                       </label>
                       <label className="flex items-center gap-2 text-sm">
                         <Checkbox checked={row.schmutzzulage} onCheckedChange={(v) => updateMitarbeiterField(row.id, "schmutzzulage", v === true)} />
-                        Schmutz
+                        Schmutzzulage
                         {row.schmutzzulage && (
                           <Input type="number" step="0.5" min="0" inputMode="decimal"
                             className="h-8 w-14 text-center text-sm"
