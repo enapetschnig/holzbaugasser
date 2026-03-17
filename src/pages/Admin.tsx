@@ -1640,16 +1640,17 @@ export default function Admin() {
       }}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Benutzer löschen</DialogTitle>
+            <DialogTitle>Benutzer deaktivieren</DialogTitle>
             <DialogDescription>
-              Möchten Sie <strong>{userToDelete?.vorname} {userToDelete?.nachname}</strong> wirklich löschen?
+              Möchten Sie <strong>{userToDelete?.vorname} {userToDelete?.nachname}</strong> wirklich deaktivieren?
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4">
             <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-800">
-              Alle Arbeitszeitdaten werden automatisch als Excel heruntergeladen bevor der Benutzer gelöscht wird.
-              Projektbuchungen bleiben erhalten.
+              Arbeitszeitdaten werden als Excel heruntergeladen.
+              Alle Daten (Leistungsberichte, Arbeitszeiten, Stammdaten) bleiben in der Datenbank erhalten.
+              Der Benutzer kann sich nicht mehr einloggen.
             </div>
 
             <div className="flex gap-2">
@@ -1675,44 +1676,32 @@ export default function Admin() {
                   try {
                     const userName = `${userToDelete.vorname} ${userToDelete.nachname}`;
 
-                    // 1. Auto-export Excel before deletion
+                    // 1. Auto-export Excel before deactivation
                     await exportUserTimeEntries(userToDelete.id, userName);
 
-                    // 2. Anonymize time entries: keep project data, mark deleted user
-                    await supabase
-                      .from("time_entries")
-                      .update({ notizen: `[Gelöschter Benutzer: ${userName}]` })
-                      .eq("user_id", userToDelete.id);
-
-                    // 3. Delete disturbances (Regieberichte) for this user
-                    await supabase.from("disturbances").delete().eq("user_id", userToDelete.id);
-
-                    // 4. Delete employee record
-                    await supabase.from("employees").delete().eq("user_id", userToDelete.id);
-
-                    // 5. Delete user roles
-                    await supabase.from("user_roles").delete().eq("user_id", userToDelete.id);
-
-                    // 6. Delete notifications
-                    await supabase.from("notifications").delete().eq("user_id", userToDelete.id);
-
-                    // 7. Deactivate user (blocks app access)
+                    // 2. Deactivate user (blocks app access, name stays everywhere)
                     await supabase
                       .from("profiles")
                       .update({ is_active: false })
                       .eq("id", userToDelete.id);
 
-                    // 8. Delete profile (time_entries.user_id becomes NULL via SET NULL FK)
-                    const { error: profileError } = await supabase
-                      .from("profiles")
-                      .delete()
-                      .eq("id", userToDelete.id);
+                    // 3. Remove role (no more access)
+                    await supabase.from("user_roles").delete().eq("user_id", userToDelete.id);
 
-                    if (profileError) throw profileError;
+                    // 4. Remove notifications (not needed anymore)
+                    await supabase.from("notifications").delete().eq("user_id", userToDelete.id);
+
+                    // 5. Remove time account
+                    await supabase.from("time_account_transactions").delete()
+                      .in("account_id", (await supabase.from("time_accounts").select("id").eq("user_id", userToDelete.id)).data?.map((a: any) => a.id) || []);
+                    await supabase.from("time_accounts").delete().eq("user_id", userToDelete.id);
+
+                    // KEPT: profiles (name stays), employees (Stammdaten), time_entries,
+                    // leistungsbericht_mitarbeiter, leave_balances - all data preserved
 
                     toast({
-                      title: "Benutzer gelöscht",
-                      description: `${userName} wurde gelöscht. Excel wurde heruntergeladen.`,
+                      title: "Benutzer deaktiviert",
+                      description: `${userName} wurde deaktiviert. Alle Daten bleiben erhalten. Excel wurde heruntergeladen.`,
                     });
 
                     fetchUsers({ silent: true });
@@ -1731,7 +1720,7 @@ export default function Admin() {
                 }}
               >
                 <Trash2 className="w-4 h-4 mr-1" />
-                {exportingBeforeDelete ? "Wird gelöscht..." : "Endgültig löschen"}
+                {exportingBeforeDelete ? "Wird deaktiviert..." : "Benutzer deaktivieren"}
               </Button>
             </div>
           </div>
