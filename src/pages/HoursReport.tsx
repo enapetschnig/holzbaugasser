@@ -641,6 +641,31 @@ export default function HoursReport() {
     setEditingCell({ userId, day, name });
   };
 
+  const handleDeleteCell = async () => {
+    if (!editingCell) return;
+    const { userId, day } = editingCell;
+    const dateStr = `${gridYear}-${String(gridMonth).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    setSavingCell(true);
+    try {
+      await supabase.from("time_entries").delete().eq("user_id", userId).eq("datum", dateStr);
+      // Also clean leistungsbericht_mitarbeiter flags
+      const { data: berichte } = await supabase.from("leistungsberichte" as any).select("id").eq("datum", dateStr);
+      if (berichte) {
+        for (const b of berichte) {
+          await supabase.from("leistungsbericht_mitarbeiter" as any).delete()
+            .eq("bericht_id", (b as any).id).eq("mitarbeiter_id", userId);
+        }
+      }
+      setEditingCell(null);
+      toast({ title: "Eintrag gelöscht" });
+      fetchGridData();
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Fehler", description: err.message });
+    } finally {
+      setSavingCell(false);
+    }
+  };
+
   const handleSaveCell = async () => {
     if (!editingCell) return;
     setSavingCell(true);
@@ -649,12 +674,8 @@ export default function HoursReport() {
     const stunden = parseFloat(editStunden) || 0;
 
     try {
-      // Delete existing entry for this day
-      await supabase
-        .from("time_entries")
-        .delete()
-        .eq("user_id", userId)
-        .eq("datum", dateStr);
+      // Delete existing time_entry for this day
+      await supabase.from("time_entries").delete().eq("user_id", userId).eq("datum", dateStr);
 
       if (stunden > 0 || editType === "absenz") {
         const isFriday = new Date(gridYear, gridMonth - 1, day).getDay() === 5;
@@ -672,32 +693,30 @@ export default function HoursReport() {
           project_id: null,
           location_type: editType === "arbeit" ? "baustelle" : null,
         });
+      }
 
-        // Update flags in leistungsbericht_mitarbeiter if this is a work entry
-        if (editType === "arbeit") {
-          // Find any leistungsbericht for this date
-          const { data: berichte } = await supabase
-            .from("leistungsberichte" as any)
-            .select("id")
-            .eq("datum", dateStr);
+      // Always update flags in leistungsbericht_mitarbeiter (even when just changing flags)
+      const { data: berichte } = await supabase
+        .from("leistungsberichte" as any)
+        .select("id")
+        .eq("datum", dateStr);
 
-          if (berichte && berichte.length > 0) {
-            for (const b of berichte) {
-              await supabase
-                .from("leistungsbericht_mitarbeiter" as any)
-                .update({
-                  ist_fahrer: editFahrer,
-                  ist_werkstatt: editWerkstatt,
-                  schmutzzulage: editSchmutz,
-                  regen_schicht: editRegen,
-                  werkstatt_stunden: editWerkstattStunden ? parseFloat(editWerkstattStunden) : null,
-                  schmutzzulage_stunden: editSchmutzStunden ? parseFloat(editSchmutzStunden) : null,
-                  regen_stunden: editRegenStunden ? parseFloat(editRegenStunden) : null,
-                })
-                .eq("bericht_id", (b as any).id)
-                .eq("mitarbeiter_id", userId);
-            }
-          }
+      if (berichte && berichte.length > 0) {
+        const flagUpdate = {
+          ist_fahrer: editType === "arbeit" ? editFahrer : false,
+          ist_werkstatt: editType === "arbeit" ? editWerkstatt : false,
+          schmutzzulage: editType === "arbeit" ? editSchmutz : false,
+          regen_schicht: editType === "arbeit" ? editRegen : false,
+          werkstatt_stunden: editType === "arbeit" && editWerkstattStunden ? parseFloat(editWerkstattStunden) : null,
+          schmutzzulage_stunden: editType === "arbeit" && editSchmutzStunden ? parseFloat(editSchmutzStunden) : null,
+          regen_stunden: editType === "arbeit" && editRegenStunden ? parseFloat(editRegenStunden) : null,
+        };
+        for (const b of berichte) {
+          await supabase
+            .from("leistungsbericht_mitarbeiter" as any)
+            .update(flagUpdate)
+            .eq("bericht_id", (b as any).id)
+            .eq("mitarbeiter_id", userId);
         }
       }
 
@@ -1536,7 +1555,18 @@ export default function HoursReport() {
               <p className="text-xs text-muted-foreground">Leer lassen = Eintrag löschen</p>
             )}
           </div>
-          <DialogFooter className="gap-2">
+          <DialogFooter className="flex flex-col sm:flex-row gap-2">
+            <Button
+              variant="destructive"
+              size="sm"
+              className="sm:mr-auto"
+              disabled={savingCell}
+              onClick={() => {
+                if (confirm("Eintrag für diesen Tag löschen?")) handleDeleteCell();
+              }}
+            >
+              Eintrag löschen
+            </Button>
             <Button variant="outline" onClick={() => setEditingCell(null)}>
               Abbrechen
             </Button>
