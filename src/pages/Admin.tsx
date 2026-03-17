@@ -1164,7 +1164,7 @@ export default function Admin() {
                 <h3 className="font-semibold text-sm">Hochgeladene Lohnzettel</h3>
                 <div className="flex flex-col sm:flex-row gap-2">
                   <Select value={lzFilterMitarbeiter} onValueChange={setLzFilterMitarbeiter}>
-                    <SelectTrigger className="sm:w-[200px]"><SelectValue placeholder="Alle Mitarbeiter" /></SelectTrigger>
+                    <SelectTrigger className="sm:w-[200px]"><SelectValue placeholder="Mitarbeiter wählen..." /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">Alle Mitarbeiter</SelectItem>
                       {profiles.filter(p => p.is_active).map((p) => (
@@ -1184,6 +1184,10 @@ export default function Admin() {
                   </Select>
                 </div>
                 {(() => {
+                  // Erst anzeigen wenn mindestens ein Filter gesetzt ist
+                  if (lzFilterMitarbeiter === "all" && lzFilterMonat === "all") {
+                    return <p className="text-sm text-muted-foreground py-4 text-center">Bitte Mitarbeiter oder Monat auswählen</p>;
+                  }
                   const filtered = uploadedLohnzettel.filter(doc => {
                     if (lzFilterMitarbeiter !== "all" && doc.userId !== lzFilterMitarbeiter) return false;
                     if (lzFilterMonat !== "all" && doc.monatKey !== lzFilterMonat) return false;

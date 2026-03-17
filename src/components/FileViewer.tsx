@@ -185,7 +185,7 @@ export function FileViewer({
           ) : actualFileType === "pdf" ? (
             <div className="w-full h-full flex flex-col">
               <iframe
-                src={fileUrl + "#toolbar=1"}
+                src={signedUrl + "#toolbar=1"}
                 className="w-full flex-1 min-h-[60vh] rounded-lg border"
                 title="PDF Vorschau"
               />
