@@ -1676,10 +1676,13 @@ export default function Admin() {
                   try {
                     const userName = `${userToDelete.vorname} ${userToDelete.nachname}`;
 
-                    // 1. Auto-export Excel
-                    await exportUserTimeEntries(userToDelete.id, userName);
+                    // 1. Export Excel (generate + download)
+                    const exported = await exportUserTimeEntries(userToDelete.id, userName);
+                    if (!exported) {
+                      toast({ title: "Hinweis", description: "Keine Arbeitszeitdaten zum Exportieren vorhanden." });
+                    }
 
-                    // 2. Preserve name in time_entries (mark as deleted user)
+                    // 2. Preserve name in time_entries
                     await supabase
                       .from("time_entries")
                       .update({ notizen: `[Ehem. Mitarbeiter: ${userName}]` })
@@ -1696,19 +1699,19 @@ export default function Admin() {
                         .in("account_id", taIds.map((a: any) => a.id));
                     }
                     await supabase.from("time_accounts").delete().eq("user_id", userToDelete.id);
-
-                    // 4. Delete employee record
                     await supabase.from("employees").delete().eq("user_id", userToDelete.id);
 
-                    // 5. Delete profile (user disappears from all lists)
+                    // 4. Delete profile
                     await supabase.from("profiles").delete().eq("id", userToDelete.id);
 
-                    // Data preserved: time_entries (with name in notizen),
-                    // leistungsbericht_mitarbeiter, leistungsbericht_stunden
+                    // 5. Delete auth user (invalidates ALL sessions immediately)
+                    await supabase.functions.invoke("delete-user", {
+                      body: { userId: userToDelete.id },
+                    });
 
                     toast({
                       title: "Benutzer gelöscht",
-                      description: `${userName} wurde gelöscht. Excel wurde heruntergeladen. Arbeitszeiten bleiben in der Datenbank.`,
+                      description: `${userName} wurde gelöscht.${exported ? " Excel wurde heruntergeladen." : ""} Arbeitszeiten bleiben in der Datenbank.`,
                     });
 
                     fetchUsers({ silent: true });
