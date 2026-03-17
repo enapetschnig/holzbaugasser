@@ -1073,7 +1073,10 @@ export default function Admin() {
                           onChange={async (e) => {
                             const file = e.target.files?.[0];
                             if (!file) return;
-                            const filePath = `${p.id}/lohnzettel/${lohnzettelJahr}-${lohnzettelMonat.padStart(2, "0")}_${file.name}`;
+                            const safeName = file.name
+                              .replace(/[äÄ]/g, "ae").replace(/[öÖ]/g, "oe").replace(/[üÜ]/g, "ue").replace(/ß/g, "ss")
+                              .replace(/[^a-zA-Z0-9._-]/g, "_");
+                            const filePath = `${p.id}/lohnzettel/${lohnzettelJahr}-${lohnzettelMonat.padStart(2, "0")}_${safeName}`;
                             const { error: uploadError } = await supabase.storage
                               .from("employee-documents")
                               .upload(filePath, file);
