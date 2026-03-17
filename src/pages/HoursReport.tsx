@@ -1099,7 +1099,7 @@ export default function HoursReport() {
                   <div className="overflow-x-auto border rounded-lg">
                     <table
                       className="text-xs border-collapse"
-                      style={{ minWidth: `${120 + daysInMonth * 56 + 200}px` }}
+                      style={{ minWidth: `${120 + daysInMonth * 64 + 200}px` }}
                     >
                       <thead>
                         {/* Row 1: Day numbers */}
@@ -1114,7 +1114,7 @@ export default function HoursReport() {
                               <th
                                 key={day}
                                 className={cn(
-                                  "border border-border px-0.5 py-1 text-center font-semibold min-w-[52px] w-[52px]",
+                                  "border border-border px-0.5 py-1 text-center font-semibold min-w-[60px] w-[60px]",
                                   we && "bg-orange-100"
                                 )}
                               >
@@ -1221,7 +1221,7 @@ export default function HoursReport() {
                                       onClick={() => openEditCell(employee.id, day, `${employee.nachname} ${employee.vorname}`)}
                                     >
                                       {cell.badges.length > 0 && (
-                                        <div className="text-[8px] leading-none text-muted-foreground font-bold -mb-0.5">
+                                        <div className="text-[9px] leading-none text-muted-foreground font-bold -mb-0.5">
                                           {cell.badges.join(" ")}
                                         </div>
                                       )}
@@ -1509,7 +1509,7 @@ export default function HoursReport() {
 
       {/* Edit Cell Dialog */}
       <Dialog open={!!editingCell} onOpenChange={(open) => { if (!open) setEditingCell(null); }}>
-        <DialogContent className="max-w-sm">
+        <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle className="text-base">
               {editingCell?.name} — {editingCell ? `${editingCell.day}. ${monthNames[gridMonth - 1]}` : ""}

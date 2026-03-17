@@ -240,7 +240,7 @@ export async function generateStundenauswertungPDF(
 
         // Badges (zulagen) small above
         if (tag.badges) {
-          doc.setFontSize(4.5);
+          doc.setFontSize(5);
           doc.setFont("helvetica", "bold");
           doc.setTextColor(100, 100, 100);
           doc.text(pdfText(tag.badges), x + dayColW / 2, y + 3, {

@@ -181,6 +181,7 @@ const TimeTracking = () => {
 
   // Saving state
   const [saving, setSaving] = useState(false);
+  const [existingEntriesWarning, setExistingEntriesWarning] = useState("");
 
   // Editing existing report
   const [editingBerichtId, setEditingBerichtId] = useState<string | null>(null);
@@ -576,19 +577,20 @@ const TimeTracking = () => {
       const activeMaIds = mitarbeiterRows.filter(r => r.mitarbeiterId).map(r => r.mitarbeiterId);
       const { data: existing } = await supabase
         .from("time_entries")
-        .select("user_id")
+        .select("user_id, stunden, taetigkeit")
         .eq("datum", datum)
         .in("user_id", activeMaIds)
         .not("taetigkeit", "in", '("Urlaub","Krankenstand","Fortbildung","Feiertag","Schule","Weiterbildung")');
 
       if (existing && existing.length > 0) {
-        const dupNames = existing.map(e => {
+        const details = existing.map(e => {
           const p = profiles.find(pr => pr.id === e.user_id);
-          return p ? `${p.vorname} ${p.nachname}` : "?";
+          const name = p ? `${p.vorname} ${p.nachname}` : "?";
+          return `• ${name}: ${e.stunden}h (${e.taetigkeit})`;
         });
-        const uniqueNames = [...new Set(dupNames)];
+        const uniqueDetails = [...new Set(details)];
         const ok = window.confirm(
-          `Für folgende Mitarbeiter wurden am ${datum} bereits Stunden geschrieben:\n\n${uniqueNames.join("\n")}\n\nBestehende Einträge überschreiben?`
+          `Am ${datum} sind bereits Stunden eingetragen:\n\n${uniqueDetails.join("\n")}\n\nBestehende Einträge überschreiben?`
         );
         if (!ok) return;
       }
@@ -824,8 +826,13 @@ const TimeTracking = () => {
         )} wurde erfolgreich gespeichert.`,
       });
 
-      // Reset form
+      // Reset form and advance to next working day
+      const savedDate = datum;
       resetForm();
+      // Set next working day
+      const next = new Date(savedDate + "T00:00:00");
+      do { next.setDate(next.getDate() + 1); } while (next.getDay() === 0 || next.getDay() === 6);
+      setDatum(format(next, "yyyy-MM-dd"));
       loadBerichte();
     } catch (err: any) {
       console.error("Save error:", err);
@@ -1062,6 +1069,28 @@ const TimeTracking = () => {
     }
   };
 
+  // Check for existing entries on selected date
+  useEffect(() => {
+    const checkExisting = async () => {
+      if (!datum || !currentUserId) { setExistingEntriesWarning(""); return; }
+      const { data } = await supabase
+        .from("time_entries")
+        .select("user_id, stunden, taetigkeit")
+        .eq("datum", datum)
+        .not("taetigkeit", "in", '("Urlaub","Krankenstand","Fortbildung","Feiertag","Schule","Weiterbildung")');
+      if (data && data.length > 0) {
+        const details = data.map(e => {
+          const p = profiles.find(pr => pr.id === e.user_id);
+          return `${p ? `${p.vorname} ${p.nachname}` : "?"}: ${e.stunden}h`;
+        });
+        setExistingEntriesWarning(`Für diesen Tag sind bereits Stunden eingetragen:\n${[...new Set(details)].join(", ")}`);
+      } else {
+        setExistingEntriesWarning("");
+      }
+    };
+    checkExisting();
+  }, [datum, currentUserId, profiles]);
+
   // -------------------------------------------------------------------------
   // Render
   // -------------------------------------------------------------------------
@@ -1109,6 +1138,13 @@ const TimeTracking = () => {
             </div>
           </CardHeader>
         </Card>
+
+        {/* Warning if entries exist for this date */}
+        {existingEntriesWarning && (
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-800">
+            <strong>Achtung:</strong> {existingEntriesWarning}
+          </div>
+        )}
 
         {/* ---------- BAUVORHABEN ---------- */}
         <Card>
