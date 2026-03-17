@@ -107,13 +107,21 @@ export default function Admin() {
   // Lohnzettel upload + overview
   const [lohnzettelMonat, setLohnzettelMonat] = useState(String(new Date().getMonth() + 1));
   const [lohnzettelJahr, setLohnzettelJahr] = useState(String(new Date().getFullYear()));
-  const [uploadedLohnzettel, setUploadedLohnzettel] = useState<{ name: string; path: string; userId: string; monat: string }[]>([]);
+  const [uploadedLohnzettel, setUploadedLohnzettel] = useState<{ name: string; path: string; userId: string; monat: string; monatKey: string }[]>([]);
+  const [lzFilterMitarbeiter, setLzFilterMitarbeiter] = useState("all");
+  const [lzFilterMonat, setLzFilterMonat] = useState("all");
+  // Upload preview
+  const [lzUploadFile, setLzUploadFile] = useState<File | null>(null);
+  const [lzUploadPreviewUrl, setLzUploadPreviewUrl] = useState<string | null>(null);
+  const [lzUploadForUser, setLzUploadForUser] = useState("");
+  const [lzUploading, setLzUploading] = useState(false);
 
 
+
+  const MONAT_LABELS = ["Jänner","Feber","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember"];
 
   const fetchLohnzettel = async () => {
-    const allDocs: { name: string; path: string; userId: string; monat: string }[] = [];
-    const monthLabels = ["Jänner","Feber","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember"];
+    const allDocs: { name: string; path: string; userId: string; monat: string; monatKey: string }[] = [];
     for (const p of profiles.filter(pr => pr.is_active)) {
       const { data } = await supabase.storage
         .from("employee-documents")
@@ -121,8 +129,9 @@ export default function Admin() {
       if (data) {
         for (const file of data) {
           const match = file.name.match(/^(\d{4})-(\d{2})_/);
-          const monat = match ? `${monthLabels[parseInt(match[2]) - 1] || match[2]} ${match[1]}` : "";
-          allDocs.push({ name: file.name, path: `${p.id}/lohnzettel/${file.name}`, userId: p.id, monat });
+          const monat = match ? `${MONAT_LABELS[parseInt(match[2]) - 1] || match[2]} ${match[1]}` : "";
+          const monatKey = match ? `${match[1]}-${match[2]}` : "";
+          allDocs.push({ name: file.name, path: `${p.id}/lohnzettel/${file.name}`, userId: p.id, monat, monatKey });
         }
       }
     }
@@ -1036,146 +1045,196 @@ export default function Admin() {
             </CardContent>
           </Card>
 
-          {/* Lohnzettel Upload Section */}
+          {/* Lohnzettel Upload + Übersicht */}
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <FileText className="w-5 h-5" />
-                Lohnzettel hochladen
+                Lohnzettel verwalten
               </CardTitle>
               <CardDescription>
-                Lohnzettel für Mitarbeiter hochladen (Push-Benachrichtigung wird gesendet)
+                Lohnzettel hochladen, ansehen und verwalten
               </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
-              {/* Monatsauswahl */}
-              <div className="flex gap-3">
-                <Select
-                  value={lohnzettelMonat}
-                  onValueChange={setLohnzettelMonat}
-                >
-                  <SelectTrigger className="w-[160px]">
-                    <SelectValue placeholder="Monat" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {["Jänner","Feber","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember"].map((m, i) => (
-                      <SelectItem key={i} value={String(i + 1)}>{m}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Select
-                  value={lohnzettelJahr}
-                  onValueChange={setLohnzettelJahr}
-                >
-                  <SelectTrigger className="w-[100px]">
-                    <SelectValue placeholder="Jahr" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {[new Date().getFullYear() - 1, new Date().getFullYear(), new Date().getFullYear() + 1].map((y) => (
-                      <SelectItem key={y} value={String(y)}>{y}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+            <CardContent className="space-y-6">
+              {/* === Upload-Bereich === */}
+              <div className="border rounded-lg p-4 bg-muted/30 space-y-4">
+                <h3 className="font-semibold text-sm">Neuen Lohnzettel hochladen</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <Select value={lohnzettelMonat} onValueChange={setLohnzettelMonat}>
+                    <SelectTrigger><SelectValue placeholder="Monat" /></SelectTrigger>
+                    <SelectContent>
+                      {MONAT_LABELS.map((m, i) => (
+                        <SelectItem key={i} value={String(i + 1)}>{m}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Select value={lohnzettelJahr} onValueChange={setLohnzettelJahr}>
+                    <SelectTrigger><SelectValue placeholder="Jahr" /></SelectTrigger>
+                    <SelectContent>
+                      {[new Date().getFullYear() - 1, new Date().getFullYear(), new Date().getFullYear() + 1].map((y) => (
+                        <SelectItem key={y} value={String(y)}>{y}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Select value={lzUploadForUser} onValueChange={setLzUploadForUser}>
+                    <SelectTrigger><SelectValue placeholder="Mitarbeiter wählen..." /></SelectTrigger>
+                    <SelectContent>
+                      {profiles.filter(p => p.is_active).map((p) => (
+                        <SelectItem key={p.id} value={p.id}>{p.vorname} {p.nachname}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                {lzUploadForUser && (
+                  <div className="space-y-3">
+                    <Input
+                      type="file"
+                      accept=".pdf,image/*"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0] || null;
+                        setLzUploadFile(file);
+                        if (file) {
+                          setLzUploadPreviewUrl(URL.createObjectURL(file));
+                        } else {
+                          setLzUploadPreviewUrl(null);
+                        }
+                      }}
+                    />
+                    {/* Vorschau */}
+                    {lzUploadPreviewUrl && lzUploadFile && (
+                      <div className="border rounded-lg overflow-hidden bg-white">
+                        <div className="px-3 py-2 bg-muted/50 text-xs font-medium flex items-center justify-between">
+                          <span>Vorschau: {lzUploadFile.name}</span>
+                          <Badge variant="secondary">
+                            {MONAT_LABELS[parseInt(lohnzettelMonat) - 1]} {lohnzettelJahr} — {profiles.find(p => p.id === lzUploadForUser)?.vorname} {profiles.find(p => p.id === lzUploadForUser)?.nachname}
+                          </Badge>
+                        </div>
+                        {lzUploadFile.type === "application/pdf" ? (
+                          <iframe src={lzUploadPreviewUrl} className="w-full h-[300px]" title="PDF Vorschau" />
+                        ) : (
+                          <img src={lzUploadPreviewUrl} alt="Vorschau" className="max-h-[300px] mx-auto object-contain p-2" />
+                        )}
+                      </div>
+                    )}
+                    {lzUploadFile && (
+                      <Button
+                        className="w-full"
+                        disabled={lzUploading}
+                        onClick={async () => {
+                          if (!lzUploadFile || !lzUploadForUser) return;
+                          setLzUploading(true);
+                          const monatLabel = MONAT_LABELS[parseInt(lohnzettelMonat) - 1] || "";
+                          const safeName = lzUploadFile.name
+                            .replace(/[äÄ]/g, "ae").replace(/[öÖ]/g, "oe").replace(/[üÜ]/g, "ue").replace(/ß/g, "ss")
+                            .replace(/[^a-zA-Z0-9._-]/g, "_");
+                          const filePath = `${lzUploadForUser}/lohnzettel/${lohnzettelJahr}-${lohnzettelMonat.padStart(2, "0")}_${safeName}`;
+                          const { error: uploadError } = await supabase.storage
+                            .from("employee-documents")
+                            .upload(filePath, lzUploadFile);
+                          if (uploadError) {
+                            toast({ variant: "destructive", title: "Upload fehlgeschlagen", description: uploadError.message });
+                            setLzUploading(false);
+                            return;
+                          }
+                          await supabase.from("notifications").insert({
+                            user_id: lzUploadForUser,
+                            type: "lohnzettel_upload",
+                            title: "Neuer Lohnzettel verfügbar",
+                            message: `Lohnzettel für ${monatLabel} ${lohnzettelJahr} wurde hochgeladen.`,
+                          });
+                          const p = profiles.find(pr => pr.id === lzUploadForUser);
+                          toast({ title: `Lohnzettel ${monatLabel} ${lohnzettelJahr} für ${p?.vorname} ${p?.nachname} hochgeladen` });
+                          setLzUploadFile(null);
+                          if (lzUploadPreviewUrl) URL.revokeObjectURL(lzUploadPreviewUrl);
+                          setLzUploadPreviewUrl(null);
+                          setLzUploading(false);
+                          fetchLohnzettel();
+                        }}
+                      >
+                        {lzUploading ? "Wird hochgeladen..." : "Lohnzettel hochladen"}
+                      </Button>
+                    )}
+                  </div>
+                )}
               </div>
-              {/* Mitarbeiter-Liste */}
+
+              {/* === Übersicht mit Filter === */}
               <div className="space-y-3">
-                {profiles.filter(p => p.is_active).map((p) => {
-                  const monatLabel = ["Jänner","Feber","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember"][parseInt(lohnzettelMonat) - 1] || "";
-                  return (
-                    <div key={p.id} className="flex items-center justify-between p-3 rounded-lg border bg-card">
-                      <div className="flex items-center gap-3">
-                        <Avatar>
-                          <AvatarFallback>{p.vorname[0]}{p.nachname[0]}</AvatarFallback>
-                        </Avatar>
-                        <span className="font-medium text-sm">{p.vorname} {p.nachname}</span>
-                      </div>
-                      <div>
-                        <Input
-                          type="file"
-                          accept=".pdf,image/*"
-                          className="w-auto text-xs"
-                          onChange={async (e) => {
-                            const file = e.target.files?.[0];
-                            if (!file) return;
-                            const safeName = file.name
-                              .replace(/[äÄ]/g, "ae").replace(/[öÖ]/g, "oe").replace(/[üÜ]/g, "ue").replace(/ß/g, "ss")
-                              .replace(/[^a-zA-Z0-9._-]/g, "_");
-                            const filePath = `${p.id}/lohnzettel/${lohnzettelJahr}-${lohnzettelMonat.padStart(2, "0")}_${safeName}`;
-                            const { error: uploadError } = await supabase.storage
-                              .from("employee-documents")
-                              .upload(filePath, file);
-                            if (uploadError) {
-                              toast({ variant: "destructive", title: "Upload fehlgeschlagen", description: uploadError.message });
-                              return;
-                            }
-                            await supabase.from("notifications").insert({
-                              user_id: p.id,
-                              type: "lohnzettel_upload",
-                              title: "Neuer Lohnzettel verfügbar",
-                              message: `Lohnzettel für ${monatLabel} ${lohnzettelJahr} wurde hochgeladen.`,
-                            });
-                            toast({ title: `Lohnzettel ${monatLabel} ${lohnzettelJahr} für ${p.vorname} ${p.nachname} hochgeladen` });
-                            e.target.value = "";
-                            fetchLohnzettel();
-                          }}
-                        />
-                      </div>
+                <h3 className="font-semibold text-sm">Hochgeladene Lohnzettel</h3>
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <Select value={lzFilterMitarbeiter} onValueChange={setLzFilterMitarbeiter}>
+                    <SelectTrigger className="sm:w-[200px]"><SelectValue placeholder="Alle Mitarbeiter" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Alle Mitarbeiter</SelectItem>
+                      {profiles.filter(p => p.is_active).map((p) => (
+                        <SelectItem key={p.id} value={p.id}>{p.vorname} {p.nachname}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Select value={lzFilterMonat} onValueChange={setLzFilterMonat}>
+                    <SelectTrigger className="sm:w-[160px]"><SelectValue placeholder="Alle Monate" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Alle Monate</SelectItem>
+                      {[...new Set(uploadedLohnzettel.map(d => d.monatKey).filter(Boolean))].sort().reverse().map((key) => {
+                        const [y, m] = key.split("-");
+                        return <SelectItem key={key} value={key}>{MONAT_LABELS[parseInt(m) - 1]} {y}</SelectItem>;
+                      })}
+                    </SelectContent>
+                  </Select>
+                </div>
+                {(() => {
+                  const filtered = uploadedLohnzettel.filter(doc => {
+                    if (lzFilterMitarbeiter !== "all" && doc.userId !== lzFilterMitarbeiter) return false;
+                    if (lzFilterMonat !== "all" && doc.monatKey !== lzFilterMonat) return false;
+                    return true;
+                  });
+                  return filtered.length === 0 ? (
+                    <p className="text-sm text-muted-foreground py-4 text-center">Keine Lohnzettel gefunden</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {filtered.map((doc) => {
+                        const profile = profiles.find(p => p.id === doc.userId);
+                        return (
+                          <div key={doc.path} className="flex items-center justify-between p-3 rounded-lg border bg-card">
+                            <div className="flex items-center gap-3 min-w-0">
+                              <Avatar>
+                                <AvatarFallback>{profile ? `${profile.vorname[0]}${profile.nachname[0]}` : "?"}</AvatarFallback>
+                              </Avatar>
+                              <div className="min-w-0">
+                                <p className="font-medium text-sm">{profile ? `${profile.vorname} ${profile.nachname}` : "?"}</p>
+                                {doc.monat && <Badge variant="secondary" className="text-xs">{doc.monat}</Badge>}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1 shrink-0">
+                              <Button variant="outline" size="sm" onClick={async () => {
+                                const { data } = await supabase.storage.from("employee-documents").createSignedUrl(doc.path, 300);
+                                if (data?.signedUrl) window.open(data.signedUrl, "_blank");
+                              }}>
+                                Ansehen
+                              </Button>
+                              <Button variant="ghost" size="sm" className="text-destructive" onClick={async () => {
+                                if (!confirm("Lohnzettel löschen?")) return;
+                                const { error } = await supabase.storage.from("employee-documents").remove([doc.path]);
+                                if (error) {
+                                  toast({ variant: "destructive", title: "Fehler", description: error.message });
+                                } else {
+                                  toast({ title: "Gelöscht" });
+                                  fetchLohnzettel();
+                                }
+                              }}>
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   );
-                })}
+                })()}
               </div>
             </CardContent>
           </Card>
-
-          {/* Hochgeladene Lohnzettel Übersicht */}
-          {uploadedLohnzettel.length > 0 && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-lg">Hochgeladene Lohnzettel</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-2">
-                  {uploadedLohnzettel.map((doc) => {
-                    const profile = profiles.find(p => p.id === doc.userId);
-                    const displayName = profile ? `${profile.vorname} ${profile.nachname}` : doc.userId;
-                    return (
-                      <div key={doc.path} className="flex items-center justify-between p-3 rounded-lg border bg-card">
-                        <div className="flex items-center gap-3 min-w-0">
-                          <Avatar>
-                            <AvatarFallback>{profile ? `${profile.vorname[0]}${profile.nachname[0]}` : "?"}</AvatarFallback>
-                          </Avatar>
-                          <div className="min-w-0">
-                            <p className="font-medium text-sm">{displayName}</p>
-                            {doc.monat && <Badge variant="secondary" className="text-xs">{doc.monat}</Badge>}
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-1 shrink-0">
-                          <Button variant="outline" size="sm" onClick={async () => {
-                            const { data } = await supabase.storage.from("employee-documents").createSignedUrl(doc.path, 300);
-                            if (data?.signedUrl) window.open(data.signedUrl, "_blank");
-                          }}>
-                            Ansehen
-                          </Button>
-                          <Button variant="ghost" size="sm" className="text-destructive" onClick={async () => {
-                            if (!confirm("Lohnzettel löschen?")) return;
-                            const { error } = await supabase.storage.from("employee-documents").remove([doc.path]);
-                            if (error) {
-                              toast({ variant: "destructive", title: "Fehler", description: error.message });
-                            } else {
-                              toast({ title: "Gelöscht" });
-                              fetchLohnzettel();
-                            }
-                          }}>
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </CardContent>
-            </Card>
-          )}
         </section>
 
         {/* ===== URLAUBSVERWALTUNG ===== */}
