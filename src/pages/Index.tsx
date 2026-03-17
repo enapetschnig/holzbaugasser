@@ -270,8 +270,6 @@ export default function Index() {
   }
 
   if (isActivated === false) {
-    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
-    const isAndroid = /Android/.test(navigator.userAgent);
     const isStandalone = window.matchMedia("(display-mode: standalone)").matches
       || (navigator as any).standalone === true;
 
@@ -287,48 +285,27 @@ export default function Index() {
 
           {/* App Installation Guide - only show if not already installed */}
           {!isStandalone && (
-            <div className="bg-muted/50 rounded-xl p-5 text-left space-y-4 border">
+            <div className="bg-muted/50 rounded-xl p-5 text-left space-y-5 border">
               <h2 className="font-semibold text-base text-center">App zum Startbildschirm hinzufügen</h2>
 
-              {isIOS ? (
-                <div className="space-y-3">
-                  <div className="flex items-start gap-3">
-                    <span className="bg-primary text-primary-foreground rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold shrink-0">1</span>
-                    <p className="text-sm">Tippen Sie auf das <strong>Teilen-Symbol</strong> (Quadrat mit Pfeil nach oben) in der Safari-Leiste.</p>
-                  </div>
-                  <div className="flex items-start gap-3">
-                    <span className="bg-primary text-primary-foreground rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold shrink-0">2</span>
-                    <p className="text-sm">Scrollen Sie nach unten und tippen Sie auf <strong>"Mehr anzeigen"</strong>.</p>
-                  </div>
-                  <div className="flex items-start gap-3">
-                    <span className="bg-primary text-primary-foreground rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold shrink-0">3</span>
-                    <p className="text-sm">Wählen Sie <strong>"Zum Home-Bildschirm"</strong> aus.</p>
-                  </div>
-                  <div className="flex items-start gap-3">
-                    <span className="bg-primary text-primary-foreground rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold shrink-0">4</span>
-                    <p className="text-sm">Tippen Sie oben rechts auf <strong>"Hinzufügen"</strong>.</p>
-                  </div>
+              <div>
+                <p className="text-xs font-semibold text-muted-foreground mb-2">iPhone / iPad (Safari):</p>
+                <div className="space-y-2">
+                  <p className="text-sm">1. Tippen Sie auf das <strong>Teilen-Symbol</strong> (Quadrat mit Pfeil nach oben).</p>
+                  <p className="text-sm">2. Tippen Sie auf <strong>"Mehr anzeigen"</strong>.</p>
+                  <p className="text-sm">3. Wählen Sie <strong>"Zum Home-Bildschirm"</strong>.</p>
+                  <p className="text-sm">4. Tippen Sie auf <strong>"Hinzufügen"</strong>.</p>
                 </div>
-              ) : isAndroid ? (
-                <div className="space-y-3">
-                  <div className="flex items-start gap-3">
-                    <span className="bg-primary text-primary-foreground rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold shrink-0">1</span>
-                    <p className="text-sm">Tippen Sie auf das <strong>Menü</strong> (3 Punkte oben rechts).</p>
-                  </div>
-                  <div className="flex items-start gap-3">
-                    <span className="bg-primary text-primary-foreground rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold shrink-0">2</span>
-                    <p className="text-sm">Wählen Sie <strong>"App installieren"</strong> oder <strong>"Zum Startbildschirm hinzufügen"</strong>.</p>
-                  </div>
-                  <div className="flex items-start gap-3">
-                    <span className="bg-primary text-primary-foreground rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold shrink-0">3</span>
-                    <p className="text-sm">Bestätigen Sie mit <strong>"Installieren"</strong>.</p>
-                  </div>
+              </div>
+
+              <div>
+                <p className="text-xs font-semibold text-muted-foreground mb-2">Android (Chrome):</p>
+                <div className="space-y-2">
+                  <p className="text-sm">1. Tippen Sie auf das <strong>Menü</strong> (3 Punkte oben rechts).</p>
+                  <p className="text-sm">2. Wählen Sie <strong>"App installieren"</strong>.</p>
+                  <p className="text-sm">3. Bestätigen Sie mit <strong>"Installieren"</strong>.</p>
                 </div>
-              ) : (
-                <p className="text-sm text-muted-foreground text-center">
-                  Öffnen Sie diese Seite auf Ihrem Handy, um die App zu installieren.
-                </p>
-              )}
+              </div>
             </div>
           )}
 
