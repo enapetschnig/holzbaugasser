@@ -283,30 +283,15 @@ export default function Index() {
             Bitte schauen Sie später noch einmal vorbei.
           </p>
 
-          {/* App Installation Guide - only show if not already installed */}
+          {/* App Installation Button - only show if not already installed */}
           {!isStandalone && (
-            <div className="bg-muted/50 rounded-xl p-5 text-left space-y-5 border">
-              <h2 className="font-semibold text-base text-center">App zum Startbildschirm hinzufügen</h2>
-
-              <div>
-                <p className="text-xs font-semibold text-muted-foreground mb-2">iPhone / iPad (Safari):</p>
-                <div className="space-y-2">
-                  <p className="text-sm">1. Tippen Sie auf das <strong>Teilen-Symbol</strong> (Quadrat mit Pfeil nach oben).</p>
-                  <p className="text-sm">2. Tippen Sie auf <strong>"Mehr anzeigen"</strong>.</p>
-                  <p className="text-sm">3. Wählen Sie <strong>"Zum Home-Bildschirm"</strong>.</p>
-                  <p className="text-sm">4. Tippen Sie auf <strong>"Hinzufügen"</strong>.</p>
-                </div>
-              </div>
-
-              <div>
-                <p className="text-xs font-semibold text-muted-foreground mb-2">Android (Chrome):</p>
-                <div className="space-y-2">
-                  <p className="text-sm">1. Tippen Sie auf das <strong>Menü</strong> (3 Punkte oben rechts).</p>
-                  <p className="text-sm">2. Wählen Sie <strong>"App installieren"</strong>.</p>
-                  <p className="text-sm">3. Bestätigen Sie mit <strong>"Installieren"</strong>.</p>
-                </div>
-              </div>
-            </div>
+            <Button
+              variant="outline"
+              className="w-full"
+              onClick={handleRestartInstallGuide}
+            >
+              App zum Startbildschirm hinzufügen
+            </Button>
           )}
 
           <Button variant="outline" onClick={() => supabase.auth.signOut()}>Abmelden</Button>
