@@ -64,7 +64,7 @@ type MitarbeiterRow = {
   werkstattStunden: string;
   schmutzzulageStunden: string;
   regenStunden: string;
-  stunden: Record<number, number>; // position -> hours
+  stunden: Record<number, number | string>; // position -> hours (string during editing)
 };
 
 type ExistingBericht = {
@@ -88,7 +88,12 @@ function calcPauseMinutes(von: string, bis: string): number {
 }
 
 function sumStunden(row: MitarbeiterRow): number {
-  return Object.values(row.stunden).reduce((a, b) => a + (b || 0), 0);
+  return Object.values(row.stunden).reduce((a, b) => a + (typeof b === "string" ? parseFloat(b) || 0 : b || 0), 0);
+}
+
+function parseStunden(val: number | string): number {
+  if (typeof val === "string") return parseFloat(val) || 0;
+  return val || 0;
 }
 
 function createEmptyMitarbeiterRow(): MitarbeiterRow {
@@ -385,7 +390,7 @@ const TimeTracking = () => {
   const updateMitarbeiterStunden = (
     id: string,
     position: number,
-    value: number
+    value: number | string
   ) => {
     setMitarbeiterRows((prev) => {
       if (gleicheStundenFuerAlle) {
@@ -493,6 +498,17 @@ const TimeTracking = () => {
       prev.map((r) => ({ ...r, regenSchicht: regenSchichtAlle }))
     );
   }, [regenSchichtAlle]);
+
+  // When "gleiche Stunden" is activated, copy first row's stunden to all others
+  useEffect(() => {
+    if (gleicheStundenFuerAlle) {
+      setMitarbeiterRows((prev) => {
+        if (prev.length <= 1) return prev;
+        const firstStunden = prev[0].stunden;
+        return prev.map((r, i) => i === 0 ? r : { ...r, stunden: { ...firstStunden } });
+      });
+    }
+  }, [gleicheStundenFuerAlle]);
 
   // Auto-select current user as first mitarbeiter
   useEffect(() => {
@@ -683,8 +699,9 @@ const TimeTracking = () => {
       // 5. Create stunden records (matrix entries)
       const stundenInserts: any[] = [];
       for (const row of activeMitarbeiter) {
-        for (const [posStr, hours] of Object.entries(row.stunden)) {
+        for (const [posStr, rawHours] of Object.entries(row.stunden)) {
           const pos = Number(posStr);
+          const hours = parseStunden(rawHours);
           if (hours > 0 && positionToTaetigkeitId[pos]) {
             stundenInserts.push({
               bericht_id: berichtId,
@@ -712,8 +729,9 @@ const TimeTracking = () => {
       const timeEntryInserts = activeMitarbeiter.map((r) => {
         // Build activity description from hours
         const parts: string[] = [];
-        for (const [posStr, hours] of Object.entries(r.stunden)) {
+        for (const [posStr, rawHours] of Object.entries(r.stunden)) {
           const pos = Number(posStr);
+          const hours = parseStunden(rawHours);
           if (hours > 0) {
             const tObj = finalTaetigkeiten.find((t) => t.position === pos);
             if (tObj && !tObj.bezeichnung.startsWith("Pause")) {
@@ -1411,7 +1429,7 @@ const TimeTracking = () => {
                             onChange={(e) => {
                               const v = e.target.value.replace(",", ".");
                               if (v === "" || v === "." || /^\d*\.?\d*$/.test(v)) {
-                                updateMitarbeiterStunden(row.id, t.position, v === "" || v === "." ? 0 : parseFloat(v) || 0);
+                                updateMitarbeiterStunden(row.id, t.position, v);
                               }
                             }}
                             placeholder="–"
