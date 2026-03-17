@@ -674,18 +674,18 @@ export default function HoursReport() {
     const stunden = parseFloat(editStunden) || 0;
 
     try {
+      const isFriday = new Date(gridYear, gridMonth - 1, day).getDay() === 5;
+      const standardDefault = isFriday ? 7 : 8;
+      const empWeekly = employeeSollMap[userId];
+      const defaultHours = empWeekly != null
+        ? Math.round((empWeekly / 39) * standardDefault * 10) / 10
+        : standardDefault;
+      const absenzStunden = editType === "absenz" ? (stunden > 0 ? stunden : defaultHours) : stunden;
+
       // Delete existing time_entry for this day
       await supabase.from("time_entries").delete().eq("user_id", userId).eq("datum", dateStr);
 
       if (stunden > 0 || editType === "absenz") {
-        const isFriday = new Date(gridYear, gridMonth - 1, day).getDay() === 5;
-        const standardDefault = isFriday ? 7 : 8;
-        // Use employee weekly hours for absence default
-        const empWeekly = employeeSollMap[userId];
-        const defaultHours = empWeekly != null
-          ? Math.round((empWeekly / 39) * standardDefault * 10) / 10
-          : standardDefault;
-        const absenzStunden = editType === "absenz" ? (stunden > 0 ? stunden : defaultHours) : stunden;
 
         await supabase.from("time_entries").insert({
           user_id: userId,
@@ -700,28 +700,77 @@ export default function HoursReport() {
         });
       }
 
-      // Always update flags in leistungsbericht_mitarbeiter (even when just changing flags)
+      // Always update flags in leistungsbericht_mitarbeiter
+      const flagData = {
+        ist_fahrer: editType === "arbeit" ? editFahrer : false,
+        ist_werkstatt: editType === "arbeit" ? editWerkstatt : false,
+        schmutzzulage: editType === "arbeit" ? editSchmutz : false,
+        regen_schicht: editType === "arbeit" ? editRegen : false,
+        fahrer_stunden: null as number | null,
+        werkstatt_stunden: editType === "arbeit" && editWerkstattStunden ? parseFloat(editWerkstattStunden) : null,
+        schmutzzulage_stunden: editType === "arbeit" && editSchmutzStunden ? parseFloat(editSchmutzStunden) : null,
+        regen_stunden: editType === "arbeit" && editRegenStunden ? parseFloat(editRegenStunden) : null,
+      };
+
       const { data: berichte } = await supabase
         .from("leistungsberichte" as any)
         .select("id")
         .eq("datum", dateStr);
 
       if (berichte && berichte.length > 0) {
-        const flagUpdate = {
-          ist_fahrer: editType === "arbeit" ? editFahrer : false,
-          ist_werkstatt: editType === "arbeit" ? editWerkstatt : false,
-          schmutzzulage: editType === "arbeit" ? editSchmutz : false,
-          regen_schicht: editType === "arbeit" ? editRegen : false,
-          werkstatt_stunden: editType === "arbeit" && editWerkstattStunden ? parseFloat(editWerkstattStunden) : null,
-          schmutzzulage_stunden: editType === "arbeit" && editSchmutzStunden ? parseFloat(editSchmutzStunden) : null,
-          regen_stunden: editType === "arbeit" && editRegenStunden ? parseFloat(editRegenStunden) : null,
-        };
+        // Update existing bericht entries
         for (const b of berichte) {
+          // Check if mitarbeiter entry exists
+          const { data: existing } = await supabase
+            .from("leistungsbericht_mitarbeiter" as any)
+            .select("id")
+            .eq("bericht_id", (b as any).id)
+            .eq("mitarbeiter_id", userId)
+            .maybeSingle();
+
+          if (existing) {
+            await supabase
+              .from("leistungsbericht_mitarbeiter" as any)
+              .update({ ...flagData, summe_stunden: stunden > 0 ? stunden : absenzStunden })
+              .eq("bericht_id", (b as any).id)
+              .eq("mitarbeiter_id", userId);
+          } else {
+            // MA was not in this bericht - create entry
+            await supabase
+              .from("leistungsbericht_mitarbeiter" as any)
+              .insert({
+                bericht_id: (b as any).id,
+                mitarbeiter_id: userId,
+                ...flagData,
+                summe_stunden: stunden > 0 ? stunden : absenzStunden,
+              });
+          }
+        }
+      } else if (editType === "arbeit" && (editFahrer || editWerkstatt || editSchmutz || editRegen)) {
+        // No bericht exists but flags are set - create a minimal bericht
+        const { data: { user } } = await supabase.auth.getUser();
+        const { data: newBericht } = await supabase
+          .from("leistungsberichte" as any)
+          .insert({
+            datum: dateStr,
+            erstellt_von: user?.id,
+            ankunft_zeit: "07:00",
+            abfahrt_zeit: isFriday ? "15:00" : "16:00",
+            pause_von: "11:00",
+            pause_bis: "11:30",
+          })
+          .select("id")
+          .single();
+
+        if (newBericht) {
           await supabase
             .from("leistungsbericht_mitarbeiter" as any)
-            .update(flagUpdate)
-            .eq("bericht_id", (b as any).id)
-            .eq("mitarbeiter_id", userId);
+            .insert({
+              bericht_id: (newBericht as any).id,
+              mitarbeiter_id: userId,
+              ...flagData,
+              summe_stunden: stunden,
+            });
         }
       }
 
