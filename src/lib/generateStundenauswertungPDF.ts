@@ -65,8 +65,8 @@ export async function generateStundenauswertungPDF(
 
   // Column widths
   const nameColW = 36;        // Employee name column (left)
-  const summaryColW = 14;     // Σ, Soll, +/-, ZK columns
-  const summaryCount = 4;
+  const summaryColW = 14;     // Sum, Soll, +/- columns
+  const summaryCount = 3;
 
   // Calculate day column width to fill available space
   const availableW = pageW - margin * 2 - nameColW - summaryColW * summaryCount;
@@ -140,7 +140,7 @@ export async function generateStundenauswertungPDF(
   }
 
   // Summary column headers
-  const summaryLabels = ["\u03A3", "Soll", "+/-", "ZK"];
+  const summaryLabels = ["Sum", "Soll", "+/-"];
   for (let s = 0; s < summaryCount; s++) {
     const x = startX + nameColW + numDays * dayColW + s * summaryColW;
     doc.setFillColor(200, 200, 200);
@@ -286,22 +286,6 @@ export async function generateStundenauswertungPDF(
       { align: "center" }
     );
 
-    // ZK
-    const zkX = diffX + summaryColW;
-    doc.setFillColor(240, 240, 240);
-    doc.rect(zkX, y, summaryColW, empRowH, "FD");
-    const zk = emp.zeitkonto;
-    if (zk != null) {
-      doc.setTextColor(zk >= 0 ? 22 : 220, zk >= 0 ? 163 : 38, zk >= 0 ? 74 : 38);
-      doc.setFont("helvetica", "bold");
-      const zkSign = zk >= 0 ? "+" : "";
-      doc.text(
-        `${zkSign}${formatNum(zk)}`,
-        zkX + summaryColW / 2,
-        y + empRowH / 2 + 1,
-        { align: "center" }
-      );
-    }
     doc.setTextColor(0, 0, 0);
   }
 

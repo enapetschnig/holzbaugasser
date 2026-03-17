@@ -675,6 +675,30 @@ export default function HoursReport() {
           project_id: null,
           location_type: editType === "arbeit" ? "baustelle" : null,
         });
+
+        // Update flags in leistungsbericht_mitarbeiter if this is a work entry
+        if (editType === "arbeit") {
+          // Find any leistungsbericht for this date
+          const { data: berichte } = await supabase
+            .from("leistungsberichte" as any)
+            .select("id")
+            .eq("datum", dateStr);
+
+          if (berichte && berichte.length > 0) {
+            for (const b of berichte) {
+              await supabase
+                .from("leistungsbericht_mitarbeiter" as any)
+                .update({
+                  ist_fahrer: editFahrer,
+                  ist_werkstatt: editWerkstatt,
+                  schmutzzulage: editSchmutz,
+                  regen_schicht: editRegen,
+                })
+                .eq("bericht_id", (b as any).id)
+                .eq("mitarbeiter_id", userId);
+            }
+          }
+        }
       }
 
       setEditingCell(null);
@@ -822,7 +846,6 @@ export default function HoursReport() {
           summe: totalHours,
           soll: employeeSoll,
           differenz: displayIst - employeeSoll,
-          zeitkonto: zeitkontoMap[p.id] ?? undefined,
         };
       }),
     };
@@ -1017,9 +1040,6 @@ export default function HoursReport() {
                           <th className="border border-border px-2 py-1 text-center font-semibold bg-gray-100 min-w-[50px]">
                             +/-
                           </th>
-                          <th className="border border-border px-2 py-1 text-center font-semibold bg-gray-100 min-w-[50px]" title="Zeitkonto">
-                            ZK
-                          </th>
                         </tr>
                         {/* Row 2: Weekday abbreviations */}
                         <tr className="bg-muted/40">
@@ -1048,14 +1068,13 @@ export default function HoursReport() {
                           <th className="border border-border px-2 py-0.5 text-center text-[10px] bg-gray-100">&nbsp;</th>
                           <th className="border border-border px-2 py-0.5 text-center text-[10px] bg-gray-100">&nbsp;</th>
                           <th className="border border-border px-2 py-0.5 text-center text-[10px] bg-gray-100">&nbsp;</th>
-                          <th className="border border-border px-2 py-0.5 text-center text-[10px] bg-gray-100">&nbsp;</th>
                         </tr>
                       </thead>
                       <tbody>
                         {gridEmployees.length === 0 ? (
                           <tr>
                             <td
-                              colSpan={daysInMonth + 6}
+                              colSpan={daysInMonth + 5}
                               className="text-center py-8 text-muted-foreground"
                             >
                               Keine Mitarbeiter gefunden
@@ -1125,14 +1144,6 @@ export default function HoursReport() {
                                   diff >= 0 ? "text-green-600" : "text-red-600"
                                 )}>
                                   {diff >= 0 ? "+" : ""}{formatNumber(diff)}
-                                </td>
-                                <td className={cn(
-                                  "border border-border px-2 py-1 text-center font-bold bg-gray-50 whitespace-nowrap",
-                                  (zeitkontoMap[employee.id] || 0) >= 0 ? "text-green-600" : "text-red-600"
-                                )}>
-                                  {zeitkontoMap[employee.id] != null
-                                    ? `${(zeitkontoMap[employee.id] || 0) >= 0 ? "+" : ""}${formatNumber(zeitkontoMap[employee.id] || 0)}`
-                                    : "-"}
                                 </td>
                               </tr>
                             );
