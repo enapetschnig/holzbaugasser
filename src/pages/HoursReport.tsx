@@ -1006,7 +1006,7 @@ export default function HoursReport() {
                   <div className="overflow-x-auto border rounded-lg">
                     <table
                       className="text-xs border-collapse"
-                      style={{ minWidth: `${120 + daysInMonth * 44 + 56 + 150}px` }}
+                      style={{ minWidth: `${120 + daysInMonth * 56 + 200}px` }}
                     >
                       <thead>
                         {/* Row 1: Day numbers */}
@@ -1021,7 +1021,7 @@ export default function HoursReport() {
                               <th
                                 key={day}
                                 className={cn(
-                                  "border border-border px-0.5 py-1 text-center font-semibold min-w-[40px] w-10",
+                                  "border border-border px-0.5 py-1 text-center font-semibold min-w-[52px] w-[52px]",
                                   we && "bg-orange-100"
                                 )}
                               >
@@ -1128,7 +1128,7 @@ export default function HoursReport() {
                                       onClick={() => openEditCell(employee.id, day, `${employee.nachname} ${employee.vorname}`)}
                                     >
                                       {cell.badges.length > 0 && (
-                                        <div className="text-[7px] leading-none text-muted-foreground font-medium -mb-0.5">
+                                        <div className="text-[8px] leading-none text-muted-foreground font-bold -mb-0.5">
                                           {cell.badges.join(" ")}
                                         </div>
                                       )}

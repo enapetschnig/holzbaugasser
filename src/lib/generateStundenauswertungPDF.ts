@@ -65,22 +65,22 @@ export async function generateStundenauswertungPDF(
   const numEmployees = data.mitarbeiter.length;
 
   // Column widths
-  const nameColW = 36;        // Employee name column (left)
-  const summaryColW = 14;     // Sum, Soll, +/- columns
+  const nameColW = 38;        // Employee name column (left)
+  const summaryColW = 16;     // Sum, Soll, +/- columns
   const summaryCount = 3;
 
   // Calculate day column width to fill available space
   const availableW = pageW - margin * 2 - nameColW - summaryColW * summaryCount;
-  const dayColW = Math.max(8, Math.min(12, availableW / Math.max(numDays, 1)));
+  const dayColW = Math.max(9, Math.min(13, availableW / Math.max(numDays, 1)));
 
   // Table dimensions
   const tableW = nameColW + dayColW * numDays + summaryColW * summaryCount;
   const startX = margin;
 
   // Row heights
-  const headerRowH = 7;   // Day number header row
+  const headerRowH = 8;   // Day number header row
   const wdayRowH = 5;     // Weekday abbreviation row
-  const empRowH = 7;      // Each employee row
+  const empRowH = 9;      // Each employee row (taller for badges)
 
   const startY = margin + 14; // space for title
 
@@ -197,7 +197,7 @@ export async function generateStundenauswertungPDF(
     // Name cell
     doc.setFillColor(e % 2 === 0 ? 255 : 248, e % 2 === 0 ? 255 : 248, e % 2 === 0 ? 255 : 248);
     doc.rect(startX, y, nameColW, empRowH, "FD");
-    doc.setFontSize(6);
+    doc.setFontSize(7);
     doc.setFont("helvetica", "bold");
     doc.setTextColor(0, 0, 0);
     doc.text(pdfText(emp.name), startX + 1.5, y + empRowH / 2 + 1);
@@ -240,10 +240,10 @@ export async function generateStundenauswertungPDF(
 
         // Badges (zulagen) small above
         if (tag.badges) {
-          doc.setFontSize(3.5);
+          doc.setFontSize(4.5);
           doc.setFont("helvetica", "bold");
           doc.setTextColor(100, 100, 100);
-          doc.text(pdfText(tag.badges), x + dayColW / 2, y + 2.5, {
+          doc.text(pdfText(tag.badges), x + dayColW / 2, y + 3, {
             align: "center",
           });
           // Reset color for hours
@@ -252,8 +252,8 @@ export async function generateStundenauswertungPDF(
           else doc.setTextColor(0, 0, 0);
         }
 
-        doc.setFontSize(5.5);
-        doc.text(pdfText(content), x + dayColW / 2, y + empRowH / 2 + (tag.badges ? 1.5 : 1), {
+        doc.setFontSize(6.5);
+        doc.text(pdfText(content), x + dayColW / 2, y + empRowH / 2 + (tag.badges ? 2 : 1), {
           align: "center",
         });
         doc.setTextColor(0, 0, 0);
@@ -264,7 +264,7 @@ export async function generateStundenauswertungPDF(
     const sumX = startX + nameColW + numDays * dayColW;
     doc.setFillColor(230, 230, 230);
     doc.rect(sumX, y, summaryColW, empRowH, "FD");
-    doc.setFontSize(6);
+    doc.setFontSize(7);
     doc.setFont("helvetica", "bold");
     doc.setTextColor(0, 0, 0);
     doc.text(
