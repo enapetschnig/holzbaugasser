@@ -1323,16 +1323,17 @@ const TimeTracking = () => {
             <div className="sm:hidden space-y-3">
               {mitarbeiterRows.map((row) => {
                 const total = sumStunden(row);
+                const selectedProfile = profiles.find(p => p.id === row.mitarbeiterId);
                 return (
-                  <div key={row.id} className="border rounded-lg p-3 bg-card space-y-3">
-                    {/* Name + Delete */}
+                  <div key={row.id} className="border-2 rounded-xl p-4 bg-card space-y-3">
+                    {/* Name prominent + Delete */}
                     <div className="flex items-center gap-2">
                       <Select
                         value={row.mitarbeiterId}
                         onValueChange={(v) => updateMitarbeiterField(row.id, "mitarbeiterId", v)}
                       >
-                        <SelectTrigger className="h-9 text-sm flex-1">
-                          <SelectValue placeholder="Mitarbeiter..." />
+                        <SelectTrigger className="h-11 text-base font-semibold flex-1">
+                          <SelectValue placeholder="Mitarbeiter wählen..." />
                         </SelectTrigger>
                         <SelectContent>
                           {profiles.map((p) => (
@@ -1343,70 +1344,65 @@ const TimeTracking = () => {
                         </SelectContent>
                       </Select>
                       {mitarbeiterRows.length > 1 && (
-                        <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
+                        <Button variant="ghost" size="icon" className="h-10 w-10 shrink-0 text-muted-foreground hover:text-destructive"
                           onClick={() => removeMitarbeiter(row.id)}>
-                          <Trash2 className="h-4 w-4" />
+                          <Trash2 className="h-5 w-5" />
                         </Button>
                       )}
                     </div>
-                    {/* F/W/SCH/R Flags */}
-                    <div className="flex flex-wrap gap-3">
-                      <label className="flex items-center gap-1.5 text-xs">
+
+                    {/* Flags: F nur Checkbox, W/SCH/R mit Stunden */}
+                    <div className="flex flex-wrap gap-x-4 gap-y-2">
+                      <label className="flex items-center gap-2 text-sm font-medium">
                         <Checkbox checked={row.istFahrer} onCheckedChange={(v) => updateMitarbeiterField(row.id, "istFahrer", v === true)} />
-                        F
-                        {row.istFahrer && (
-                          <Input type="number" step="0.25" min="0" inputMode="decimal"
-                            className="h-7 w-12 text-center text-xs px-0.5"
-                            value={row.fahrerStunden}
-                            onChange={(e) => updateMitarbeiterField(row.id, "fahrerStunden", e.target.value)}
-                            placeholder="alle" />
-                        )}
+                        Fahrer
                       </label>
-                      <label className="flex items-center gap-1.5 text-xs">
+                      <label className="flex items-center gap-2 text-sm">
                         <Checkbox checked={row.istWerkstatt} onCheckedChange={(v) => updateMitarbeiterField(row.id, "istWerkstatt", v === true)} />
-                        W
+                        Werk
                         {row.istWerkstatt && (
-                          <Input type="number" step="0.25" min="0" inputMode="decimal"
-                            className="h-7 w-12 text-center text-xs px-0.5"
+                          <Input type="number" step="0.5" min="0" inputMode="decimal"
+                            className="h-8 w-14 text-center text-sm"
                             value={row.werkstattStunden}
                             onChange={(e) => updateMitarbeiterField(row.id, "werkstattStunden", e.target.value)}
-                            placeholder="alle" />
+                            placeholder="h" />
                         )}
                       </label>
-                      <label className="flex items-center gap-1.5 text-xs">
+                      <label className="flex items-center gap-2 text-sm">
                         <Checkbox checked={row.schmutzzulage} onCheckedChange={(v) => updateMitarbeiterField(row.id, "schmutzzulage", v === true)} />
-                        SCH
+                        Schmutz
                         {row.schmutzzulage && (
-                          <Input type="number" step="0.25" min="0" inputMode="decimal"
-                            className="h-7 w-12 text-center text-xs px-0.5"
+                          <Input type="number" step="0.5" min="0" inputMode="decimal"
+                            className="h-8 w-14 text-center text-sm"
                             value={row.schmutzzulageStunden}
                             onChange={(e) => updateMitarbeiterField(row.id, "schmutzzulageStunden", e.target.value)}
-                            placeholder="alle" />
+                            placeholder="h" />
                         )}
                       </label>
-                      <label className="flex items-center gap-1.5 text-xs">
+                      <label className="flex items-center gap-2 text-sm">
                         <Checkbox checked={row.regenSchicht} onCheckedChange={(v) => updateMitarbeiterField(row.id, "regenSchicht", v === true)} />
-                        R
+                        Regen
                         {row.regenSchicht && (
-                          <Input type="number" step="0.25" min="0" inputMode="decimal"
-                            className="h-7 w-12 text-center text-xs px-0.5"
+                          <Input type="number" step="0.5" min="0" inputMode="decimal"
+                            className="h-8 w-14 text-center text-sm"
                             value={row.regenStunden}
                             onChange={(e) => updateMitarbeiterField(row.id, "regenStunden", e.target.value)}
-                            placeholder="alle" />
+                            placeholder="h" />
                         )}
                       </label>
                     </div>
-                    {/* Activities as list */}
-                    <div className="space-y-1.5">
+
+                    {/* Activities */}
+                    <div className="space-y-2">
                       {taetigkeiten.map((t) => (
                         <div key={t.position} className="flex items-center gap-2">
-                          <span className="text-xs text-muted-foreground w-5 text-right shrink-0">{t.position}.</span>
-                          <span className="text-xs flex-1 truncate">
+                          <span className="text-sm text-muted-foreground w-5 text-right shrink-0 font-mono">{t.position}.</span>
+                          <span className="text-sm flex-1 truncate">
                             {t.bezeichnung || (t.position === 1 ? pos1Text : `Tätigkeit ${t.position}`)}
                           </span>
                           <Input
                             type="number" inputMode="decimal" step="0.25" min="0" max="24"
-                            className="h-8 w-16 text-center text-sm"
+                            className="h-10 w-20 text-center text-base font-medium"
                             value={row.stunden[t.position] || ""}
                             onChange={(e) => updateMitarbeiterStunden(row.id, t.position, parseFloat(e.target.value) || 0)}
                             placeholder="–"
@@ -1414,9 +1410,10 @@ const TimeTracking = () => {
                         </div>
                       ))}
                     </div>
+
                     {/* Sum */}
-                    <div className={`text-right text-sm font-semibold rounded px-2 py-1 ${total > 0 ? "bg-green-100 text-green-800" : "text-muted-foreground"}`}>
-                      {total > 0 ? `Σ ${total.toFixed(1)}h` : "–"}
+                    <div className={`text-right text-base font-bold rounded-lg px-3 py-2 ${total > 0 ? "bg-green-100 text-green-800" : "bg-muted text-muted-foreground"}`}>
+                      {total > 0 ? `Σ ${total.toFixed(1)} Stunden` : "Keine Stunden"}
                     </div>
                   </div>
                 );
@@ -1808,91 +1805,29 @@ const TimeTracking = () => {
         </Card>
 
         {/* ---------- SUBMIT ---------- */}
-        <div className="flex flex-col sm:flex-row gap-3">
-          <Button
-            onClick={handleSave}
-            disabled={saving}
-            className="flex-1 sm:flex-none"
-            size="lg"
-          >
-            <Save className="h-5 w-5 mr-2" />
-            {saving
-              ? "Speichern..."
-              : editingBerichtId
-              ? "Bericht aktualisieren"
-              : "Leistungsbericht speichern"}
-          </Button>
-          {editingBerichtId && (
-            <Button variant="outline" size="lg" onClick={resetForm}>
-              Abbrechen
+        <div className="sticky bottom-0 z-20 bg-background/95 backdrop-blur border-t -mx-3 sm:-mx-4 lg:-mx-6 px-3 sm:px-4 lg:px-6 py-3">
+          <div className="flex flex-col sm:flex-row gap-2">
+            <Button
+              onClick={handleSave}
+              disabled={saving}
+              className="w-full sm:w-auto h-12 sm:h-10 text-base sm:text-sm"
+              size="lg"
+            >
+              <Save className="h-5 w-5 mr-2" />
+              {saving
+                ? "Speichern..."
+                : editingBerichtId
+                ? "Bericht aktualisieren"
+                : "Leistungsbericht speichern"}
             </Button>
-          )}
+            {editingBerichtId && (
+              <Button variant="outline" size="lg" className="w-full sm:w-auto h-12 sm:h-10" onClick={resetForm}>
+                Abbrechen
+              </Button>
+            )}
+          </div>
         </div>
 
-        {/* ---------- EXISTING REPORTS ---------- */}
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-lg flex items-center gap-2">
-              <FileText className="h-5 w-5" />
-              Bisherige Leistungsberichte
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {loadingBerichte ? (
-              <p className="text-sm text-muted-foreground">Laden...</p>
-            ) : existingBerichte.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                Noch keine Leistungsberichte vorhanden.
-              </p>
-            ) : (
-              <div className="space-y-2">
-                {existingBerichte.map((b) => (
-                  <div
-                    key={b.id}
-                    className="flex items-center justify-between p-3 rounded-lg border hover:bg-muted/50 transition-colors"
-                  >
-                    <div
-                      className="flex-1 cursor-pointer"
-                      onClick={() => loadBericht(b.id)}
-                    >
-                      <div className="flex items-center gap-3 flex-wrap">
-                        <div className="flex items-center gap-1.5">
-                          <CalendarDays className="h-4 w-4 text-muted-foreground" />
-                          <span className="font-medium">
-                            {format(new Date(b.datum), "dd.MM.yyyy", {
-                              locale: de,
-                            })}
-                          </span>
-                        </div>
-                        <Badge variant="outline">{b.projekt_name}</Badge>
-                        <div className="flex items-center gap-1 text-sm text-muted-foreground">
-                          <Users className="h-3.5 w-3.5" />
-                          {b.mitarbeiter_count}
-                        </div>
-                        <span className="text-sm font-medium">
-                          {b.total_stunden.toFixed(1)} Std.
-                        </span>
-                      </div>
-                    </div>
-                    {isAdmin && (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 text-muted-foreground hover:text-destructive shrink-0"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          deleteBericht(b.id);
-                        }}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
       </div>
 
       {/* ---------- MITARBEITER AUSWAHL DIALOG ---------- */}
