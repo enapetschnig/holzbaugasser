@@ -186,34 +186,38 @@ function formatCell(dayData: DayData | null): CellData {
   const h = dayData.stunden;
   if (h === 0) return { hours: "", badges: [], className: "", isAbsence: false };
 
-  // Zulagen = Badges (shown small above the hours)
+  // SCH = Badge oben (klein). F/W = direkt an der Stundenzahl. R = Split.
   const badges: string[] = [];
 
-  // Fahrer
-  if (dayData.istFahrer) badges.push("F");
-
-  // Werkstatt (with hours if partial)
-  if (dayData.werkstattStunden !== null && dayData.werkstattStunden > 0 && dayData.werkstattStunden < h) {
-    badges.push(`${formatNumber(dayData.werkstattStunden)}W`);
-  } else if (dayData.istWerkstatt) {
-    badges.push("W");
-  }
-
-  // Schmutzzulage (with hours if partial)
+  // Schmutzzulage → Badge oben
   if (dayData.schmutzzulageStunden !== null && dayData.schmutzzulageStunden > 0 && dayData.schmutzzulageStunden < h) {
     badges.push(`${formatNumber(dayData.schmutzzulageStunden)}SCH`);
   } else if (dayData.schmutzzulage) {
     badges.push("SCH");
   }
 
-  // Regen (with hours if partial)
+  // Build hours string: F and W go directly on the number
+  let suffix = "";
+  if (dayData.istFahrer) suffix = "F";
+  else if (dayData.istWerkstatt) suffix = "W";
+
+  // Regen → Split format
   if (dayData.regenStunden !== null && dayData.regenStunden > 0 && dayData.regenStunden < h) {
-    badges.push(`${formatNumber(dayData.regenStunden)}R`);
-  } else if (dayData.regenSchicht) {
-    badges.push("R");
+    const rest = h - dayData.regenStunden;
+    const regenPart = `${formatNumber(dayData.regenStunden)}R`;
+    const restPart = rest > 0 ? formatNumber(rest) : "";
+    return { hours: restPart ? `${regenPart}/${restPart}${suffix}` : `${regenPart}${suffix}`, badges, className: "", isAbsence: false };
+  } else if (dayData.regenSchicht && !dayData.istFahrer && !dayData.istWerkstatt) {
+    suffix = "R";
   }
 
-  return { hours: formatNumber(h), badges, className: "", isAbsence: false };
+  // Werkstatt with partial hours → Split
+  if (dayData.werkstattStunden !== null && dayData.werkstattStunden > 0 && dayData.werkstattStunden < h) {
+    const rest = h - dayData.werkstattStunden;
+    return { hours: `${formatNumber(dayData.werkstattStunden)}W/${formatNumber(rest)}`, badges, className: "", isAbsence: false };
+  }
+
+  return { hours: `${formatNumber(h)}${suffix}`, badges, className: "", isAbsence: false };
 }
 
 /** Flat text version for PDF export */
