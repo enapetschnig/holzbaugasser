@@ -386,24 +386,6 @@ export default function Index() {
           </div>
         )}
 
-        {/* Zeitkonto Info */}
-        {zeitkontoBalance !== null && (
-          <Card className="border-primary/20 bg-primary/5">
-            <CardContent className="p-4 flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                  <Clock className="h-5 w-5 text-primary" />
-                </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">Zeitkonto</p>
-                  <p className={`text-lg font-bold ${zeitkontoBalance >= 0 ? "text-green-600" : "text-red-600"}`}>
-                    {zeitkontoBalance >= 0 ? "+" : ""}{zeitkontoBalance % 1 === 0 ? zeitkontoBalance : zeitkontoBalance.toFixed(1)} Stunden
-                  </p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        )}
 
         {/* Main Actions Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 lg:gap-6">
@@ -482,7 +464,7 @@ export default function Index() {
               </div>
               <CardTitle className="text-lg sm:text-xl">Urlaub / Abwesenheit</CardTitle>
               <CardDescription className="text-sm">
-                Urlaub, Krankenstand oder ZA eintragen
+                Urlaub, Krankenstand, Schule, usw. eintragen
               </CardDescription>
             </CardHeader>
             <CardContent>

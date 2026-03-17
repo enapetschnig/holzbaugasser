@@ -261,6 +261,16 @@ export default function Admin() {
       return;
     }
     setUserRoles((prev) => ({ ...prev, [userId]: selectedRole }));
+
+    // 2) Auto-create Zeitkonto
+    const { data: existingAccount } = await supabase
+      .from("time_accounts")
+      .select("id")
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (!existingAccount) {
+      await supabase.from("time_accounts").insert({ user_id: userId, balance_hours: 0 });
+    }
     // 2) Activate
     await handleActivateUser(userId, true);
   };
