@@ -1199,19 +1199,7 @@ const TimeTracking = () => {
         {/* ---------- TAETIGKEITEN ---------- */}
         <Card>
           <CardHeader className="pb-3">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-lg">Tätigkeiten</CardTitle>
-              {taetigkeiten.length < 8 && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={addTaetigkeit}
-                >
-                  <Plus className="h-4 w-4 mr-1" />
-                  Zeile
-                </Button>
-              )}
-            </div>
+            <CardTitle className="text-lg">Tätigkeiten</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
             {taetigkeiten.map((t) => (
@@ -1248,6 +1236,22 @@ const TimeTracking = () => {
                 )}
               </div>
             ))}
+
+            {/* + Zeile Button */}
+            {taetigkeiten.length < 8 && (
+              <div className="flex items-center gap-2">
+                <span className="w-8 shrink-0" />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-9"
+                  onClick={addTaetigkeit}
+                >
+                  <Plus className="h-4 w-4 mr-1" />
+                  Tätigkeit
+                </Button>
+              </div>
+            )}
 
             {/* Auto-displayed Pause info */}
             <div className="flex items-center gap-2 opacity-60">
@@ -1401,10 +1405,15 @@ const TimeTracking = () => {
                             {t.bezeichnung || (t.position === 1 ? pos1Text : `Tätigkeit ${t.position}`)}
                           </span>
                           <Input
-                            type="number" inputMode="decimal" step="0.25" min="0" max="24"
+                            type="text" inputMode="decimal"
                             className="h-10 w-20 text-center text-base font-medium"
                             value={row.stunden[t.position] || ""}
-                            onChange={(e) => updateMitarbeiterStunden(row.id, t.position, parseFloat(e.target.value) || 0)}
+                            onChange={(e) => {
+                              const v = e.target.value.replace(",", ".");
+                              if (v === "" || v === "." || /^\d*\.?\d*$/.test(v)) {
+                                updateMitarbeiterStunden(row.id, t.position, v === "" || v === "." ? 0 : parseFloat(v) || 0);
+                              }
+                            }}
                             placeholder="–"
                           />
                         </div>
@@ -1603,20 +1612,15 @@ const TimeTracking = () => {
                         {taetigkeiten.map((t) => (
                           <td key={t.position} className="px-1 py-1.5 text-center">
                             <Input
-                              type="number"
+                              type="text"
                               inputMode="decimal"
-                              step="0.25"
-                              min="0"
-                              max="24"
                               className="h-9 w-16 text-center text-sm px-1"
                               value={row.stunden[t.position] || ""}
                               onChange={(e) => {
-                                const val = parseFloat(e.target.value) || 0;
-                                updateMitarbeiterStunden(
-                                  row.id,
-                                  t.position,
-                                  val
-                                );
+                                const v = e.target.value.replace(",", ".");
+                                if (v === "" || v === "." || /^\d*\.?\d*$/.test(v)) {
+                                  updateMitarbeiterStunden(row.id, t.position, v === "" || v === "." ? 0 : parseFloat(v) || 0);
+                                }
                               }}
                               placeholder="–"
                             />
