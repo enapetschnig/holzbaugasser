@@ -815,29 +815,29 @@ export default function HoursReport() {
         .select("mitarbeiter_id, ist_fahrer, ist_werkstatt, schmutzzulage, regen_schicht, summe_stunden")
         .eq("bericht_id", berichtId);
 
+      // Load stunden
       const { data: stundenDataRaw } = await supabase
         .from("leistungsbericht_stunden" as any)
         .select("mitarbeiter_id, taetigkeit_id, stunden")
         .eq("bericht_id", berichtId);
 
-      // Map taetigkeit_id → position using taetigkeiten
-      const taetigkeitIdToPosition: Record<string, number> = {};
-      if (taetigkeitenData) {
-        // Load taetigkeit IDs
-        const { data: taetigkeitenWithIds } = await supabase
-          .from("leistungsbericht_taetigkeiten" as any)
-          .select("id, position")
-          .eq("bericht_id", berichtId);
-        if (taetigkeitenWithIds) {
-          for (const t of taetigkeitenWithIds) {
-            taetigkeitIdToPosition[(t as any).id] = (t as any).position;
-          }
+      // Load taetigkeit IDs → positions
+      const { data: taetigkeitenIds } = await supabase
+        .from("leistungsbericht_taetigkeiten" as any)
+        .select("id, position")
+        .eq("bericht_id", berichtId);
+
+      const tidToPos: Record<string, number> = {};
+      if (taetigkeitenIds) {
+        for (const t of taetigkeitenIds) {
+          tidToPos[(t as any).id] = (t as any).position;
         }
       }
+
       const stundenData = (stundenDataRaw || []).map((s: any) => ({
         mitarbeiter_id: s.mitarbeiter_id,
-        position: taetigkeitIdToPosition[s.taetigkeit_id] || 0,
-        stunden: s.stunden,
+        position: tidToPos[s.taetigkeit_id] || 0,
+        stunden: parseFloat(s.stunden) || 0,
       }));
 
       const { data: geraeteData } = await supabase
@@ -865,7 +865,7 @@ export default function HoursReport() {
         taetigkeiten: (taetigkeitenData || []).map((t: any) => ({ position: t.position, bezeichnung: t.bezeichnung })),
         mitarbeiter: (mitarbeiterData || []).map((m: any) => {
           const p = profileMap[m.mitarbeiter_id];
-          const mStunden = (stundenData || [])
+          const mStunden = stundenData
             .filter((s: any) => s.mitarbeiter_id === m.mitarbeiter_id)
             .map((s: any) => ({ position: s.position, stunden: s.stunden }));
           return {
@@ -875,7 +875,7 @@ export default function HoursReport() {
             schmutzzulage: m.schmutzzulage || false,
             regenSchicht: m.regen_schicht || false,
             stunden: mStunden,
-            summe: m.summe_stunden || 0,
+            summe: parseFloat(m.summe_stunden) || 0,
           };
         }),
         gesamtstunden: (mitarbeiterData || []).reduce((s: number, m: any) => s + (m.summe_stunden || 0), 0),
