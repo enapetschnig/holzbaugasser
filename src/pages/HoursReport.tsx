@@ -108,19 +108,19 @@ const weekdayAbbr = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"];
 const ABSENCE_TYPES = [
   "Urlaub",
   "Krankenstand",
-  "Zeitausgleich",
   "Berufsschule",
   "Feiertag",
   "Weiterbildung",
+  "Fortbildung",
 ];
 
 const ABSENCE_SHORT: Record<string, string> = {
   Urlaub: "U",
   Krankenstand: "K",
-  Zeitausgleich: "ZA",
   Berufsschule: "Schule",
   Feiertag: "Feiertag",
   Weiterbildung: "WB",
+  Fortbildung: "FB",
 };
 
 // ---------------------------------------------------------------------------
@@ -171,45 +171,63 @@ function formatCell(dayData: DayData | null): { text: string; className: string 
     const short = ABSENCE_SHORT[dayData.absenceType] || dayData.absenceType;
     if (dayData.absenceType === "Urlaub") return { text: short, className: "text-green-600 font-semibold" };
     if (dayData.absenceType === "Krankenstand") return { text: short, className: "text-red-600 font-semibold" };
-    if (dayData.absenceType === "Zeitausgleich") return { text: short, className: "text-blue-600 font-semibold" };
+    if (dayData.absenceType === "Fortbildung") return { text: short, className: "text-blue-600 font-semibold" };
     return { text: short, className: "text-gray-600" };
   }
 
   const h = dayData.stunden;
   if (h === 0) return { text: "", className: "" };
 
-  const parts: string[] = [];
+  // Build tagged hour segments (e.g., 4F, 2SCH, 3W)
+  const segments: string[] = [];
+  let accountedHours = 0;
 
-  // Split hours logic: if specific hour amounts are given, show them
   if (dayData.fahrerStunden !== null && dayData.fahrerStunden > 0) {
-    parts.push(`${formatNumber(dayData.fahrerStunden)}F`);
+    segments.push(`${formatNumber(dayData.fahrerStunden)}F`);
+    accountedHours += dayData.fahrerStunden;
   } else if (dayData.istFahrer) {
-    parts.push(`${formatNumber(h)}F`);
+    segments.push(`${formatNumber(h)}F`);
+    accountedHours = h;
   }
 
   if (dayData.werkstattStunden !== null && dayData.werkstattStunden > 0) {
-    parts.push(`${formatNumber(dayData.werkstattStunden)}W`);
-  } else if (dayData.istWerkstatt && !dayData.istFahrer) {
-    parts.push(`${formatNumber(h)}W`);
+    segments.push(`${formatNumber(dayData.werkstattStunden)}W`);
+    accountedHours += dayData.werkstattStunden;
+  } else if (dayData.istWerkstatt && accountedHours === 0) {
+    segments.push(`${formatNumber(h)}W`);
+    accountedHours = h;
   }
 
   if (dayData.schmutzzulageStunden !== null && dayData.schmutzzulageStunden > 0) {
-    parts.push(`${formatNumber(dayData.schmutzzulageStunden)}SCH`);
-  } else if (dayData.schmutzzulage && parts.length === 0) {
-    parts.push(`${formatNumber(h)}SCH`);
+    segments.push(`${formatNumber(dayData.schmutzzulageStunden)}SCH`);
+    accountedHours += dayData.schmutzzulageStunden;
+  } else if (dayData.schmutzzulage && accountedHours === 0) {
+    segments.push(`${formatNumber(h)}SCH`);
+    accountedHours = h;
   }
 
   if (dayData.regenStunden !== null && dayData.regenStunden > 0) {
-    parts.push(`${formatNumber(dayData.regenStunden)}R`);
-  } else if (dayData.regenSchicht && parts.length === 0) {
-    parts.push(`${formatNumber(h)}R`);
+    segments.push(`${formatNumber(dayData.regenStunden)}R`);
+    accountedHours += dayData.regenStunden;
+  } else if (dayData.regenSchicht && accountedHours === 0) {
+    segments.push(`${formatNumber(h)}R`);
+    accountedHours = h;
   }
 
-  if (parts.length === 0) {
-    parts.push(formatNumber(h));
+  // If there are tagged segments but remaining untagged hours, add them
+  if (segments.length > 0 && accountedHours < h) {
+    const remaining = h - accountedHours;
+    if (remaining > 0) {
+      segments.push(formatNumber(remaining));
+    }
   }
 
-  return { text: parts.join(""), className: "" };
+  // If no segments at all, just show total hours
+  if (segments.length === 0) {
+    segments.push(formatNumber(h));
+  }
+
+  return { text: segments.join("/"), className: "" };
 }
 
 // ---------------------------------------------------------------------------
@@ -671,7 +689,6 @@ export default function HoursReport() {
       mitarbeiter: gridEmployees.map((p) => {
         const employeeDays = gridDataMap[p.id] || {};
         let totalHours = 0;
-        let istHours = 0;
 
         const tage = Array.from({ length: daysInMonth }, (_, i) => {
           const day = i + 1;
@@ -684,9 +701,6 @@ export default function HoursReport() {
 
           if (dd) {
             totalHours += dd.stunden;
-            if (showWithZA || !dd.isAbsence || dd.absenceType !== "Zeitausgleich") {
-              istHours += dd.stunden;
-            }
           }
 
           return {
@@ -698,13 +712,14 @@ export default function HoursReport() {
         });
 
         const employeeSoll = weeklyToMonthlyTarget(employeeSollMap[p.id] ?? null, gridYear, gridMonth);
+        const displayIst = showWithZA ? totalHours : Math.min(totalHours, employeeSoll);
 
         return {
           name: `${p.nachname} ${p.vorname}`,
           tage,
           summe: totalHours,
           soll: employeeSoll,
-          differenz: istHours - employeeSoll,
+          differenz: displayIst - employeeSoll,
           zeitkonto: zeitkontoMap[p.id] ?? undefined,
         };
       }),
@@ -832,7 +847,7 @@ export default function HoursReport() {
                       className="h-10 rounded-r-none"
                       onClick={() => setShowWithZA(false)}
                     >
-                      Ohne ZA
+                      Ohne Überstunden
                     </Button>
                     <Button
                       variant={showWithZA ? "default" : "outline"}
@@ -840,7 +855,7 @@ export default function HoursReport() {
                       className="h-10 rounded-l-none"
                       onClick={() => setShowWithZA(true)}
                     >
-                      Mit ZA
+                      Mit Überstunden
                     </Button>
                   </div>
 
@@ -948,18 +963,17 @@ export default function HoursReport() {
                           gridEmployees.map((employee) => {
                             const employeeDays = gridDataMap[employee.id] || {};
                             let totalHours = 0;
-                            let istHours = 0;
                             const monthlyTarget = weeklyToMonthlyTarget(employeeSollMap[employee.id] ?? null, gridYear, gridMonth);
                             for (let d = 1; d <= daysInMonth; d++) {
                               const dd = employeeDays[d];
                               if (dd) {
                                 totalHours += dd.stunden;
-                                if (showWithZA || !dd.isAbsence || dd.absenceType !== 'Zeitausgleich') {
-                                  istHours += dd.stunden;
-                                }
                               }
                             }
-                            const diff = istHours - monthlyTarget;
+                            // "Ohne Überstunden": gedeckelt auf Soll
+                            // "Mit Überstunden": echte Stunden
+                            const displayIst = showWithZA ? totalHours : Math.min(totalHours, monthlyTarget);
+                            const diff = displayIst - monthlyTarget;
 
                             return (
                               <tr key={employee.id} className="hover:bg-muted/20">
@@ -1002,7 +1016,7 @@ export default function HoursReport() {
                                   {formatNumber(monthlyTarget)}
                                 </td>
                                 <td className="border border-border px-2 py-1 text-center bg-gray-50 whitespace-nowrap">
-                                  {formatNumber(istHours)}
+                                  {formatNumber(displayIst)}
                                 </td>
                                 <td className={cn(
                                   "border border-border px-2 py-1 text-center font-bold bg-gray-50 whitespace-nowrap",
@@ -1048,7 +1062,7 @@ export default function HoursReport() {
                     <strong>K</strong> = Krankenstand
                   </span>
                   <span className="text-blue-600">
-                    <strong>ZA</strong> = Zeitausgleich
+                    <strong>FB</strong> = Fortbildung
                   </span>
                   <span>
                     <strong>Schule</strong> = Berufsschule
@@ -1371,7 +1385,7 @@ export default function HoursReport() {
                   <SelectContent>
                     <SelectItem value="Urlaub">Urlaub (U)</SelectItem>
                     <SelectItem value="Krankenstand">Krankenstand (K)</SelectItem>
-                    <SelectItem value="Zeitausgleich">Zeitausgleich (ZA)</SelectItem>
+                    <SelectItem value="Fortbildung">Fortbildung</SelectItem>
                     <SelectItem value="Fortbildung">Fortbildung</SelectItem>
                     <SelectItem value="Feiertag">Feiertag</SelectItem>
                     <SelectItem value="Schule">Berufsschule</SelectItem>

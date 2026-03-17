@@ -17,7 +17,6 @@ const ABSENCE_TYPES = [
   { value: "urlaub", label: "Urlaub", icon: Sun, color: "text-green-600" },
   { value: "krankenstand", label: "Krankenstand", icon: Thermometer, color: "text-red-600" },
   { value: "fortbildung", label: "Fortbildung", icon: BookOpen, color: "text-blue-600" },
-  { value: "za", label: "Zeitausgleich (ZA)", icon: Clock, color: "text-purple-600" },
   { value: "feiertag", label: "Feiertag", icon: PartyPopper, color: "text-orange-600" },
   { value: "schule", label: "Berufsschule", icon: GraduationCap, color: "text-cyan-600" },
 ] as const;
@@ -48,7 +47,6 @@ function capitalizeType(type: AbsenceType): string {
     case "urlaub": return "Urlaub";
     case "krankenstand": return "Krankenstand";
     case "fortbildung": return "Fortbildung";
-    case "za": return "ZA";
     case "feiertag": return "Feiertag";
     case "schule": return "Schule";
     default: return type;

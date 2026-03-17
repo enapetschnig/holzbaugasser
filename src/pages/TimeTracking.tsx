@@ -1543,20 +1543,6 @@ const TimeTracking = () => {
                     );
                   })}
                 </tbody>
-                <tfoot>
-                  <tr className="border-t-2">
-                    <td
-                      colSpan={5 + taetigkeiten.length}
-                      className="px-2 py-2 text-right font-semibold"
-                    >
-                      Gesamtsumme Arbeitsstunden:
-                    </td>
-                    <td className="px-2 py-2 text-center font-bold text-lg">
-                      {gesamtStunden.toFixed(2)}
-                    </td>
-                    <td></td>
-                  </tr>
-                </tfoot>
               </table>
             </div>
           </CardContent>
