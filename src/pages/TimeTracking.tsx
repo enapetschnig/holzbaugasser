@@ -195,11 +195,6 @@ const TimeTracking = () => {
     [pauseVon, pauseBis]
   );
 
-  const gesamtStunden = useMemo(
-    () => mitarbeiterRows.reduce((sum, row) => sum + sumStunden(row), 0),
-    [mitarbeiterRows]
-  );
-
   // Auto-fill position 1 text
   const pos1Text = useMemo(
     () => `Rüstzeit/Anfahrt, Ankunftszeit Baustelle: ${ankunftZeit}`,
@@ -498,6 +493,18 @@ const TimeTracking = () => {
       prev.map((r) => ({ ...r, regenSchicht: regenSchichtAlle }))
     );
   }, [regenSchichtAlle]);
+
+  // Auto-select current user as first mitarbeiter
+  useEffect(() => {
+    if (currentUserId && profiles.length > 0 && !editingBerichtId) {
+      setMitarbeiterRows((prev) => {
+        if (prev.length === 1 && !prev[0].mitarbeiterId) {
+          return [{ ...prev[0], mitarbeiterId: currentUserId }];
+        }
+        return prev;
+      });
+    }
+  }, [currentUserId, profiles, editingBerichtId]);
 
   // -------------------------------------------------------------------------
   // Build Taetigkeiten display list (with auto-filled positions)
@@ -1312,8 +1319,112 @@ const TimeTracking = () => {
               <span><strong>R</strong> = Regen/Wetterschicht</span>
             </div>
 
-            {/* Scrollable matrix table */}
-            <div className="overflow-x-auto -mx-4 sm:-mx-6 px-4 sm:px-6">
+            {/* ===== MOBILE: Card-Layout (< sm) ===== */}
+            <div className="sm:hidden space-y-3">
+              {mitarbeiterRows.map((row) => {
+                const total = sumStunden(row);
+                return (
+                  <div key={row.id} className="border rounded-lg p-3 bg-card space-y-3">
+                    {/* Name + Delete */}
+                    <div className="flex items-center gap-2">
+                      <Select
+                        value={row.mitarbeiterId}
+                        onValueChange={(v) => updateMitarbeiterField(row.id, "mitarbeiterId", v)}
+                      >
+                        <SelectTrigger className="h-9 text-sm flex-1">
+                          <SelectValue placeholder="Mitarbeiter..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {profiles.map((p) => (
+                            <SelectItem key={p.id} value={p.id}>
+                              {p.nachname} {p.vorname}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {mitarbeiterRows.length > 1 && (
+                        <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
+                          onClick={() => removeMitarbeiter(row.id)}>
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      )}
+                    </div>
+                    {/* F/W/SCH/R Flags */}
+                    <div className="flex flex-wrap gap-3">
+                      <label className="flex items-center gap-1.5 text-xs">
+                        <Checkbox checked={row.istFahrer} onCheckedChange={(v) => updateMitarbeiterField(row.id, "istFahrer", v === true)} />
+                        F
+                        {row.istFahrer && (
+                          <Input type="number" step="0.25" min="0" inputMode="decimal"
+                            className="h-7 w-12 text-center text-xs px-0.5"
+                            value={row.fahrerStunden}
+                            onChange={(e) => updateMitarbeiterField(row.id, "fahrerStunden", e.target.value)}
+                            placeholder="alle" />
+                        )}
+                      </label>
+                      <label className="flex items-center gap-1.5 text-xs">
+                        <Checkbox checked={row.istWerkstatt} onCheckedChange={(v) => updateMitarbeiterField(row.id, "istWerkstatt", v === true)} />
+                        W
+                        {row.istWerkstatt && (
+                          <Input type="number" step="0.25" min="0" inputMode="decimal"
+                            className="h-7 w-12 text-center text-xs px-0.5"
+                            value={row.werkstattStunden}
+                            onChange={(e) => updateMitarbeiterField(row.id, "werkstattStunden", e.target.value)}
+                            placeholder="alle" />
+                        )}
+                      </label>
+                      <label className="flex items-center gap-1.5 text-xs">
+                        <Checkbox checked={row.schmutzzulage} onCheckedChange={(v) => updateMitarbeiterField(row.id, "schmutzzulage", v === true)} />
+                        SCH
+                        {row.schmutzzulage && (
+                          <Input type="number" step="0.25" min="0" inputMode="decimal"
+                            className="h-7 w-12 text-center text-xs px-0.5"
+                            value={row.schmutzzulageStunden}
+                            onChange={(e) => updateMitarbeiterField(row.id, "schmutzzulageStunden", e.target.value)}
+                            placeholder="alle" />
+                        )}
+                      </label>
+                      <label className="flex items-center gap-1.5 text-xs">
+                        <Checkbox checked={row.regenSchicht} onCheckedChange={(v) => updateMitarbeiterField(row.id, "regenSchicht", v === true)} />
+                        R
+                        {row.regenSchicht && (
+                          <Input type="number" step="0.25" min="0" inputMode="decimal"
+                            className="h-7 w-12 text-center text-xs px-0.5"
+                            value={row.regenStunden}
+                            onChange={(e) => updateMitarbeiterField(row.id, "regenStunden", e.target.value)}
+                            placeholder="alle" />
+                        )}
+                      </label>
+                    </div>
+                    {/* Activities as list */}
+                    <div className="space-y-1.5">
+                      {taetigkeiten.map((t) => (
+                        <div key={t.position} className="flex items-center gap-2">
+                          <span className="text-xs text-muted-foreground w-5 text-right shrink-0">{t.position}.</span>
+                          <span className="text-xs flex-1 truncate">
+                            {t.bezeichnung || (t.position === 1 ? pos1Text : `Tätigkeit ${t.position}`)}
+                          </span>
+                          <Input
+                            type="number" inputMode="decimal" step="0.25" min="0" max="24"
+                            className="h-8 w-16 text-center text-sm"
+                            value={row.stunden[t.position] || ""}
+                            onChange={(e) => updateMitarbeiterStunden(row.id, t.position, parseFloat(e.target.value) || 0)}
+                            placeholder="–"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                    {/* Sum */}
+                    <div className={`text-right text-sm font-semibold rounded px-2 py-1 ${total > 0 ? "bg-green-100 text-green-800" : "text-muted-foreground"}`}>
+                      {total > 0 ? `Σ ${total.toFixed(1)}h` : "–"}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* ===== DESKTOP: Scrollable matrix table (≥ sm) ===== */}
+            <div className="hidden sm:block overflow-x-auto -mx-4 sm:-mx-6 px-4 sm:px-6">
               <table className="w-full text-sm border-collapse min-w-[600px]">
                 <thead>
                   <tr className="border-b bg-muted/50">
