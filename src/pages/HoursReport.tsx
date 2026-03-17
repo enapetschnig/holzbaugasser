@@ -16,7 +16,12 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import ProjectHoursReport from "@/components/ProjectHoursReport";
-import { FileSpreadsheet, Building2, ClipboardList, Loader2, Download } from "lucide-react";
+import { FileSpreadsheet, Building2, ClipboardList, Loader2, Download, X } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { getMonthlyTargetHours, getWorkingDaysInMonth, getTargetHoursForDate } from "@/lib/workingHours";
 import { generateStundenauswertungPDF, StundenauswertungPDFData } from "@/lib/generateStundenauswertungPDF";
 import { format, parseISO } from "date-fns";
@@ -84,9 +89,9 @@ interface ExistingBericht {
 // ---------------------------------------------------------------------------
 
 const monthNames = [
-  "J\u00e4nner",
+  "Jänner",
   "Feber",
-  "M\u00e4rz",
+  "März",
   "April",
   "Mai",
   "Juni",
@@ -143,6 +148,13 @@ function countWorkingDays(year: number, month: number): number {
     if (!isWeekend(year, month, d)) count++;
   }
   return count;
+}
+
+/** Convert weekly hours to monthly target. weeklyHours=null means standard 39h */
+function weeklyToMonthlyTarget(weeklyHours: number | null, year: number, month: number): number {
+  const standardMonthly = getMonthlyTargetHours(year, month);
+  if (weeklyHours == null) return standardMonthly;
+  return Math.round((weeklyHours / 39) * standardMonthly * 10) / 10;
 }
 
 function formatNumber(n: number): string {
@@ -235,6 +247,20 @@ export default function HoursReport() {
   // Employee Soll override map
   const [employeeSollMap, setEmployeeSollMap] = useState<Record<string, number | null>>({});
 
+  // Zeitkonto data
+  const [zeitkontoMap, setZeitkontoMap] = useState<Record<string, number>>({});
+
+  // Cell editing (Admin only)
+  const [editingCell, setEditingCell] = useState<{ userId: string; day: number; name: string } | null>(null);
+  const [editStunden, setEditStunden] = useState("");
+  const [editType, setEditType] = useState<"arbeit" | "absenz">("arbeit");
+  const [editAbsenzTyp, setEditAbsenzTyp] = useState("Urlaub");
+  const [editFahrer, setEditFahrer] = useState(false);
+  const [editWerkstatt, setEditWerkstatt] = useState(false);
+  const [editSchmutz, setEditSchmutz] = useState(false);
+  const [editRegen, setEditRegen] = useState(false);
+  const [savingCell, setSavingCell] = useState(false);
+
   // Tab 2: Leistungsberichte state
   const [berichte, setBerichte] = useState<ExistingBericht[]>([]);
   const [berichteLoading, setBerichteLoading] = useState(false);
@@ -310,6 +336,18 @@ export default function HoursReport() {
       });
       setEmployeeSollMap(sollMap);
     }
+
+    // Load Zeitkonto balances
+    const { data: timeAccounts } = await supabase
+      .from("time_accounts")
+      .select("user_id, balance_hours");
+    if (timeAccounts) {
+      const zkMap: Record<string, number> = {};
+      timeAccounts.forEach((ta: any) => {
+        zkMap[ta.user_id] = ta.balance_hours || 0;
+      });
+      setZeitkontoMap(zkMap);
+    }
   };
 
   // -------------------------------------------------------------------------
@@ -373,6 +411,7 @@ export default function HoursReport() {
   useEffect(() => {
     if (isAdmin) fetchGridData();
   }, [isAdmin, fetchGridData]);
+
 
   // Build grid data: userId -> day -> DayData
   const gridDataMap = useMemo(() => {
@@ -554,6 +593,71 @@ export default function HoursReport() {
   }, [berichte, berichteVorarbeiter, berichteProjekt, profileMap, berichteProjects]);
 
   // -------------------------------------------------------------------------
+  // Cell editing
+  // -------------------------------------------------------------------------
+
+  const openEditCell = (userId: string, day: number, name: string) => {
+    if (!isAdmin) return;
+    const dd = (gridDataMap[userId] || {})[day];
+    if (dd?.isAbsence) {
+      setEditType("absenz");
+      setEditAbsenzTyp(dd.absenceType || "Urlaub");
+      setEditStunden(dd.stunden.toString());
+    } else {
+      setEditType("arbeit");
+      setEditStunden(dd ? dd.stunden.toString() : "");
+      setEditFahrer(dd?.istFahrer ?? false);
+      setEditWerkstatt(dd?.istWerkstatt ?? false);
+      setEditSchmutz(dd?.schmutzzulage ?? false);
+      setEditRegen(dd?.regenSchicht ?? false);
+    }
+    setEditingCell({ userId, day, name });
+  };
+
+  const handleSaveCell = async () => {
+    if (!editingCell) return;
+    setSavingCell(true);
+    const { userId, day } = editingCell;
+    const dateStr = `${gridYear}-${String(gridMonth).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    const stunden = parseFloat(editStunden) || 0;
+
+    try {
+      // Delete existing entry for this day
+      await supabase
+        .from("time_entries")
+        .delete()
+        .eq("user_id", userId)
+        .eq("datum", dateStr);
+
+      if (stunden > 0 || editType === "absenz") {
+        const isFriday = new Date(gridYear, gridMonth - 1, day).getDay() === 5;
+        const defaultHours = isFriday ? 7 : 8;
+        const absenzStunden = editType === "absenz" ? (stunden > 0 ? stunden : defaultHours) : stunden;
+
+        await supabase.from("time_entries").insert({
+          user_id: userId,
+          datum: dateStr,
+          stunden: absenzStunden,
+          taetigkeit: editType === "absenz" ? editAbsenzTyp : "Arbeit",
+          start_time: "07:00",
+          end_time: isFriday ? "14:00" : "15:00",
+          pause_minutes: 0,
+          project_id: null,
+          location_type: editType === "arbeit" ? "baustelle" : null,
+        });
+      }
+
+      setEditingCell(null);
+      toast({ title: "Gespeichert" });
+      fetchGridData();
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Fehler", description: err.message });
+    } finally {
+      setSavingCell(false);
+    }
+  };
+
+  // -------------------------------------------------------------------------
   // PDF Export (A3)
   // -------------------------------------------------------------------------
 
@@ -593,7 +697,7 @@ export default function HoursReport() {
           };
         });
 
-        const employeeSoll = employeeSollMap[p.id] ?? defaultMonthlyTarget;
+        const employeeSoll = weeklyToMonthlyTarget(employeeSollMap[p.id] ?? null, gridYear, gridMonth);
 
         return {
           name: `${p.nachname} ${p.vorname}`,
@@ -601,6 +705,7 @@ export default function HoursReport() {
           summe: totalHours,
           soll: employeeSoll,
           differenz: istHours - employeeSoll,
+          zeitkonto: zeitkontoMap[p.id] ?? undefined,
         };
       }),
     };
@@ -795,6 +900,9 @@ export default function HoursReport() {
                           <th className="border border-border px-2 py-1 text-center font-semibold bg-gray-100 min-w-[50px]">
                             +/-
                           </th>
+                          <th className="border border-border px-2 py-1 text-center font-semibold bg-gray-100 min-w-[50px]" title="Zeitkonto">
+                            ZK
+                          </th>
                         </tr>
                         {/* Row 2: Weekday abbreviations */}
                         <tr className="bg-muted/40">
@@ -823,13 +931,14 @@ export default function HoursReport() {
                           <th className="border border-border px-2 py-0.5 text-center text-[10px] bg-gray-100">&nbsp;</th>
                           <th className="border border-border px-2 py-0.5 text-center text-[10px] bg-gray-100">&nbsp;</th>
                           <th className="border border-border px-2 py-0.5 text-center text-[10px] bg-gray-100">&nbsp;</th>
+                          <th className="border border-border px-2 py-0.5 text-center text-[10px] bg-gray-100">&nbsp;</th>
                         </tr>
                       </thead>
                       <tbody>
                         {gridEmployees.length === 0 ? (
                           <tr>
                             <td
-                              colSpan={daysInMonth + 5}
+                              colSpan={daysInMonth + 6}
                               className="text-center py-8 text-muted-foreground"
                             >
                               Keine Mitarbeiter gefunden
@@ -840,7 +949,7 @@ export default function HoursReport() {
                             const employeeDays = gridDataMap[employee.id] || {};
                             let totalHours = 0;
                             let istHours = 0;
-                            const monthlyTarget = employeeSollMap[employee.id] ?? getMonthlyTargetHours(gridYear, gridMonth);
+                            const monthlyTarget = weeklyToMonthlyTarget(employeeSollMap[employee.id] ?? null, gridYear, gridMonth);
                             for (let d = 1; d <= daysInMonth; d++) {
                               const dd = employeeDays[d];
                               if (dd) {
@@ -870,15 +979,17 @@ export default function HoursReport() {
                                         "border border-border px-0.5 py-1 text-center whitespace-nowrap",
                                         we && !dd && "bg-orange-50",
                                         we && dd && "bg-orange-100",
-                                        cell.className
+                                        cell.className,
+                                        isAdmin && "cursor-pointer hover:ring-2 hover:ring-primary/40 hover:ring-inset"
                                       )}
                                       title={
                                         dd
                                           ? dd.isAbsence
                                             ? dd.absenceType
                                             : `${dd.stunden}h${dd.istFahrer ? " Fahrer" : ""}${dd.istWerkstatt ? " Werkstatt" : ""}${dd.schmutzzulage ? " Schmutz" : ""}${dd.regenSchicht ? " Regen" : ""}`
-                                          : ""
+                                          : isAdmin ? "Klicken zum Bearbeiten" : ""
                                       }
+                                      onClick={() => openEditCell(employee.id, day, `${employee.nachname} ${employee.vorname}`)}
                                     >
                                       {cell.text}
                                     </td>
@@ -898,6 +1009,14 @@ export default function HoursReport() {
                                   diff >= 0 ? "text-green-600" : "text-red-600"
                                 )}>
                                   {diff >= 0 ? "+" : ""}{formatNumber(diff)}
+                                </td>
+                                <td className={cn(
+                                  "border border-border px-2 py-1 text-center font-bold bg-gray-50 whitespace-nowrap",
+                                  (zeitkontoMap[employee.id] || 0) >= 0 ? "text-green-600" : "text-red-600"
+                                )}>
+                                  {zeitkontoMap[employee.id] != null
+                                    ? `${(zeitkontoMap[employee.id] || 0) >= 0 ? "+" : ""}${formatNumber(zeitkontoMap[employee.id] || 0)}`
+                                    : "-"}
                                 </td>
                               </tr>
                             );
@@ -1179,6 +1298,102 @@ export default function HoursReport() {
           </TabsContent>
         </Tabs>
       </div>
+
+      {/* Edit Cell Dialog */}
+      <Dialog open={!!editingCell} onOpenChange={(open) => { if (!open) setEditingCell(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="text-base">
+              {editingCell?.name} — {editingCell ? `${editingCell.day}. ${monthNames[gridMonth - 1]}` : ""}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="flex gap-2">
+              <Button
+                variant={editType === "arbeit" ? "default" : "outline"}
+                size="sm"
+                className="flex-1"
+                onClick={() => setEditType("arbeit")}
+              >
+                Arbeit
+              </Button>
+              <Button
+                variant={editType === "absenz" ? "default" : "outline"}
+                size="sm"
+                className="flex-1"
+                onClick={() => setEditType("absenz")}
+              >
+                Abwesenheit
+              </Button>
+            </div>
+
+            {editType === "arbeit" ? (
+              <>
+                <div className="space-y-2">
+                  <Label>Stunden</Label>
+                  <Input
+                    type="number"
+                    step="0.5"
+                    min="0"
+                    max="24"
+                    value={editStunden}
+                    onChange={(e) => setEditStunden(e.target.value)}
+                    inputMode="decimal"
+                    autoFocus
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <label className="flex items-center gap-2 text-sm cursor-pointer">
+                    <Checkbox checked={editFahrer} onCheckedChange={(v) => setEditFahrer(v === true)} />
+                    F (Fahrer)
+                  </label>
+                  <label className="flex items-center gap-2 text-sm cursor-pointer">
+                    <Checkbox checked={editWerkstatt} onCheckedChange={(v) => setEditWerkstatt(v === true)} />
+                    W (Werkstatt)
+                  </label>
+                  <label className="flex items-center gap-2 text-sm cursor-pointer">
+                    <Checkbox checked={editSchmutz} onCheckedChange={(v) => setEditSchmutz(v === true)} />
+                    SCH (Schmutz)
+                  </label>
+                  <label className="flex items-center gap-2 text-sm cursor-pointer">
+                    <Checkbox checked={editRegen} onCheckedChange={(v) => setEditRegen(v === true)} />
+                    R (Regen)
+                  </label>
+                </div>
+              </>
+            ) : (
+              <div className="space-y-2">
+                <Label>Absenztyp</Label>
+                <Select value={editAbsenzTyp} onValueChange={setEditAbsenzTyp}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Urlaub">Urlaub (U)</SelectItem>
+                    <SelectItem value="Krankenstand">Krankenstand (K)</SelectItem>
+                    <SelectItem value="Zeitausgleich">Zeitausgleich (ZA)</SelectItem>
+                    <SelectItem value="Fortbildung">Fortbildung</SelectItem>
+                    <SelectItem value="Feiertag">Feiertag</SelectItem>
+                    <SelectItem value="Schule">Berufsschule</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            {editStunden === "" && editType === "arbeit" && (
+              <p className="text-xs text-muted-foreground">Leer lassen = Eintrag löschen</p>
+            )}
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setEditingCell(null)}>
+              Abbrechen
+            </Button>
+            <Button onClick={handleSaveCell} disabled={savingCell}>
+              {savingCell ? "Speichert..." : "Speichern"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

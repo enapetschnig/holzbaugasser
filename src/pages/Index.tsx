@@ -58,6 +58,7 @@ export default function Index() {
   const [loading, setLoading] = useState(true);
   const [isActivated, setIsActivated] = useState<boolean | null>(null);
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [zeitkontoBalance, setZeitkontoBalance] = useState<number | null>(null);
   const { handleRestartInstallGuide } = useOnboarding();
 
   const fetchProjects = async () => {
@@ -139,6 +140,16 @@ export default function Index() {
 
     const role = roleData?.role ?? null;
     setUserRole(role);
+
+    // Load Zeitkonto balance
+    const { data: zkData } = await supabase
+      .from("time_accounts")
+      .select("balance_hours")
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (zkData) {
+      setZeitkontoBalance(zkData.balance_hours || 0);
+    }
 
     await Promise.all([
       fetchProjects(),
@@ -350,6 +361,7 @@ export default function Index() {
                 onClick={() => {
                   handleDismissNotification(notif.id);
                   if (notif.type === "krankmeldung_upload") navigate("/admin");
+                  if (notif.type === "neue_registrierung") navigate("/admin");
                   if (notif.type === "lohnzettel_upload") navigate("/my-documents");
                 }}
               >
@@ -372,6 +384,25 @@ export default function Index() {
               </div>
             ))}
           </div>
+        )}
+
+        {/* Zeitkonto Info */}
+        {zeitkontoBalance !== null && (
+          <Card className="border-primary/20 bg-primary/5">
+            <CardContent className="p-4 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
+                  <Clock className="h-5 w-5 text-primary" />
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Zeitkonto</p>
+                  <p className={`text-lg font-bold ${zeitkontoBalance >= 0 ? "text-green-600" : "text-red-600"}`}>
+                    {zeitkontoBalance >= 0 ? "+" : ""}{zeitkontoBalance % 1 === 0 ? zeitkontoBalance : zeitkontoBalance.toFixed(1)} Stunden
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
         )}
 
         {/* Main Actions Grid */}

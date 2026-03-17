@@ -26,6 +26,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -162,6 +163,13 @@ const TimeTracking = () => {
   // Mitarbeiter-Auswahl Dialog
   const [showMitarbeiterDialog, setShowMitarbeiterDialog] = useState(false);
   const [selectedNewMitarbeiter, setSelectedNewMitarbeiter] = useState<Set<string>>(new Set());
+
+  // Neues Projekt Dialog
+  const [showNewProjectDialog, setShowNewProjectDialog] = useState(false);
+  const [newProjectName, setNewProjectName] = useState("");
+  const [newProjectPlz, setNewProjectPlz] = useState("");
+  const [newProjectAdresse, setNewProjectAdresse] = useState("");
+  const [creatingProject, setCreatingProject] = useState(false);
 
   // Gleiche Stunden für alle
   const [gleicheStundenFuerAlle, setGleicheStundenFuerAlle] = useState(false);
@@ -436,6 +444,45 @@ const TimeTracking = () => {
   const removeMitarbeiter = (id: string) => {
     if (mitarbeiterRows.length <= 1) return;
     setMitarbeiterRows((prev) => prev.filter((r) => r.id !== id));
+  };
+
+  // Neues Projekt erstellen
+  const handleCreateProject = async () => {
+    if (!newProjectName.trim()) {
+      toast({ variant: "destructive", title: "Projektname ist Pflicht" });
+      return;
+    }
+    if (!newProjectPlz.match(/^\d{4,5}$/)) {
+      toast({ variant: "destructive", title: "PLZ muss 4-5 Ziffern haben" });
+      return;
+    }
+    setCreatingProject(true);
+    try {
+      const { data, error } = await supabase
+        .from("projects")
+        .insert({
+          name: newProjectName.trim(),
+          plz: newProjectPlz.trim(),
+          adresse: newProjectAdresse.trim() || null,
+          status: "aktiv",
+        })
+        .select("id, name, plz, adresse, status")
+        .single();
+      if (error) throw error;
+      if (data) {
+        setProjects((prev) => [...prev, data].sort((a, b) => a.name.localeCompare(b.name)));
+        setProjektId(data.id);
+        toast({ title: "Projekt erstellt" });
+      }
+      setShowNewProjectDialog(false);
+      setNewProjectName("");
+      setNewProjectPlz("");
+      setNewProjectAdresse("");
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Fehler", description: err.message });
+    } finally {
+      setCreatingProject(false);
+    }
   };
 
   // Schmutzzulage for all toggle
@@ -1024,18 +1071,30 @@ const TimeTracking = () => {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>Projekt *</Label>
-                <Select value={projektId} onValueChange={setProjektId}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Projekt auswählen..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {projects.map((p) => (
-                      <SelectItem key={p.id} value={p.id}>
-                        {p.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <div className="flex gap-2">
+                  <Select value={projektId} onValueChange={setProjektId}>
+                    <SelectTrigger className="flex-1">
+                      <SelectValue placeholder="Projekt auswählen..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {projects.map((p) => (
+                        <SelectItem key={p.id} value={p.id}>
+                          {p.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="shrink-0 h-10 w-10"
+                    onClick={() => setShowNewProjectDialog(true)}
+                    title="Neues Projekt erstellen"
+                  >
+                    <Plus className="h-4 w-4" />
+                  </Button>
+                </div>
               </div>
               <div className="space-y-2">
                 <Label>Ort</Label>
@@ -1503,191 +1562,127 @@ const TimeTracking = () => {
           </CardContent>
         </Card>
 
-        {/* ---------- GERÄTEEINSATZ ---------- */}
+        {/* ---------- ZUSÄTZLICHE ANGABEN (einklappbar) ---------- */}
         <Card>
           <CardHeader className="pb-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <CardTitle className="text-lg">Geräteeinsatz</CardTitle>
-                <p className="text-sm text-muted-foreground">LKW, Kran (in Stunden)</p>
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() =>
-                  setGeraete((prev) => [
-                    ...prev,
-                    { id: crypto.randomUUID(), geraet: "", stunden: "" },
-                  ])
-                }
-              >
-                <Plus className="h-4 w-4 mr-1" />
-                Gerät hinzufügen
-              </Button>
-            </div>
-          </CardHeader>
-          {geraete.length > 0 && (
-            <CardContent className="space-y-2">
-              {geraete.map((g) => (
-                <div key={g.id} className="flex items-center gap-2">
-                  {!GERAETE_OPTIONEN.includes(g.geraet) && g.geraet !== "" ? (
-                    <Input
-                      value={g.geraet.trim()}
-                      onChange={(e) =>
-                        setGeraete((prev) =>
-                          prev.map((item) =>
-                            item.id === g.id
-                              ? { ...item, geraet: e.target.value }
-                              : item
-                          )
-                        )
-                      }
-                      placeholder="Gerät eingeben..."
-                      className="flex-1"
-                    />
-                  ) : (
-                    <Select
-                      value={g.geraet}
-                      onValueChange={(v) =>
-                        setGeraete((prev) =>
-                          prev.map((item) =>
-                            item.id === g.id
-                              ? {
-                                  ...item,
-                                  geraet: v === "Sonstiges" ? " " : v,
-                                }
-                              : item
-                          )
-                        )
-                      }
-                    >
-                      <SelectTrigger className="flex-1">
-                        <SelectValue placeholder="Gerät auswählen..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {GERAETE_OPTIONEN.map((opt) => (
-                          <SelectItem key={opt} value={opt}>
-                            {opt}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )}
-                  <Input
-                    type="number"
-                    step="0.5"
-                    min="0"
-                    value={g.stunden}
-                    onChange={(e) =>
-                      setGeraete((prev) =>
-                        prev.map((item) =>
-                          item.id === g.id
-                            ? { ...item, stunden: e.target.value }
-                            : item
-                        )
-                      )
-                    }
-                    placeholder="Stunden"
-                    className="w-24"
-                  />
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="shrink-0 h-8 w-8 text-muted-foreground hover:text-destructive"
-                    onClick={() =>
-                      setGeraete((prev) => prev.filter((item) => item.id !== g.id))
-                    }
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </div>
-              ))}
-            </CardContent>
-          )}
-        </Card>
-
-        {/* ---------- VERBRAUCHTE MATERIALIEN ---------- */}
-        <Card>
-          <CardHeader className="pb-3">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-lg">Verbrauchte Materialien für Regiearbeiten</CardTitle>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() =>
-                  setMaterialien((prev) => [
-                    ...prev,
-                    { id: crypto.randomUUID(), bezeichnung: "", menge: "" },
-                  ])
-                }
-              >
-                <Plus className="h-4 w-4 mr-1" />
-                Material hinzufügen
-              </Button>
-            </div>
-          </CardHeader>
-          {materialien.length > 0 && (
-            <CardContent className="space-y-2">
-              {materialien.map((m) => (
-                <div key={m.id} className="flex items-center gap-2">
-                  <Input
-                    value={m.bezeichnung}
-                    onChange={(e) =>
-                      setMaterialien((prev) =>
-                        prev.map((item) =>
-                          item.id === m.id
-                            ? { ...item, bezeichnung: e.target.value }
-                            : item
-                        )
-                      )
-                    }
-                    placeholder="Bezeichnung..."
-                    className="flex-1"
-                  />
-                  <Input
-                    value={m.menge}
-                    onChange={(e) =>
-                      setMaterialien((prev) =>
-                        prev.map((item) =>
-                          item.id === m.id
-                            ? { ...item, menge: e.target.value }
-                            : item
-                        )
-                      )
-                    }
-                    placeholder="z.B. 5 Stk, 20m²"
-                    className="w-32"
-                  />
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="shrink-0 h-8 w-8 text-muted-foreground hover:text-destructive"
-                    onClick={() =>
-                      setMaterialien((prev) =>
-                        prev.filter((item) => item.id !== m.id)
-                      )
-                    }
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </div>
-              ))}
-            </CardContent>
-          )}
-        </Card>
-
-        {/* ---------- ANMERKUNGEN ---------- */}
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-lg">Anmerkungen</CardTitle>
+            <CardTitle className="text-lg">Zusätzliche Angaben</CardTitle>
+            <p className="text-sm text-muted-foreground">Geräteeinsatz, Materialien, Anmerkungen</p>
           </CardHeader>
           <CardContent>
-            <Textarea
-              rows={3}
-              value={anmerkungen}
-              onChange={(e) => setAnmerkungen(e.target.value)}
-              placeholder="Anmerkungen zum Leistungsbericht..."
-            />
+            <Accordion type="multiple" className="w-full">
+              {/* Geräteeinsatz */}
+              <AccordionItem value="geraete">
+                <AccordionTrigger className="text-sm font-medium py-2">
+                  Geräteeinsatz {geraete.length > 0 && <Badge variant="secondary" className="ml-2 text-xs">{geraete.length}</Badge>}
+                </AccordionTrigger>
+                <AccordionContent className="space-y-2 pb-4">
+                  <p className="text-xs text-muted-foreground mb-2">LKW, Kran (in Stunden)</p>
+                  {geraete.map((g) => (
+                    <div key={g.id} className="flex items-center gap-2">
+                      {!GERAETE_OPTIONEN.includes(g.geraet) && g.geraet !== "" ? (
+                        <Input
+                          value={g.geraet.trim()}
+                          onChange={(e) =>
+                            setGeraete((prev) =>
+                              prev.map((item) =>
+                                item.id === g.id ? { ...item, geraet: e.target.value } : item
+                              )
+                            )
+                          }
+                          placeholder="Gerät eingeben..."
+                          className="flex-1"
+                        />
+                      ) : (
+                        <Select
+                          value={g.geraet}
+                          onValueChange={(v) =>
+                            setGeraete((prev) =>
+                              prev.map((item) =>
+                                item.id === g.id ? { ...item, geraet: v === "Sonstiges" ? " " : v } : item
+                              )
+                            )
+                          }
+                        >
+                          <SelectTrigger className="flex-1">
+                            <SelectValue placeholder="Gerät auswählen..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {GERAETE_OPTIONEN.map((opt) => (
+                              <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      )}
+                      <Input
+                        type="number" step="0.5" min="0"
+                        value={g.stunden}
+                        onChange={(e) =>
+                          setGeraete((prev) =>
+                            prev.map((item) => item.id === g.id ? { ...item, stunden: e.target.value } : item)
+                          )
+                        }
+                        placeholder="Std."
+                        className="w-20"
+                      />
+                      <Button variant="ghost" size="icon" className="shrink-0 h-8 w-8 text-muted-foreground hover:text-destructive"
+                        onClick={() => setGeraete((prev) => prev.filter((item) => item.id !== g.id))}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  ))}
+                  <Button variant="outline" size="sm"
+                    onClick={() => setGeraete((prev) => [...prev, { id: crypto.randomUUID(), geraet: "", stunden: "" }])}
+                  >
+                    <Plus className="h-4 w-4 mr-1" /> Gerät
+                  </Button>
+                </AccordionContent>
+              </AccordionItem>
+
+              {/* Materialien */}
+              <AccordionItem value="materialien">
+                <AccordionTrigger className="text-sm font-medium py-2">
+                  Verbrauchte Materialien {materialien.length > 0 && <Badge variant="secondary" className="ml-2 text-xs">{materialien.length}</Badge>}
+                </AccordionTrigger>
+                <AccordionContent className="space-y-2 pb-4">
+                  {materialien.map((m) => (
+                    <div key={m.id} className="flex items-center gap-2">
+                      <Input value={m.bezeichnung}
+                        onChange={(e) => setMaterialien((prev) => prev.map((item) => item.id === m.id ? { ...item, bezeichnung: e.target.value } : item))}
+                        placeholder="Bezeichnung..." className="flex-1"
+                      />
+                      <Input value={m.menge}
+                        onChange={(e) => setMaterialien((prev) => prev.map((item) => item.id === m.id ? { ...item, menge: e.target.value } : item))}
+                        placeholder="Menge" className="w-24"
+                      />
+                      <Button variant="ghost" size="icon" className="shrink-0 h-8 w-8 text-muted-foreground hover:text-destructive"
+                        onClick={() => setMaterialien((prev) => prev.filter((item) => item.id !== m.id))}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  ))}
+                  <Button variant="outline" size="sm"
+                    onClick={() => setMaterialien((prev) => [...prev, { id: crypto.randomUUID(), bezeichnung: "", menge: "" }])}
+                  >
+                    <Plus className="h-4 w-4 mr-1" /> Material
+                  </Button>
+                </AccordionContent>
+              </AccordionItem>
+
+              {/* Anmerkungen */}
+              <AccordionItem value="anmerkungen">
+                <AccordionTrigger className="text-sm font-medium py-2">
+                  Anmerkungen {anmerkungen && <Badge variant="secondary" className="ml-2 text-xs">1</Badge>}
+                </AccordionTrigger>
+                <AccordionContent className="pb-4">
+                  <Textarea rows={3} value={anmerkungen}
+                    onChange={(e) => setAnmerkungen(e.target.value)}
+                    placeholder="Anmerkungen zum Leistungsbericht..."
+                  />
+                </AccordionContent>
+              </AccordionItem>
+            </Accordion>
           </CardContent>
         </Card>
 
@@ -1877,6 +1872,51 @@ const TimeTracking = () => {
               {selectedNewMitarbeiter.size > 0
                 ? `${selectedNewMitarbeiter.size} Mitarbeiter hinzufügen`
                 : "Hinzufügen"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Neues Projekt Dialog */}
+      <Dialog open={showNewProjectDialog} onOpenChange={setShowNewProjectDialog}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Neues Projekt erstellen</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Projektname *</Label>
+              <Input
+                value={newProjectName}
+                onChange={(e) => setNewProjectName(e.target.value)}
+                placeholder="z.B. Schönlieb, VS-Rosegg..."
+                autoFocus
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>PLZ *</Label>
+              <Input
+                value={newProjectPlz}
+                onChange={(e) => setNewProjectPlz(e.target.value)}
+                placeholder="z.B. 9072"
+                inputMode="numeric"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Adresse</Label>
+              <Input
+                value={newProjectAdresse}
+                onChange={(e) => setNewProjectAdresse(e.target.value)}
+                placeholder="Straße, Ort (optional)"
+              />
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setShowNewProjectDialog(false)}>
+              Abbrechen
+            </Button>
+            <Button onClick={handleCreateProject} disabled={creatingProject}>
+              {creatingProject ? "Erstellt..." : "Projekt erstellen"}
             </Button>
           </DialogFooter>
         </DialogContent>

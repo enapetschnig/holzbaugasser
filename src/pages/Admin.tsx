@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ArrowLeft, Shield, User as UserIcon, Send, Mail, Phone, MapPin, Shirt, FileText, Clock, Trash2, Settings, Save, Calendar, Package, Plus } from "lucide-react";
+import { ArrowLeft, Shield, User as UserIcon, Send, Mail, Phone, MapPin, Shirt, FileText, Clock, Trash2, Save, Calendar, Plus } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
@@ -104,117 +104,14 @@ export default function Admin() {
   // Employee save state
   const [savingEmployee, setSavingEmployee] = useState(false);
 
-  // App settings states
-  const [regiereportEmail, setRegiereportEmail] = useState("");
-  const [savingSettings, setSavingSettings] = useState(false);
-  const [loadingSettings, setLoadingSettings] = useState(true);
 
-  // Material catalog states
-  const [materials, setMaterials] = useState<{ id: string; name: string; einheit: string }[]>([]);
-  const [newMaterialName, setNewMaterialName] = useState("");
-  const [newMaterialUnit, setNewMaterialUnit] = useState("Stück");
-  const [addingMaterial, setAddingMaterial] = useState(false);
-
-  const fetchAppSettings = useCallback(async () => {
-    setLoadingSettings(true);
-    try {
-      const { data, error } = await supabase
-        .from("app_settings")
-        .select("value")
-        .eq("key", "disturbance_report_email")
-        .maybeSingle();
-
-      if (error) {
-        console.error("Error fetching app settings:", error);
-      } else if (data) {
-        setRegiereportEmail(data.value);
-      }
-    } catch (err) {
-      console.error("Error fetching app settings:", err);
-    } finally {
-      setLoadingSettings(false);
-    }
-  }, []);
-
-  const fetchMaterials = useCallback(async () => {
-    const { data, error } = await supabase
-      .from("materials")
-      .select("id, name, einheit")
-      .order("name");
-    if (!error && data) setMaterials(data);
-  }, []);
-
-  const addMaterial = async () => {
-    if (!newMaterialName.trim()) return;
-    setAddingMaterial(true);
-    const { error } = await supabase
-      .from("materials")
-      .insert({ name: newMaterialName.trim(), einheit: newMaterialUnit });
-    if (error) {
-      toast({ variant: "destructive", title: "Fehler", description: error.message });
-    } else {
-      setNewMaterialName("");
-      setNewMaterialUnit("Stück");
-      fetchMaterials();
-      toast({ title: "Material hinzugefügt" });
-    }
-    setAddingMaterial(false);
-  };
-
-  const deleteMaterial = async (id: string) => {
-    const { error } = await supabase.from("materials").delete().eq("id", id);
-    if (error) {
-      toast({ variant: "destructive", title: "Fehler", description: error.message });
-    } else {
-      fetchMaterials();
-    }
-  };
-
-  const saveRegiereportEmail = async () => {
-    if (!regiereportEmail.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) {
-      toast({
-        variant: "destructive",
-        title: "Ungültige E-Mail",
-        description: "Bitte geben Sie eine gültige E-Mail-Adresse ein.",
-      });
-      return;
-    }
-
-    setSavingSettings(true);
-    try {
-      const { error } = await supabase
-        .from("app_settings")
-        .upsert({ 
-          key: "disturbance_report_email", 
-          value: regiereportEmail,
-          updated_at: new Date().toISOString()
-        });
-
-      if (error) throw error;
-
-      toast({
-        title: "Gespeichert",
-        description: "E-Mail-Adresse wurde aktualisiert.",
-      });
-    } catch (err: any) {
-      toast({
-        variant: "destructive",
-        title: "Fehler",
-        description: err.message || "Einstellung konnte nicht gespeichert werden.",
-      });
-    } finally {
-      setSavingSettings(false);
-    }
-  };
 
   useEffect(() => {
     checkAdminAccess();
     fetchUsers();
     fetchEmployees();
     fetchSickNotes();
-    fetchAppSettings();
-    fetchMaterials();
-  }, [fetchAppSettings, fetchMaterials]);
+  }, []);
 
   const checkAdminAccess = async () => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -1110,6 +1007,62 @@ export default function Admin() {
               )}
             </CardContent>
           </Card>
+
+          {/* Lohnzettel Upload Section */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <FileText className="w-5 h-5" />
+                Lohnzettel hochladen
+              </CardTitle>
+              <CardDescription>
+                Lohnzettel für Mitarbeiter hochladen (Push-Benachrichtigung wird gesendet)
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                {profiles.filter(p => p.is_active).map((p) => (
+                  <div key={p.id} className="flex items-center justify-between p-3 rounded-lg border bg-card">
+                    <div className="flex items-center gap-3">
+                      <Avatar>
+                        <AvatarFallback>{p.vorname[0]}{p.nachname[0]}</AvatarFallback>
+                      </Avatar>
+                      <span className="font-medium text-sm">{p.vorname} {p.nachname}</span>
+                    </div>
+                    <div>
+                      <Input
+                        type="file"
+                        accept=".pdf,image/*"
+                        className="w-auto text-xs"
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          if (!file) return;
+                          const timestamp = Date.now();
+                          const filePath = `${p.id}/lohnzettel/${timestamp}_${file.name}`;
+                          const { error: uploadError } = await supabase.storage
+                            .from("employee-documents")
+                            .upload(filePath, file);
+                          if (uploadError) {
+                            toast({ variant: "destructive", title: "Upload fehlgeschlagen", description: uploadError.message });
+                            return;
+                          }
+                          // Notify employee
+                          await supabase.from("notifications").insert({
+                            user_id: p.id,
+                            type: "lohnzettel_upload",
+                            title: "Neuer Lohnzettel verfügbar",
+                            message: "Ihr Lohnzettel wurde hochgeladen.",
+                          });
+                          toast({ title: `Lohnzettel für ${p.vorname} ${p.nachname} hochgeladen` });
+                          e.target.value = "";
+                        }}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
         </section>
 
         {/* ===== URLAUBSVERWALTUNG ===== */}
@@ -1122,8 +1075,6 @@ export default function Admin() {
         </section>
 
 
-        {/* Zeitkonto vorerst deaktiviert */}
-        {false && (
         <section>
           <h2 className="text-2xl font-bold mb-4 flex items-center gap-2">
             <Clock className="h-6 w-6" />
@@ -1131,7 +1082,6 @@ export default function Admin() {
           </h2>
           <TimeAccountManagement profiles={profiles.filter(p => p.is_active)} />
         </section>
-        )}
 
 
       </main>
@@ -1270,16 +1220,16 @@ export default function Admin() {
                         </Select>
                       </div>
                       <div className="space-y-2">
-                        <Label>Beschäftigungsausmaß (Monatsstunden)</Label>
+                        <Label>Beschäftigungsausmaß (Wochenstunden)</Label>
                         <Input
                           type="number"
                           step="0.5"
-                          placeholder="Leer = Standard"
+                          placeholder="Leer = Standard (39h)"
                           value={formData.monats_soll_stunden ?? ""}
                           onChange={(e) => setFormData({ ...formData, monats_soll_stunden: e.target.value ? parseFloat(e.target.value) : null })}
                         />
                         <p className="text-xs text-muted-foreground">
-                          Leer = Standard (Mo–Do 8h, Fr 7h). Für Teilzeit z.B. 80h eintragen.
+                          Leer = Standard (39h/Woche). Für Teilzeit z.B. 20h eintragen.
                         </p>
                       </div>
                       <div>

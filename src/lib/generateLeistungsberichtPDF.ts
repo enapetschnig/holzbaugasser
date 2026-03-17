@@ -1,5 +1,17 @@
 import { jsPDF } from "jspdf";
 
+// Umlaut helper for jsPDF WinAnsiEncoding
+function pdfText(s: string): string {
+  return s
+    .replace(/ä/g, "\xe4")
+    .replace(/ö/g, "\xf6")
+    .replace(/ü/g, "\xfc")
+    .replace(/Ä/g, "\xc4")
+    .replace(/Ö/g, "\xd6")
+    .replace(/Ü/g, "\xdc")
+    .replace(/ß/g, "\xdf");
+}
+
 export type LeistungsberichtPDFData = {
   projektName: string;
   projektOrt: string;
@@ -157,7 +169,7 @@ export async function generateLeistungsberichtPDF(
   doc.setTextColor(...ORANGE_RED);
   doc.setFontSize(8);
   doc.setFont("helvetica", "italic");
-  doc.text("Der Leistungsbericht ist t\u00e4glich abzugeben!", mL, y);
+  doc.text(pdfText("Der Leistungsbericht ist täglich abzugeben!"), mL, y);
 
   // ════════════════════════════════════════════════════════════════════════════
   // BAUVORHABEN SECTION
@@ -181,7 +193,7 @@ export async function generateLeistungsberichtPDF(
   doc.setFont("helvetica", "bold");
   doc.text("Name:", labelX, y);
   doc.setFont("helvetica", "normal");
-  doc.text(data.projektName, valX, y);
+  doc.text(pdfText(data.projektName), valX, y);
   drawLine(doc, valX, y + 0.8, rightBlockX - 4, y + 0.8, 0.15);
 
   doc.setFont("helvetica", "bold");
@@ -197,7 +209,7 @@ export async function generateLeistungsberichtPDF(
   doc.setFont("helvetica", "bold");
   doc.text("Ort:", labelX, y);
   doc.setFont("helvetica", "normal");
-  doc.text(data.projektOrt, valX, y);
+  doc.text(pdfText(data.projektOrt), valX, y);
   drawLine(doc, valX, y + 0.8, rightBlockX - 4, y + 0.8, 0.15);
   y += 5;
 
@@ -205,7 +217,7 @@ export async function generateLeistungsberichtPDF(
   doc.setFont("helvetica", "bold");
   doc.text("Objekt:", labelX, y);
   doc.setFont("helvetica", "normal");
-  doc.text(data.objekt, valX, y);
+  doc.text(pdfText(data.objekt), valX, y);
   drawLine(doc, valX, y + 0.8, rightBlockX - 4, y + 0.8, 0.15);
 
   doc.setFont("helvetica", "bold");
@@ -224,7 +236,7 @@ export async function generateLeistungsberichtPDF(
   doc.setTextColor(...DARK_GREEN);
   doc.setFontSize(10);
   doc.setFont("helvetica", "bold");
-  doc.text("T\u00e4tigkeiten:", mL, y);
+  doc.text(pdfText("Tätigkeiten:"), mL, y);
 
   doc.setFontSize(8);
   doc.text("Regie", contentRight, y, { align: "right" });
@@ -235,7 +247,7 @@ export async function generateLeistungsberichtPDF(
   doc.setFontSize(6);
   doc.setFont("helvetica", "normal");
   doc.text(
-    "Normalarbeitszeit Mo\u2013Do 7\u201316 Uhr = 9 Std. \u2013 1 Std. Pause = 8 Std.    Fr 7\u201315 Uhr = 8 Std. \u2013 1 Std. Pause = 7 Std.",
+    pdfText("Normalarbeitszeit Mo-Do 7-16 Uhr = 9 Std. - 1 Std. Pause = 8 Std.    Fr 7-15 Uhr = 8 Std. - 1 Std. Pause = 7 Std."),
     mL + 2,
     y
   );
@@ -249,7 +261,7 @@ export async function generateLeistungsberichtPDF(
   }
   // Row 1: Rüstzeit/Anfahrt with arrival time
   if (!activityTexts[0]) {
-    activityTexts[0] = `R\u00fcstzeit/Anfahrt, Ankunftszeit Baustelle: ${data.ankunftZeit}`;
+    activityTexts[0] = `Rüstzeit/Anfahrt, Ankunftszeit Baustelle: ${data.ankunftZeit}`;
   }
 
   // Activity grid (8 rows)
@@ -280,7 +292,7 @@ export async function generateLeistungsberichtPDF(
     if (posNum === 8) {
       text = `Pause, Von: ${data.pauseVon}   Bis: ${data.pauseBis}`;
     }
-    doc.text(text, actTableX + actNumW + 1, rowY + actRowH * 0.65);
+    doc.text(pdfText(text), actTableX + actNumW + 1, rowY + actRowH * 0.65);
 
     // If row 7, show LKW hours on right
     if (posNum === 7 && data.lkwStunden > 0) {
@@ -382,7 +394,7 @@ export async function generateLeistungsberichtPDF(
   const actColsStart = hx;
   doc.setFontSize(5);
   doc.text(
-    "Geleistete Arbeitsstunden f\u00fcr T\u00e4tigkeit Nr.:",
+    pdfText("Geleistete Arbeitsstunden für Tätigkeit Nr.:"),
     actColsStart + (8 * colAct) / 2,
     y + 3.5,
     { align: "center" }
@@ -427,7 +439,7 @@ export async function generateLeistungsberichtPDF(
 
     // Name
     doc.setFont("helvetica", "normal");
-    if (m) doc.text(m.name, cx + 1, y + rowH * 0.7);
+    if (m) doc.text(pdfText(m.name), cx + 1, y + rowH * 0.7);
     cx += colName;
 
     // Sum 1-8
@@ -513,7 +525,7 @@ export async function generateLeistungsberichtPDF(
   doc.setTextColor(...DARK_GREEN);
   doc.setFontSize(8);
   doc.setFont("helvetica", "bold");
-  doc.text("Ger\u00e4teeinsatz:", mL, y);
+  doc.text(pdfText("Geräteeinsatz:"), mL, y);
 
   doc.setTextColor(...GRAY);
   doc.setFontSize(6);
@@ -540,7 +552,7 @@ export async function generateLeistungsberichtPDF(
 
   for (let i = 0; i < geraeteRows.length; i++) {
     const g = geraeteRows[i];
-    doc.text(g.geraet, mL + 1, y + geraeteRowH * 0.7);
+    doc.text(pdfText(g.geraet), mL + 1, y + geraeteRowH * 0.7);
     if (g.stunden > 0) {
       doc.text(
         formatNumber(g.stunden),
@@ -587,7 +599,7 @@ export async function generateLeistungsberichtPDF(
   doc.setTextColor(...DARK_GREEN);
   doc.setFontSize(7);
   doc.setFont("helvetica", "bold");
-  doc.text("Verbrauchte Materialien f\u00fcr Regiearbeiten:", mL, y);
+  doc.text(pdfText("Verbrauchte Materialien für Regiearbeiten:"), mL, y);
   y += 3;
 
   const matRows =
@@ -609,7 +621,7 @@ export async function generateLeistungsberichtPDF(
 
   for (let i = 0; i < matRows.length; i++) {
     const mat = matRows[i];
-    doc.text(mat.bezeichnung, mL + 1, y + matRowH * 0.7);
+    doc.text(pdfText(mat.bezeichnung), mL + 1, y + matRowH * 0.7);
     doc.text(mat.menge, mL + matColBez + 1, y + matRowH * 0.7);
     y += matRowH;
   }
@@ -650,7 +662,7 @@ export async function generateLeistungsberichtPDF(
   doc.setFontSize(6);
   doc.setFont("helvetica", "normal");
   if (data.anmerkungen) {
-    const anmLines = doc.splitTextToSize(data.anmerkungen, anmBoxW - 3);
+    const anmLines = doc.splitTextToSize(pdfText(data.anmerkungen), anmBoxW - 3);
     doc.text(anmLines, anmX + 1.5, anmBoxTop + 3.5);
   }
 
@@ -660,17 +672,17 @@ export async function generateLeistungsberichtPDF(
   doc.setFontSize(5);
   doc.setFont("helvetica", "italic");
   doc.text(
-    "Ma\u00dfnahmen gem\u00e4\u00df \u00a7 14 ASchG & BauV \u00a7 154 sowie",
+    pdfText("Maßnahmen gemäß § 14 ASchG & BauV § 154 sowie"),
     anmX,
     safetyY
   );
   doc.text(
-    "Hinweis zur Verwendung von Pers\u00f6nlicher",
+    pdfText("Hinweis zur Verwendung von Persönlicher"),
     anmX,
     safetyY + 3
   );
   doc.text(
-    "Schutzausr\u00fcstung zur Kenntnis genommen!",
+    pdfText("Schutzausrüstung zur Kenntnis genommen!"),
     anmX,
     safetyY + 6
   );
@@ -709,7 +721,7 @@ export async function generateLeistungsberichtPDF(
   doc.setTextColor(...BLACK);
   doc.setFontSize(7);
   doc.setFont("helvetica", "normal");
-  doc.text("Partief\u00fchrer:", sig1X, sigY + 3.5);
+  doc.text(pdfText("Partieführer:"), sig1X, sigY + 3.5);
   doc.text("Kontrolliert:", sig2X, sigY + 3.5);
   doc.text("Auftraggeber:in:", sig3X, sigY + 3.5);
 

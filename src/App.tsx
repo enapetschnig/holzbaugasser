@@ -24,7 +24,6 @@ import Admin from "./pages/Admin";
 import HoursReport from "./pages/HoursReport";
 import Employees from "./pages/Employees";
 import Notepad from "./pages/Notepad";
-import MaterialList from "./pages/MaterialList";
 import Absence from "./pages/Absence";
 import Disturbances from "./pages/Disturbances";
 import DisturbanceDetail from "./pages/DisturbanceDetail";
@@ -99,7 +98,6 @@ function AppContent() {
         <Route path="/projects" element={<Projects />} />
         <Route path="/projects/:projectId" element={<ProjectOverview />} />
         <Route path="/projects/:projectId/:type" element={<ProjectDetail />} />
-        <Route path="/projects/:projectId/materials" element={<MaterialList />} />
         <Route path="/my-hours" element={<MyHours />} />
         <Route path="/my-documents" element={<MyDocuments />} />
         <Route path="/reports" element={<Reports />} />

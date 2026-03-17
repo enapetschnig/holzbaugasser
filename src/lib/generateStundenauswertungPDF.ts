@@ -1,6 +1,20 @@
 import { jsPDF } from "jspdf";
 
 // ---------------------------------------------------------------------------
+// Umlaut helper – jsPDF built-in fonts use WinAnsiEncoding.
+// ---------------------------------------------------------------------------
+function pdfText(s: string): string {
+  return s
+    .replace(/ä/g, "\xe4")
+    .replace(/ö/g, "\xf6")
+    .replace(/ü/g, "\xfc")
+    .replace(/Ä/g, "\xc4")
+    .replace(/Ö/g, "\xd6")
+    .replace(/Ü/g, "\xdc")
+    .replace(/ß/g, "\xdf");
+}
+
+// ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
@@ -19,11 +33,22 @@ export type StundenauswertungPDFData = {
     summe: number;
     soll: number;
     differenz: number;
+    zeitkonto?: number;
   }[];
 };
 
 // ---------------------------------------------------------------------------
-// PDF Generator
+// Helpers
+// ---------------------------------------------------------------------------
+
+function formatNum(n: number): string {
+  if (n === Math.floor(n)) return n.toString();
+  const s = n.toFixed(1);
+  return s.endsWith("0") ? n.toString() : s;
+}
+
+// ---------------------------------------------------------------------------
+// PDF Generator – Rows = Employees, Columns = Days
 // ---------------------------------------------------------------------------
 
 export async function generateStundenauswertungPDF(
@@ -33,34 +58,28 @@ export async function generateStundenauswertungPDF(
 
   // A3 landscape = 420mm x 297mm
   const pageW = 420;
-  const pageH = 297;
   const margin = 8;
 
   const numDays = data.mitarbeiter.length > 0 ? data.mitarbeiter[0].tage.length : 31;
   const numEmployees = data.mitarbeiter.length;
 
   // Column widths
-  const dayLabelColW = 12;   // "1 Mo" column
-  const summaryColW = 16;    // Summe / Soll / +/- columns
-  const summaryCount = 3;    // 3 summary columns
+  const nameColW = 36;        // Employee name column (left)
+  const summaryColW = 14;     // Σ, Soll, +/-, ZK columns
+  const summaryCount = 4;
 
-  // Calculate employee column width to fill available space
-  const availableW =
-    pageW - margin * 2 - dayLabelColW - summaryColW * summaryCount;
-  const empColW = Math.max(
-    14,
-    Math.min(28, availableW / Math.max(numEmployees, 1))
-  );
+  // Calculate day column width to fill available space
+  const availableW = pageW - margin * 2 - nameColW - summaryColW * summaryCount;
+  const dayColW = Math.max(8, Math.min(12, availableW / Math.max(numDays, 1)));
 
   // Table dimensions
-  const tableW =
-    dayLabelColW + empColW * numEmployees + summaryColW * summaryCount;
+  const tableW = nameColW + dayColW * numDays + summaryColW * summaryCount;
   const startX = margin;
 
   // Row heights
-  const headerH = 10;   // Employee name header
-  const dayRowH = 7;    // Each day row
-  const summaryRowH = 7; // Bottom summary rows
+  const headerRowH = 7;   // Day number header row
+  const wdayRowH = 5;     // Weekday abbreviation row
+  const empRowH = 7;      // Each employee row
 
   const startY = margin + 14; // space for title
 
@@ -78,7 +97,7 @@ export async function generateStundenauswertungPDF(
 
   doc.setFontSize(11);
   doc.text(
-    `MONAT: ${data.monat} ${data.jahr} = ${data.sollStunden} Std.`,
+    pdfText(`MONAT: ${data.monat} ${data.jahr} = ${data.sollStunden} Std.`),
     startX + tableW - 4,
     margin + 8,
     { align: "right" }
@@ -87,286 +106,259 @@ export async function generateStundenauswertungPDF(
   doc.setTextColor(0, 0, 0);
 
   // -------------------------------------------------------------------------
-  // Column header row (employee names)
+  // Row 1: Day numbers
   // -------------------------------------------------------------------------
-  const colHeaderY = startY;
+  const row1Y = startY;
 
-  // Day label header
+  // Name column header (spans both header rows)
   doc.setFillColor(220, 220, 220);
-  doc.rect(startX, colHeaderY, dayLabelColW, headerH, "FD");
+  doc.rect(startX, row1Y, nameColW, headerRowH + wdayRowH, "FD");
   doc.setFontSize(7);
   doc.setFont("helvetica", "bold");
-  doc.text("Tag", startX + dayLabelColW / 2, colHeaderY + headerH / 2 + 1, {
-    align: "center",
-  });
+  doc.text("Mitarbeiter", startX + 2, row1Y + (headerRowH + wdayRowH) / 2 + 1);
 
-  // Employee name headers
-  for (let e = 0; e < numEmployees; e++) {
-    const x = startX + dayLabelColW + e * empColW;
-    doc.setFillColor(220, 220, 220);
-    doc.rect(x, colHeaderY, empColW, headerH, "FD");
+  // Day columns - numbers
+  for (let d = 0; d < numDays; d++) {
+    const x = startX + nameColW + d * dayColW;
+    const sampleDay = numEmployees > 0 ? data.mitarbeiter[0].tage[d] : null;
+    const isWe = sampleDay?.isWeekend ?? false;
+    const isSa = sampleDay?.wochentag === "Sa";
 
-    const name = data.mitarbeiter[e].name;
-    doc.setFontSize(6);
-    doc.setFont("helvetica", "bold");
-
-    // Split name into lines if too long
-    const maxCharsPerLine = Math.floor(empColW / 1.8);
-    if (name.length > maxCharsPerLine) {
-      const parts = name.split(" ");
-      const line1 = parts[0] || "";
-      const line2 = parts.slice(1).join(" ");
-      doc.text(line1, x + empColW / 2, colHeaderY + 3.5, { align: "center" });
-      doc.text(line2, x + empColW / 2, colHeaderY + 7, { align: "center" });
+    if (isWe) {
+      doc.setFillColor(isSa ? 244 : 232, isSa ? 199 : 180, isSa ? 161 : 160);
     } else {
-      doc.text(name, x + empColW / 2, colHeaderY + headerH / 2 + 1, {
-        align: "center",
-      });
+      doc.setFillColor(220, 220, 220);
     }
+    doc.rect(x, row1Y, dayColW, headerRowH, "FD");
+
+    doc.setFontSize(6.5);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(0, 0, 0);
+    doc.text(`${d + 1}`, x + dayColW / 2, row1Y + headerRowH / 2 + 1, {
+      align: "center",
+    });
   }
 
   // Summary column headers
-  const summaryLabels = ["\u03A3", "Soll", "+/-"];
+  const summaryLabels = ["\u03A3", "Soll", "+/-", "ZK"];
   for (let s = 0; s < summaryCount; s++) {
-    const x = startX + dayLabelColW + numEmployees * empColW + s * summaryColW;
+    const x = startX + nameColW + numDays * dayColW + s * summaryColW;
     doc.setFillColor(200, 200, 200);
-    doc.rect(x, colHeaderY, summaryColW, headerH, "FD");
+    doc.rect(x, row1Y, summaryColW, headerRowH + wdayRowH, "FD");
     doc.setFontSize(7);
     doc.setFont("helvetica", "bold");
     doc.text(
       summaryLabels[s],
       x + summaryColW / 2,
-      colHeaderY + headerH / 2 + 1,
+      row1Y + (headerRowH + wdayRowH) / 2 + 1,
       { align: "center" }
     );
   }
 
   // -------------------------------------------------------------------------
-  // Day rows
+  // Row 2: Weekday abbreviations
   // -------------------------------------------------------------------------
-  const bodyStartY = colHeaderY + headerH;
+  const row2Y = row1Y + headerRowH;
 
   for (let d = 0; d < numDays; d++) {
-    const y = bodyStartY + d * dayRowH;
-    const sampleDay = data.mitarbeiter.length > 0 ? data.mitarbeiter[0].tage[d] : null;
+    const x = startX + nameColW + d * dayColW;
+    const sampleDay = numEmployees > 0 ? data.mitarbeiter[0].tage[d] : null;
     const isWe = sampleDay?.isWeekend ?? false;
     const isSa = sampleDay?.wochentag === "Sa";
+    const wd = sampleDay?.wochentag || "";
 
-    // Day label cell
     if (isWe) {
       doc.setFillColor(isSa ? 244 : 232, isSa ? 199 : 180, isSa ? 161 : 160);
     } else {
-      doc.setFillColor(255, 255, 255);
+      doc.setFillColor(235, 235, 235);
     }
-    doc.rect(startX, y, dayLabelColW, dayRowH, "FD");
+    doc.rect(x, row2Y, dayColW, wdayRowH, "FD");
 
-    doc.setFontSize(6.5);
-    doc.setFont("helvetica", isWe ? "bold" : "normal");
-    doc.setTextColor(0, 0, 0);
-    const dayLabel = sampleDay
-      ? `${sampleDay.tag} ${sampleDay.wochentag}`
-      : `${d + 1}`;
-    doc.text(dayLabel, startX + dayLabelColW / 2, y + dayRowH / 2 + 1, {
+    doc.setFontSize(5.5);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(80, 80, 80);
+    doc.text(wd, x + dayColW / 2, row2Y + wdayRowH / 2 + 1, {
       align: "center",
     });
+  }
 
-    // Employee data cells
-    for (let e = 0; e < numEmployees; e++) {
-      const x = startX + dayLabelColW + e * empColW;
-      const tag = data.mitarbeiter[e].tage[d];
-      const cellIsWe = tag?.isWeekend ?? isWe;
-      const cellIsSa = tag?.wochentag === "Sa";
+  doc.setTextColor(0, 0, 0);
 
-      if (cellIsWe) {
-        doc.setFillColor(
-          cellIsSa ? 244 : 232,
-          cellIsSa ? 199 : 180,
-          cellIsSa ? 161 : 160
-        );
+  // -------------------------------------------------------------------------
+  // Employee rows
+  // -------------------------------------------------------------------------
+  const bodyStartY = row2Y + wdayRowH;
+
+  for (let e = 0; e < numEmployees; e++) {
+    const y = bodyStartY + e * empRowH;
+    const emp = data.mitarbeiter[e];
+
+    // Name cell
+    doc.setFillColor(e % 2 === 0 ? 255 : 248, e % 2 === 0 ? 255 : 248, e % 2 === 0 ? 255 : 248);
+    doc.rect(startX, y, nameColW, empRowH, "FD");
+    doc.setFontSize(6);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(0, 0, 0);
+    doc.text(pdfText(emp.name), startX + 1.5, y + empRowH / 2 + 1);
+
+    // Day cells
+    for (let d = 0; d < numDays; d++) {
+      const x = startX + nameColW + d * dayColW;
+      const tag = emp.tage[d];
+      const isWe = tag?.isWeekend ?? false;
+      const isSa = tag?.wochentag === "Sa";
+
+      if (isWe) {
+        doc.setFillColor(isSa ? 244 : 232, isSa ? 199 : 180, isSa ? 161 : 160);
       } else {
-        doc.setFillColor(255, 255, 255);
+        doc.setFillColor(e % 2 === 0 ? 255 : 248, e % 2 === 0 ? 255 : 248, e % 2 === 0 ? 255 : 248);
       }
-      doc.rect(x, y, empColW, dayRowH, "FD");
+      doc.rect(x, y, dayColW, empRowH, "FD");
 
       if (tag && tag.content) {
-        // Color coding for absence types
         const content = tag.content;
         if (content === "U") {
-          doc.setTextColor(22, 163, 74); // green
+          doc.setTextColor(22, 163, 74);
           doc.setFont("helvetica", "bold");
         } else if (content === "K") {
-          doc.setTextColor(220, 38, 38); // red
+          doc.setTextColor(220, 38, 38);
           doc.setFont("helvetica", "bold");
         } else if (content === "ZA") {
-          doc.setTextColor(37, 99, 235); // blue
+          doc.setTextColor(37, 99, 235);
           doc.setFont("helvetica", "bold");
         } else if (content === "Feiertag") {
           doc.setTextColor(100, 100, 100);
           doc.setFont("helvetica", "bold");
+        } else if (content === "Schule") {
+          doc.setTextColor(100, 100, 100);
+          doc.setFont("helvetica", "normal");
         } else {
           doc.setTextColor(0, 0, 0);
           doc.setFont("helvetica", "normal");
         }
 
-        doc.setFontSize(6);
-        doc.text(content, x + empColW / 2, y + dayRowH / 2 + 1, {
+        doc.setFontSize(5.5);
+        doc.text(pdfText(content), x + dayColW / 2, y + empRowH / 2 + 1, {
           align: "center",
         });
         doc.setTextColor(0, 0, 0);
       }
     }
 
-    // Empty summary cells for day rows (no per-day summary)
-    for (let s = 0; s < summaryCount; s++) {
-      const x =
-        startX + dayLabelColW + numEmployees * empColW + s * summaryColW;
-      if (isWe) {
-        doc.setFillColor(isSa ? 244 : 232, isSa ? 199 : 180, isSa ? 161 : 160);
-      } else {
-        doc.setFillColor(245, 245, 245);
-      }
-      doc.rect(x, y, summaryColW, dayRowH, "FD");
-    }
-  }
-
-  // -------------------------------------------------------------------------
-  // Summary rows at bottom (per employee totals)
-  // -------------------------------------------------------------------------
-  const summaryY = bodyStartY + numDays * dayRowH;
-
-  // Row: Summe
-  {
-    const y = summaryY;
+    // Summary cells: Σ
+    const sumX = startX + nameColW + numDays * dayColW;
     doc.setFillColor(230, 230, 230);
-    doc.rect(startX, y, dayLabelColW, summaryRowH, "FD");
-    doc.setFontSize(6.5);
+    doc.rect(sumX, y, summaryColW, empRowH, "FD");
+    doc.setFontSize(6);
     doc.setFont("helvetica", "bold");
     doc.setTextColor(0, 0, 0);
-    doc.text("\u03A3", startX + dayLabelColW / 2, y + summaryRowH / 2 + 1, {
-      align: "center",
-    });
+    doc.text(
+      emp.summe > 0 ? formatNum(emp.summe) : "",
+      sumX + summaryColW / 2,
+      y + empRowH / 2 + 1,
+      { align: "center" }
+    );
 
-    for (let e = 0; e < numEmployees; e++) {
-      const x = startX + dayLabelColW + e * empColW;
-      doc.setFillColor(230, 230, 230);
-      doc.rect(x, y, empColW, summaryRowH, "FD");
-      const val = data.mitarbeiter[e].summe;
-      doc.setFontSize(6.5);
+    // Soll
+    const sollX = sumX + summaryColW;
+    doc.setFillColor(240, 240, 240);
+    doc.rect(sollX, y, summaryColW, empRowH, "FD");
+    doc.setFont("helvetica", "normal");
+    doc.text(
+      formatNum(emp.soll),
+      sollX + summaryColW / 2,
+      y + empRowH / 2 + 1,
+      { align: "center" }
+    );
+
+    // +/-
+    const diffX = sollX + summaryColW;
+    doc.setFillColor(240, 240, 240);
+    doc.rect(diffX, y, summaryColW, empRowH, "FD");
+    const diff = emp.differenz;
+    doc.setTextColor(diff >= 0 ? 22 : 220, diff >= 0 ? 163 : 38, diff >= 0 ? 74 : 38);
+    doc.setFont("helvetica", "bold");
+    const sign = diff >= 0 ? "+" : "";
+    doc.text(
+      `${sign}${formatNum(diff)}`,
+      diffX + summaryColW / 2,
+      y + empRowH / 2 + 1,
+      { align: "center" }
+    );
+
+    // ZK
+    const zkX = diffX + summaryColW;
+    doc.setFillColor(240, 240, 240);
+    doc.rect(zkX, y, summaryColW, empRowH, "FD");
+    const zk = emp.zeitkonto;
+    if (zk != null) {
+      doc.setTextColor(zk >= 0 ? 22 : 220, zk >= 0 ? 163 : 38, zk >= 0 ? 74 : 38);
       doc.setFont("helvetica", "bold");
+      const zkSign = zk >= 0 ? "+" : "";
       doc.text(
-        val > 0 ? formatNum(val) : "",
-        x + empColW / 2,
-        y + summaryRowH / 2 + 1,
+        `${zkSign}${formatNum(zk)}`,
+        zkX + summaryColW / 2,
+        y + empRowH / 2 + 1,
         { align: "center" }
       );
     }
-
-    // Summary columns: total of totals not needed, leave blank or repeat
-    for (let s = 0; s < summaryCount; s++) {
-      const x =
-        startX + dayLabelColW + numEmployees * empColW + s * summaryColW;
-      doc.setFillColor(210, 210, 210);
-      doc.rect(x, y, summaryColW, summaryRowH, "FD");
-    }
+    doc.setTextColor(0, 0, 0);
   }
 
-  // Row: Soll
-  {
-    const y = summaryY + summaryRowH;
-    doc.setFillColor(240, 240, 240);
-    doc.rect(startX, y, dayLabelColW, summaryRowH, "FD");
-    doc.setFontSize(6.5);
-    doc.setFont("helvetica", "bold");
-    doc.text("Soll", startX + dayLabelColW / 2, y + summaryRowH / 2 + 1, {
-      align: "center",
-    });
+  // -------------------------------------------------------------------------
+  // Grid lines
+  // -------------------------------------------------------------------------
+  const tableTop = row1Y;
+  const tableBottom = bodyStartY + numEmployees * empRowH;
+  const tableRight = startX + tableW;
 
-    for (let e = 0; e < numEmployees; e++) {
-      const x = startX + dayLabelColW + e * empColW;
-      doc.setFillColor(240, 240, 240);
-      doc.rect(x, y, empColW, summaryRowH, "FD");
-      doc.setFontSize(6.5);
-      doc.setFont("helvetica", "normal");
-      doc.text(
-        formatNum(data.mitarbeiter[e].soll),
-        x + empColW / 2,
-        y + summaryRowH / 2 + 1,
-        { align: "center" }
-      );
-    }
+  doc.setDrawColor(0, 0, 0);
+  doc.setLineWidth(0.3);
 
-    for (let s = 0; s < summaryCount; s++) {
-      const x =
-        startX + dayLabelColW + numEmployees * empColW + s * summaryColW;
-      doc.setFillColor(210, 210, 210);
-      doc.rect(x, y, summaryColW, summaryRowH, "FD");
-    }
+  // Outer border
+  doc.rect(startX, tableTop, tableW, tableBottom - tableTop);
+
+  // Horizontal lines
+  // After day numbers
+  doc.line(startX + nameColW, row1Y + headerRowH, tableRight, row1Y + headerRowH);
+  // After weekdays
+  doc.line(startX, bodyStartY, tableRight, bodyStartY);
+  // Employee row separators
+  for (let e = 1; e < numEmployees; e++) {
+    const lineY = bodyStartY + e * empRowH;
+    doc.setLineWidth(0.15);
+    doc.line(startX, lineY, tableRight, lineY);
   }
 
-  // Row: +/-
-  {
-    const y = summaryY + summaryRowH * 2;
-    doc.setFillColor(240, 240, 240);
-    doc.rect(startX, y, dayLabelColW, summaryRowH, "FD");
-    doc.setFontSize(6.5);
-    doc.setFont("helvetica", "bold");
-    doc.text("+/-", startX + dayLabelColW / 2, y + summaryRowH / 2 + 1, {
-      align: "center",
-    });
-
-    for (let e = 0; e < numEmployees; e++) {
-      const x = startX + dayLabelColW + e * empColW;
-      const diff = data.mitarbeiter[e].differenz;
-      doc.setFillColor(240, 240, 240);
-      doc.rect(x, y, empColW, summaryRowH, "FD");
-
-      if (diff >= 0) {
-        doc.setTextColor(22, 163, 74); // green
-      } else {
-        doc.setTextColor(220, 38, 38); // red
-      }
-      doc.setFontSize(6.5);
-      doc.setFont("helvetica", "bold");
-      const sign = diff >= 0 ? "+" : "";
-      doc.text(
-        `${sign}${formatNum(diff)}`,
-        x + empColW / 2,
-        y + summaryRowH / 2 + 1,
-        { align: "center" }
-      );
-      doc.setTextColor(0, 0, 0);
-    }
-
-    for (let s = 0; s < summaryCount; s++) {
-      const x =
-        startX + dayLabelColW + numEmployees * empColW + s * summaryColW;
-      doc.setFillColor(210, 210, 210);
-      doc.rect(x, y, summaryColW, summaryRowH, "FD");
-    }
+  // Vertical lines
+  doc.setLineWidth(0.3);
+  // After name column
+  doc.line(startX + nameColW, tableTop, startX + nameColW, tableBottom);
+  // Day column separators
+  doc.setLineWidth(0.15);
+  for (let d = 1; d < numDays; d++) {
+    const x = startX + nameColW + d * dayColW;
+    doc.line(x, tableTop, x, tableBottom);
+  }
+  // Before summary columns
+  doc.setLineWidth(0.3);
+  for (let s = 0; s <= summaryCount; s++) {
+    const x = startX + nameColW + numDays * dayColW + s * summaryColW;
+    doc.line(x, tableTop, x, tableBottom);
   }
 
   // -------------------------------------------------------------------------
   // Footer legend
   // -------------------------------------------------------------------------
-  const footerY = summaryY + summaryRowH * 3 + 4;
+  const footerY = tableBottom + 4;
   doc.setFontSize(6);
   doc.setFont("helvetica", "normal");
   doc.setTextColor(100, 100, 100);
   doc.text(
-    "F = Fahrer  |  W = Werkstatt  |  SCH = Schmutzzulage  |  R = Regen  |  U = Urlaub  |  K = Krankenstand  |  ZA = Zeitausgleich  |  Schule = Berufsschule",
+    pdfText("F = Fahrer  |  W = Werkstatt  |  SCH = Schmutzzulage  |  R = Regen  |  U = Urlaub  |  K = Krankenstand  |  ZA = Zeitausgleich  |  Schule = Berufsschule"),
     startX,
     footerY
   );
 
   return doc.output("blob") as unknown as Blob;
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function formatNum(n: number): string {
-  if (n === Math.floor(n)) return n.toString();
-  const s = n.toFixed(1);
-  return s.endsWith("0") ? n.toString() : s;
 }

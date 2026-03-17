@@ -75,11 +75,30 @@ export default function Auth() {
       return;
     }
 
-    toast({ 
+    // Notify all admins about new registration
+    try {
+      const { data: admins } = await supabase
+        .from("user_roles")
+        .select("user_id")
+        .eq("role", "administrator");
+      if (admins && admins.length > 0) {
+        const notifications = admins.map((admin: any) => ({
+          user_id: admin.user_id,
+          type: "neue_registrierung",
+          title: `Neuer Benutzer: ${vorname} ${nachname}`,
+          message: "Wartet auf Freischaltung und Rollenzuweisung.",
+        }));
+        await supabase.from("notifications").insert(notifications);
+      }
+    } catch {
+      // Notification failure is not critical
+    }
+
+    toast({
       title: "Registrierung erfolgreich!",
-      description: "Sie können jetzt die App nutzen.",
+      description: "Ihr Konto wartet auf Freischaltung durch den Administrator.",
     });
-    
+
     navigate("/");
     setLoading(false);
   };
