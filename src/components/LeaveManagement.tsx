@@ -35,7 +35,7 @@ export default function LeaveManagement({ profiles }: LeaveManagementProps) {
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [editingBalance, setEditingBalance] = useState<string | null>(null);
   const [editDays, setEditDays] = useState("");
-  const [vacationEntries, setVacationEntries] = useState<{ user_id: string; datum: string }[]>([]);
+  const [vacationEntries, setVacationEntries] = useState<{ user_id: string; datum: string; created_at: string }[]>([]);
 
   const fetchData = async () => {
     setLoading(true);
@@ -49,7 +49,7 @@ export default function LeaveManagement({ profiles }: LeaveManagementProps) {
         .eq("year", selectedYear),
       supabase
         .from("time_entries")
-        .select("user_id, datum")
+        .select("user_id, datum, created_at")
         .eq("taetigkeit", "Urlaub")
         .gte("datum", yearStart)
         .lte("datum", yearEnd)
@@ -206,13 +206,38 @@ export default function LeaveManagement({ profiles }: LeaveManagementProps) {
                     {/* Vacation history for this employee */}
                     {userVacEntries.length > 0 && (
                       <div className="border-t px-3 pb-3 pt-2">
-                        <p className="text-xs font-medium text-muted-foreground mb-1.5">Urlaubsverlauf</p>
-                        <div className="flex flex-wrap gap-1.5">
-                          {userVacEntries.map((v, i) => (
-                            <Badge key={i} variant="secondary" className="text-xs">
-                              {format(new Date(v.datum), "dd.MM.yyyy", { locale: de })}
-                            </Badge>
-                          ))}
+                        <p className="text-xs font-medium text-muted-foreground mb-2">Urlaubsverlauf</p>
+                        <div className="space-y-1.5">
+                          {(() => {
+                            // Group entries by created_at date (entries created together = one booking)
+                            const groups: Record<string, { dates: string[]; createdAt: string }> = {};
+                            for (const v of userVacEntries) {
+                              const key = v.created_at ? v.created_at.slice(0, 16) : v.datum; // group by minute
+                              if (!groups[key]) groups[key] = { dates: [], createdAt: v.created_at || v.datum };
+                              groups[key].dates.push(v.datum);
+                            }
+                            return Object.values(groups)
+                              .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+                              .map((group, i) => {
+                                const sortedDates = group.dates.sort();
+                                const firstDate = sortedDates[0];
+                                const lastDate = sortedDates[sortedDates.length - 1];
+                                const days = sortedDates.length;
+                                const dateRange = days === 1
+                                  ? format(new Date(firstDate), "dd.MM.yyyy", { locale: de })
+                                  : `${format(new Date(firstDate), "dd.MM.", { locale: de })} - ${format(new Date(lastDate), "dd.MM.yyyy", { locale: de })}`;
+                                const createdDate = format(new Date(group.createdAt), "dd.MM.yyyy HH:mm", { locale: de });
+
+                                return (
+                                  <div key={i} className="flex items-start gap-2 text-xs">
+                                    <span className="text-muted-foreground shrink-0">{createdDate}</span>
+                                    <span>
+                                      Urlaub eingetragen: <strong>{days} {days === 1 ? "Tag" : "Tage"}</strong> ({dateRange})
+                                    </span>
+                                  </div>
+                                );
+                              });
+                          })()}
                         </div>
                       </div>
                     )}
