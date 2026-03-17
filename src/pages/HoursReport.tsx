@@ -665,7 +665,7 @@ export default function HoursReport() {
             <Card>
               <CardHeader className="pb-3">
                 <CardTitle className="text-lg">
-                  Monats\u00fcbersicht
+                  Monatsübersicht
                 </CardTitle>
                 <p className="text-sm text-muted-foreground">
                   MONAT: {monthNames[gridMonth - 1]} {gridYear} = {getMonthlyTargetHours(gridYear, gridMonth)} Std. Regelarbeitszeit
@@ -1081,7 +1081,7 @@ export default function HoursReport() {
                 ) : filteredBerichte.length === 0 ? (
                   <div className="text-center py-12 text-muted-foreground">
                     <ClipboardList className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                    <p>Keine Leistungsberichte im gew\u00e4hlten Zeitraum</p>
+                    <p>Keine Leistungsberichte im gewählten Zeitraum</p>
                   </div>
                 ) : (
                   <div className="overflow-x-auto border rounded-lg">
