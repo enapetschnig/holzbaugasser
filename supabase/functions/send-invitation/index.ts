@@ -69,7 +69,7 @@ Deno.serve(async (req) => {
     }
 
     // Generate registration link
-    const appUrl = 'https://app.holzbau-gasser.at';
+    const appUrl = 'https://www.holzbaugasser.app';
     const registrationLink = `${appUrl}/auth`;
 
     // Compose SMS message
