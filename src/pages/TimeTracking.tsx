@@ -571,6 +571,29 @@ const TimeTracking = () => {
       return;
     }
 
+    // Duplikat-Check: Prüfe ob für MA an diesem Datum schon Stunden existieren
+    if (!editingBerichtId) {
+      const activeMaIds = mitarbeiterRows.filter(r => r.mitarbeiterId).map(r => r.mitarbeiterId);
+      const { data: existing } = await supabase
+        .from("time_entries")
+        .select("user_id")
+        .eq("datum", datum)
+        .in("user_id", activeMaIds)
+        .not("taetigkeit", "in", '("Urlaub","Krankenstand","Fortbildung","Feiertag","Schule","Weiterbildung")');
+
+      if (existing && existing.length > 0) {
+        const dupNames = existing.map(e => {
+          const p = profiles.find(pr => pr.id === e.user_id);
+          return p ? `${p.vorname} ${p.nachname}` : "?";
+        });
+        const uniqueNames = [...new Set(dupNames)];
+        const ok = window.confirm(
+          `Für folgende Mitarbeiter wurden am ${datum} bereits Stunden geschrieben:\n\n${uniqueNames.join("\n")}\n\nBestehende Einträge überschreiben?`
+        );
+        if (!ok) return;
+      }
+    }
+
     setSaving(true);
     try {
       // If editing, delete old records first

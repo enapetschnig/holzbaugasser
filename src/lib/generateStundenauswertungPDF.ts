@@ -28,7 +28,8 @@ export type StundenauswertungPDFData = {
       tag: number;          // 1-31
       wochentag: string;    // "Mo", "Di", etc.
       isWeekend: boolean;
-      content: string;      // "8", "8F", "8SCH", "U", "K", etc.
+      content: string;      // "8", "U", "K", etc.
+      badges?: string;      // "F SCH" - small text above hours
     }[];
     summe: number;
     soll: number;
@@ -237,8 +238,22 @@ export async function generateStundenauswertungPDF(
           doc.setFont("helvetica", "normal");
         }
 
+        // Badges (zulagen) small above
+        if (tag.badges) {
+          doc.setFontSize(3.5);
+          doc.setFont("helvetica", "bold");
+          doc.setTextColor(100, 100, 100);
+          doc.text(pdfText(tag.badges), x + dayColW / 2, y + 2.5, {
+            align: "center",
+          });
+          // Reset color for hours
+          if (content === "U") doc.setTextColor(22, 163, 74);
+          else if (content === "K") doc.setTextColor(220, 38, 38);
+          else doc.setTextColor(0, 0, 0);
+        }
+
         doc.setFontSize(5.5);
-        doc.text(pdfText(content), x + dayColW / 2, y + empRowH / 2 + 1, {
+        doc.text(pdfText(content), x + dayColW / 2, y + empRowH / 2 + (tag.badges ? 1.5 : 1), {
           align: "center",
         });
         doc.setTextColor(0, 0, 0);

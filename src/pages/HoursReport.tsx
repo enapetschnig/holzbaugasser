@@ -165,81 +165,68 @@ function formatNumber(n: number): string {
   return s.endsWith("0") ? n.toString() : s;
 }
 
-function formatCell(dayData: DayData | null): { text: string; className: string } {
-  if (!dayData) return { text: "", className: "" };
+type CellData = {
+  hours: string;       // "8", "7", "U", "K" etc.
+  badges: string[];    // ["F", "SCH", "4R"] - small badges above hours
+  className: string;
+  isAbsence: boolean;
+};
+
+function formatCell(dayData: DayData | null): CellData {
+  if (!dayData) return { hours: "", badges: [], className: "", isAbsence: false };
 
   if (dayData.isAbsence) {
     const short = ABSENCE_SHORT[dayData.absenceType] || dayData.absenceType;
-    if (dayData.absenceType === "Urlaub") return { text: short, className: "text-green-600 font-semibold" };
-    if (dayData.absenceType === "Krankenstand") return { text: short, className: "text-red-600 font-semibold" };
-    if (dayData.absenceType === "Fortbildung") return { text: short, className: "text-blue-600 font-semibold" };
-    return { text: short, className: "text-gray-600" };
+    if (dayData.absenceType === "Urlaub") return { hours: short, badges: [], className: "text-green-600 font-semibold", isAbsence: true };
+    if (dayData.absenceType === "Krankenstand") return { hours: short, badges: [], className: "text-red-600 font-semibold", isAbsence: true };
+    if (dayData.absenceType === "Fortbildung") return { hours: short, badges: [], className: "text-blue-600 font-semibold", isAbsence: true };
+    return { hours: short, badges: [], className: "text-gray-600", isAbsence: true };
   }
 
   const h = dayData.stunden;
-  if (h === 0) return { text: "", className: "" };
+  if (h === 0) return { hours: "", badges: [], className: "", isAbsence: false };
 
-  // Collect all flags with their specific hours
-  const flagParts: string[] = [];
-  const wholeDayFlags: string[] = []; // flags that apply to the whole day (no specific hours)
+  // Zulagen = Badges (shown small above the hours)
+  const badges: string[] = [];
 
   // Fahrer
-  if (dayData.fahrerStunden !== null && dayData.fahrerStunden > 0) {
-    flagParts.push(`${formatNumber(dayData.fahrerStunden)}F`);
-  } else if (dayData.istFahrer) {
-    wholeDayFlags.push("F");
-  }
+  if (dayData.istFahrer) badges.push("F");
 
-  // Werkstatt
-  if (dayData.werkstattStunden !== null && dayData.werkstattStunden > 0) {
-    flagParts.push(`${formatNumber(dayData.werkstattStunden)}W`);
+  // Werkstatt (with hours if partial)
+  if (dayData.werkstattStunden !== null && dayData.werkstattStunden > 0 && dayData.werkstattStunden < h) {
+    badges.push(`${formatNumber(dayData.werkstattStunden)}W`);
   } else if (dayData.istWerkstatt) {
-    wholeDayFlags.push("W");
+    badges.push("W");
   }
 
-  // Schmutzzulage
-  if (dayData.schmutzzulageStunden !== null && dayData.schmutzzulageStunden > 0) {
-    flagParts.push(`${formatNumber(dayData.schmutzzulageStunden)}SCH`);
+  // Schmutzzulage (with hours if partial)
+  if (dayData.schmutzzulageStunden !== null && dayData.schmutzzulageStunden > 0 && dayData.schmutzzulageStunden < h) {
+    badges.push(`${formatNumber(dayData.schmutzzulageStunden)}SCH`);
   } else if (dayData.schmutzzulage) {
-    wholeDayFlags.push("SCH");
+    badges.push("SCH");
   }
 
-  // Regen
-  if (dayData.regenStunden !== null && dayData.regenStunden > 0) {
-    flagParts.push(`${formatNumber(dayData.regenStunden)}R`);
+  // Regen (with hours if partial)
+  if (dayData.regenStunden !== null && dayData.regenStunden > 0 && dayData.regenStunden < h) {
+    badges.push(`${formatNumber(dayData.regenStunden)}R`);
   } else if (dayData.regenSchicht) {
-    wholeDayFlags.push("R");
+    badges.push("R");
   }
 
-  // No flags at all → just show hours
-  if (flagParts.length === 0 && wholeDayFlags.length === 0) {
-    return { text: formatNumber(h), className: "" };
-  }
+  return { hours: formatNumber(h), badges, className: "", isAbsence: false };
+}
 
-  // Build display: "8/F/SCH" or "4R/4SCH" or "8/F"
-  const parts: string[] = [];
+/** Flat text version for PDF export */
+function formatCellText(dayData: DayData | null): string {
+  const cell = formatCell(dayData);
+  if (!cell.hours) return "";
+  if (cell.badges.length === 0) return cell.hours;
+  return cell.hours;
+}
 
-  if (flagParts.length > 0) {
-    // Has specific hour splits (e.g., 4R, 4SCH)
-    parts.push(...flagParts);
-    // Add remaining normal hours if any
-    const accountedHours = flagParts.reduce((sum, p) => {
-      const num = parseFloat(p);
-      return sum + (isNaN(num) ? 0 : num);
-    }, 0);
-    if (accountedHours < h) {
-      const remaining = h - accountedHours;
-      if (remaining > 0) parts.push(formatNumber(remaining));
-    }
-    // Append whole-day flags
-    parts.push(...wholeDayFlags);
-  } else {
-    // Only whole-day flags → "8/F/SCH"
-    parts.push(formatNumber(h));
-    parts.push(...wholeDayFlags);
-  }
-
-  return { text: parts.join("/"), className: "" };
+function formatCellBadgesText(dayData: DayData | null): string {
+  const cell = formatCell(dayData);
+  return cell.badges.join(" ");
 }
 
 // ---------------------------------------------------------------------------
@@ -833,7 +820,8 @@ export default function HoursReport() {
             tag: day,
             wochentag: weekdays[dayOfWeek],
             isWeekend: dayOfWeek === 0 || dayOfWeek === 6,
-            content: cell.text,
+            content: cell.hours,
+            badges: cell.badges.join(" "),
           };
         });
 
@@ -1126,7 +1114,12 @@ export default function HoursReport() {
                                       }
                                       onClick={() => openEditCell(employee.id, day, `${employee.nachname} ${employee.vorname}`)}
                                     >
-                                      {cell.text}
+                                      {cell.badges.length > 0 && (
+                                        <div className="text-[7px] leading-none text-muted-foreground font-medium -mb-0.5">
+                                          {cell.badges.join(" ")}
+                                        </div>
+                                      )}
+                                      <span className={cell.className}>{cell.hours}</span>
                                     </td>
                                   );
                                 })}
