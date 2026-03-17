@@ -815,10 +815,30 @@ export default function HoursReport() {
         .select("mitarbeiter_id, ist_fahrer, ist_werkstatt, schmutzzulage, regen_schicht, summe_stunden")
         .eq("bericht_id", berichtId);
 
-      const { data: stundenData } = await supabase
+      const { data: stundenDataRaw } = await supabase
         .from("leistungsbericht_stunden" as any)
-        .select("mitarbeiter_id, position, stunden")
+        .select("mitarbeiter_id, taetigkeit_id, stunden")
         .eq("bericht_id", berichtId);
+
+      // Map taetigkeit_id → position using taetigkeiten
+      const taetigkeitIdToPosition: Record<string, number> = {};
+      if (taetigkeitenData) {
+        // Load taetigkeit IDs
+        const { data: taetigkeitenWithIds } = await supabase
+          .from("leistungsbericht_taetigkeiten" as any)
+          .select("id, position")
+          .eq("bericht_id", berichtId);
+        if (taetigkeitenWithIds) {
+          for (const t of taetigkeitenWithIds) {
+            taetigkeitIdToPosition[(t as any).id] = (t as any).position;
+          }
+        }
+      }
+      const stundenData = (stundenDataRaw || []).map((s: any) => ({
+        mitarbeiter_id: s.mitarbeiter_id,
+        position: taetigkeitIdToPosition[s.taetigkeit_id] || 0,
+        stunden: s.stunden,
+      }));
 
       const { data: geraeteData } = await supabase
         .from("leistungsbericht_geraete" as any)
@@ -1296,27 +1316,6 @@ export default function HoursReport() {
                   </div>
                   <div>
                     <label className="text-sm font-medium mb-1 block">
-                      Vorarbeiter
-                    </label>
-                    <Select
-                      value={berichteVorarbeiter}
-                      onValueChange={setBerichteVorarbeiter}
-                    >
-                      <SelectTrigger className="h-10">
-                        <SelectValue placeholder="Alle" />
-                      </SelectTrigger>
-                      <SelectContent position="popper">
-                        <SelectItem value="all">Alle</SelectItem>
-                        {profiles.map((p) => (
-                          <SelectItem key={p.id} value={p.id}>
-                            {p.nachname} {p.vorname}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium mb-1 block">
                       Projekt
                     </label>
                     <Select
@@ -1422,9 +1421,6 @@ export default function HoursReport() {
                           <th className="border-b px-3 py-2 text-left font-semibold">
                             Objekt
                           </th>
-                          <th className="border-b px-3 py-2 text-left font-semibold">
-                            Vorarbeiter
-                          </th>
                           <th className="border-b px-3 py-2 text-center font-semibold">
                             Mitarbeiter
                           </th>
@@ -1451,9 +1447,6 @@ export default function HoursReport() {
                             </td>
                             <td className="border-b px-3 py-2 text-muted-foreground">
                               {b.objekt || "-"}
-                            </td>
-                            <td className="border-b px-3 py-2">
-                              {b.ersteller_name}
                             </td>
                             <td className="border-b px-3 py-2 text-center">
                               <Badge variant="secondary">

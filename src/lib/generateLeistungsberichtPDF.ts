@@ -362,6 +362,18 @@ export async function generateLeistungsberichtPDF(
   const headerH = 9;
   const rowH = 5;
 
+  // "Geleistete Arbeitsstunden" label ABOVE the table
+  const actColsStartX = tableX + colF + colR + colName + colSum18;
+  doc.setFontSize(5.5);
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(...BLACK);
+  doc.text(
+    pdfText("Geleistete Arbeitsstunden für Tätigkeit Nr.:"),
+    actColsStartX + (8 * colAct) / 2,
+    y - 1.5,
+    { align: "center" }
+  );
+
   // Header background
   doc.setFillColor(...HEADER_BG);
   doc.rect(tableX, y, tableW, headerH, "F");
@@ -391,17 +403,7 @@ export async function generateLeistungsberichtPDF(
   doc.text("1.-8.", hx + colSum18 / 2, y + 7, { align: "center" });
   hx += colSum18;
 
-  // "Geleistete Arbeitsstunden" spanning header
-  const actColsStart = hx;
-  doc.setFontSize(5);
-  doc.text(
-    pdfText("Geleistete Arbeitsstunden für Tätigkeit Nr.:"),
-    actColsStart + (8 * colAct) / 2,
-    y + 3.5,
-    { align: "center" }
-  );
-
-  // Number sub-headers
+  // Number sub-headers (numbers 1-8 in header row)
   doc.setFontSize(5.5);
   for (let i = 0; i < 8; i++) {
     doc.text(`${i + 1}`, hx + colAct / 2, y + 7, { align: "center" });
