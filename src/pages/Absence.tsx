@@ -438,7 +438,7 @@ export default function Absence() {
             {/* Krankmeldung Upload (krankenstand only) */}
             {absenceType === "krankenstand" && (
               <div className="space-y-2">
-                <Label>Krankmeldung hochladen (optional)</Label>
+                <Label>Krankmeldung hochladen (optional, gilt für den gesamten Zeitraum)</Label>
                 <div className="flex items-center gap-2">
                   <Input
                     type="file"

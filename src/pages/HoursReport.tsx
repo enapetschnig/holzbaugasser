@@ -700,77 +700,52 @@ export default function HoursReport() {
         });
       }
 
-      // Always update flags in leistungsbericht_mitarbeiter
-      const flagData = {
-        ist_fahrer: editType === "arbeit" ? editFahrer : false,
-        ist_werkstatt: editType === "arbeit" ? editWerkstatt : false,
-        schmutzzulage: editType === "arbeit" ? editSchmutz : false,
-        regen_schicht: editType === "arbeit" ? editRegen : false,
-        fahrer_stunden: null as number | null,
-        werkstatt_stunden: editType === "arbeit" && editWerkstattStunden ? parseFloat(editWerkstattStunden) : null,
-        schmutzzulage_stunden: editType === "arbeit" && editSchmutzStunden ? parseFloat(editSchmutzStunden) : null,
-        regen_stunden: editType === "arbeit" && editRegenStunden ? parseFloat(editRegenStunden) : null,
-      };
+      // Save flags in leistungsbericht_mitarbeiter
+      if (editType === "arbeit") {
+        const flagData = {
+          ist_fahrer: editFahrer,
+          ist_werkstatt: editWerkstatt,
+          schmutzzulage: editSchmutz,
+          regen_schicht: editRegen,
+          fahrer_stunden: null as number | null,
+          werkstatt_stunden: editWerkstattStunden ? parseFloat(editWerkstattStunden) : null,
+          schmutzzulage_stunden: editSchmutzStunden ? parseFloat(editSchmutzStunden) : null,
+          regen_stunden: editRegenStunden ? parseFloat(editRegenStunden) : null,
+          summe_stunden: stunden,
+        };
 
-      const { data: berichte } = await supabase
-        .from("leistungsberichte" as any)
-        .select("id")
-        .eq("datum", dateStr);
-
-      if (berichte && berichte.length > 0) {
-        // Update existing bericht entries
-        for (const b of berichte) {
-          // Check if mitarbeiter entry exists
-          const { data: existing } = await supabase
-            .from("leistungsbericht_mitarbeiter" as any)
-            .select("id")
-            .eq("bericht_id", (b as any).id)
-            .eq("mitarbeiter_id", userId)
-            .maybeSingle();
-
-          if (existing) {
-            await supabase
-              .from("leistungsbericht_mitarbeiter" as any)
-              .update({ ...flagData, summe_stunden: stunden > 0 ? stunden : absenzStunden })
-              .eq("bericht_id", (b as any).id)
-              .eq("mitarbeiter_id", userId);
-          } else {
-            // MA was not in this bericht - create entry
-            await supabase
-              .from("leistungsbericht_mitarbeiter" as any)
-              .insert({
-                bericht_id: (b as any).id,
-                mitarbeiter_id: userId,
-                ...flagData,
-                summe_stunden: stunden > 0 ? stunden : absenzStunden,
-              });
-          }
-        }
-      } else if (editType === "arbeit" && (editFahrer || editWerkstatt || editSchmutz || editRegen)) {
-        // No bericht exists but flags are set - create a minimal bericht
-        const { data: { user } } = await supabase.auth.getUser();
-        const { data: newBericht } = await supabase
+        // Find or create a bericht for this date
+        let { data: berichte } = await supabase
           .from("leistungsberichte" as any)
-          .insert({
-            datum: dateStr,
-            erstellt_von: user?.id,
-            ankunft_zeit: "07:00",
-            abfahrt_zeit: isFriday ? "15:00" : "16:00",
-            pause_von: "11:00",
-            pause_bis: "11:30",
-          })
           .select("id")
-          .single();
+          .eq("datum", dateStr)
+          .limit(1);
 
-        if (newBericht) {
+        let berichtId: string;
+        if (berichte && berichte.length > 0) {
+          berichtId = (berichte[0] as any).id;
+        } else {
+          // Create minimal bericht
+          const { data: { user } } = await supabase.auth.getUser();
+          const { data: nb } = await supabase
+            .from("leistungsberichte" as any)
+            .insert({ datum: dateStr, erstellt_von: user?.id, ankunft_zeit: "07:00", abfahrt_zeit: isFriday ? "15:00" : "16:00", pause_von: "11:00", pause_bis: "11:30" })
+            .select("id")
+            .single();
+          berichtId = (nb as any)?.id;
+        }
+
+        if (berichtId) {
+          // Upsert: delete old + insert new (simple and reliable)
           await supabase
             .from("leistungsbericht_mitarbeiter" as any)
-            .insert({
-              bericht_id: (newBericht as any).id,
-              mitarbeiter_id: userId,
-              ...flagData,
-              summe_stunden: stunden,
-            });
+            .delete()
+            .eq("bericht_id", berichtId)
+            .eq("mitarbeiter_id", userId);
+
+          await supabase
+            .from("leistungsbericht_mitarbeiter" as any)
+            .insert({ bericht_id: berichtId, mitarbeiter_id: userId, ...flagData });
         }
       }
 
