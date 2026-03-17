@@ -1365,22 +1365,6 @@ export default function Admin() {
                           onChange={(e) => setFormData({ ...formData, position: e.target.value })}
                         />
                       </div>
-                      <div>
-                        <Label>Beschäftigungsart</Label>
-                        <Select
-                          value={formData.beschaeftigung_art || ""}
-                          onValueChange={(val) => setFormData({ ...formData, beschaeftigung_art: val })}
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Wählen..." />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="vollzeit">Vollzeit</SelectItem>
-                            <SelectItem value="teilzeit">Teilzeit</SelectItem>
-                            <SelectItem value="geringfuegig">Geringfügig</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
                       <div className="space-y-2">
                         <Label>Beschäftigungsausmaß (Wochenstunden)</Label>
                         <Input

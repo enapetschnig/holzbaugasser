@@ -147,12 +147,33 @@ export default function Absence() {
       const remaining = leaveBalance.total_days - leaveBalance.used_days;
       if (workingDays > remaining) {
         toast({
-          title: "Nicht genuegend Urlaubstage",
-          description: `Verfuegbar: ${remaining} Tage, angefragt: ${workingDays} Tage`,
+          title: "Nicht genügend Urlaubstage",
+          description: `Verfügbar: ${remaining} Tage, angefragt: ${workingDays} Tage`,
           variant: "destructive",
         });
         return;
       }
+    }
+
+    // Check for existing entries in the date range
+    const { data: existingEntries } = await supabase
+      .from("time_entries")
+      .select("datum, taetigkeit")
+      .eq("user_id", currentUserId)
+      .gte("datum", startDate)
+      .lte("datum", endDate);
+
+    if (existingEntries && existingEntries.length > 0) {
+      const conflictDates = existingEntries.map(e => {
+        const d = new Date(e.datum + "T00:00:00");
+        return `${d.toLocaleDateString("de-AT")} (${e.taetigkeit})`;
+      });
+      toast({
+        title: "Es sind bereits Einträge vorhanden",
+        description: `Folgende Tage haben schon Einträge:\n${conflictDates.join(", ")}`,
+        variant: "destructive",
+      });
+      return;
     }
 
     setSaving(true);
