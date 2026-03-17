@@ -77,7 +77,10 @@ export default function MyDocuments() {
 
     setUploading(true);
 
-    const filePath = `${userId}/${type}/${Date.now()}_${file.name}`;
+    const safeName = file.name
+      .replace(/[äÄ]/g, "ae").replace(/[öÖ]/g, "oe").replace(/[üÜ]/g, "ue").replace(/ß/g, "ss")
+      .replace(/[^a-zA-Z0-9._-]/g, "_");
+    const filePath = `${userId}/${type}/${Date.now()}_${safeName}`;
     const { error } = await supabase.storage
       .from("employee-documents")
       .upload(filePath, file);
@@ -89,8 +92,18 @@ export default function MyDocuments() {
       toast({ title: "Erfolg", description: "Dokument hochgeladen" });
       await fetchDocuments(userId, type, type === "lohnzettel" ? setPayslips : setSickNotes);
 
-      // Notify admins when employee uploads a sick note
+      // For Krankmeldung: link to existing time_entry and notify admins
       if (type === "krankmeldung") {
+        // Update today's Krankenstand entry with file path (if exists)
+        const today = new Date().toISOString().split("T")[0];
+        await supabase
+          .from("time_entries")
+          .update({ notizen: `Krankmeldung: ${filePath}` })
+          .eq("user_id", userId)
+          .eq("taetigkeit", "Krankenstand")
+          .eq("datum", today);
+
+        // Notify admins
         const { data: profile } = await supabase
           .from("profiles")
           .select("vorname, nachname")
@@ -99,11 +112,21 @@ export default function MyDocuments() {
         const uploaderName = profile
           ? `${profile.vorname} ${profile.nachname}`.trim() || "Mitarbeiter"
           : "Mitarbeiter";
-        await supabase.rpc("notify_admins_sick_note", {
-          p_uploader_id: userId,
-          p_uploader_name: uploaderName,
-          p_file_name: file.name,
-        });
+
+        const { data: adminRoles } = await supabase
+          .from("user_roles")
+          .select("user_id")
+          .eq("role", "administrator");
+        if (adminRoles && adminRoles.length > 0) {
+          await supabase.from("notifications").insert(
+            adminRoles.map((ar) => ({
+              user_id: ar.user_id,
+              type: "krankmeldung_upload",
+              title: "Krankmeldung hochgeladen",
+              message: `${uploaderName} hat eine Krankmeldung hochgeladen`,
+            }))
+          );
+        }
       }
     }
 

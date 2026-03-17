@@ -20,6 +20,7 @@ import * as XLSX from "xlsx-js-style";
 import EmployeeDocumentsManager from "@/components/EmployeeDocumentsManager";
 import LeaveManagement from "@/components/LeaveManagement";
 import TimeAccountManagement from "@/components/TimeAccountManagement";
+import { FileViewer } from "@/components/FileViewer";
 
 type Profile = {
   id: string;
@@ -103,6 +104,9 @@ export default function Admin() {
 
   // Employee save state
   const [savingEmployee, setSavingEmployee] = useState(false);
+
+  // FileViewer for sick notes
+  const [viewingSickNote, setViewingSickNote] = useState<{ name: string; path: string } | null>(null);
 
   // Lohnzettel upload + overview
   const [lohnzettelMonat, setLohnzettelMonat] = useState(String(new Date().getMonth() + 1));
@@ -396,14 +400,20 @@ export default function Admin() {
   };
 
   const fetchSickNotes = async () => {
+    // Nur letzte 14 Tage, max 5 Einträge
+    const twoWeeksAgo = new Date();
+    twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14);
+    const cutoffDate = twoWeeksAgo.toISOString().split("T")[0];
+
     const { data: timeEntriesData, error } = await supabase
       .from("time_entries")
       .select("id, datum, user_id, notizen")
       .eq("taetigkeit", "Krankenstand")
       .not("notizen", "is", null)
       .like("notizen", "Krankmeldung:%")
+      .gte("datum", cutoffDate)
       .order("datum", { ascending: false })
-      .limit(20);
+      .limit(5);
 
     if (error) {
       console.error("Error fetching sick notes:", error);
@@ -984,46 +994,12 @@ export default function Admin() {
                             <Button
                               variant="outline"
                               size="sm"
-                              onClick={async () => {
-                                if (!documentPath) return;
-
-                                const rawPath = documentPath.trim();
-
-                                // Falls alter Eintrag bereits eine komplette URL enthält
-                                if (rawPath.startsWith("http://") || rawPath.startsWith("https://")) {
-                                  window.open(rawPath, "_blank");
-                                  return;
-                                }
-
-                                // Pfad bereinigen (entfernt evtl. Bucket-Präfixe oder führende Slashes)
-                                const sanitizedPath = rawPath
+                              onClick={() => {
+                                const rawPath = (documentPath || "").trim()
                                   .replace(/^https?:\/\/[^/]+\/storage\/v1\/object\/(sign|public)\/employee-documents\//, "")
                                   .replace(/^employee-documents\//, "")
                                   .replace(/^\/+/, "");
-
-                                const { data, error } = await supabase.storage
-                                  .from("employee-documents")
-                                  .createSignedUrl(sanitizedPath, 300);
-
-                                if (error) {
-                                  console.error("Signed URL error:", error, { rawPath, sanitizedPath });
-                                  toast({ 
-                                    variant: "destructive", 
-                                    title: "Fehler", 
-                                    description: "Dokument konnte nicht geöffnet werden" 
-                                  });
-                                  return;
-                                }
-
-                                if (data?.signedUrl) {
-                                  window.open(data.signedUrl, "_blank");
-                                } else {
-                                  toast({ 
-                                    variant: "destructive", 
-                                    title: "Fehler", 
-                                    description: "Dokument konnte nicht geöffnet werden" 
-                                  });
-                                }
+                                setViewingSickNote({ name: rawPath.split("/").pop() || "Krankmeldung", path: rawPath });
                               }}
                             >
                               Ansehen
@@ -1752,6 +1728,16 @@ export default function Admin() {
         </DialogContent>
       </Dialog>
 
+      {/* FileViewer for sick notes */}
+      {viewingSickNote && (
+        <FileViewer
+          open={true}
+          onClose={() => setViewingSickNote(null)}
+          fileName={viewingSickNote.name}
+          filePath={viewingSickNote.path}
+          bucketName="employee-documents"
+        />
+      )}
     </div>
   );
 }

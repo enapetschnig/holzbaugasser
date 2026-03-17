@@ -198,11 +198,23 @@ export default function Absence() {
 
       // Upload Krankmeldung if applicable
       if (absenceType === "krankenstand" && krankmeldungFile) {
+        const safeName = krankmeldungFile.name
+          .replace(/[äÄ]/g, "ae").replace(/[öÖ]/g, "oe").replace(/[üÜ]/g, "ue").replace(/ß/g, "ss")
+          .replace(/[^a-zA-Z0-9._-]/g, "_");
         const timestamp = Date.now();
-        const filePath = `${currentUserId}/krankmeldung/${timestamp}_${krankmeldungFile.name}`;
+        const filePath = `${currentUserId}/krankmeldung/${timestamp}_${safeName}`;
         await supabase.storage
           .from("employee-documents")
           .upload(filePath, krankmeldungFile);
+
+        // Link file to time_entries so Admin "Neue Krankmeldungen" can find it
+        await supabase
+          .from("time_entries")
+          .update({ notizen: `Krankmeldung: ${filePath}` })
+          .eq("user_id", currentUserId)
+          .eq("taetigkeit", "Krankenstand")
+          .gte("datum", startDate)
+          .lte("datum", endDate);
 
         // Get user name for notification
         const { data: profile } = await supabase
