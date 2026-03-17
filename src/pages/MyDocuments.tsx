@@ -167,14 +167,24 @@ export default function MyDocuments() {
                   <p className="text-sm text-muted-foreground">Keine Lohnzettel vorhanden</p>
                 ) : (
                   <div className="space-y-2">
-                    {payslips.map((doc) => (
+                    {payslips.map((doc) => {
+                      const monthLabels = ["Jänner","Feber","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember"];
+                      const match = doc.name.match(/^(\d{4})-(\d{2})_/);
+                      const monatLabel = match ? `${monthLabels[parseInt(match[2]) - 1] || match[2]} ${match[1]}` : null;
+                      return (
                       <div
                         key={doc.path}
                         className="flex items-center justify-between p-3 border rounded-md hover:bg-accent"
                       >
                         <div className="flex items-center gap-3 flex-1 min-w-0">
                           <FileText className="w-5 h-5 text-primary shrink-0" />
-                          <span className="text-sm truncate">{doc.name}</span>
+                          <div className="min-w-0">
+                            {monatLabel ? (
+                              <span className="text-sm font-medium">{monatLabel}</span>
+                            ) : (
+                              <span className="text-sm truncate">{doc.name}</span>
+                            )}
+                          </div>
                         </div>
                         <div className="flex gap-2 shrink-0">
                           <Button
@@ -186,7 +196,8 @@ export default function MyDocuments() {
                           </Button>
                         </div>
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </CardContent>

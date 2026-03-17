@@ -104,11 +104,30 @@ export default function Admin() {
   // Employee save state
   const [savingEmployee, setSavingEmployee] = useState(false);
 
-  // Lohnzettel upload
+  // Lohnzettel upload + overview
   const [lohnzettelMonat, setLohnzettelMonat] = useState(String(new Date().getMonth() + 1));
   const [lohnzettelJahr, setLohnzettelJahr] = useState(String(new Date().getFullYear()));
+  const [uploadedLohnzettel, setUploadedLohnzettel] = useState<{ name: string; path: string; userId: string; monat: string }[]>([]);
 
 
+
+  const fetchLohnzettel = async () => {
+    const allDocs: { name: string; path: string; userId: string; monat: string }[] = [];
+    const monthLabels = ["Jänner","Feber","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember"];
+    for (const p of profiles.filter(pr => pr.is_active)) {
+      const { data } = await supabase.storage
+        .from("employee-documents")
+        .list(`${p.id}/lohnzettel`, { limit: 100, sortBy: { column: "created_at", order: "desc" } });
+      if (data) {
+        for (const file of data) {
+          const match = file.name.match(/^(\d{4})-(\d{2})_/);
+          const monat = match ? `${monthLabels[parseInt(match[2]) - 1] || match[2]} ${match[1]}` : "";
+          allDocs.push({ name: file.name, path: `${p.id}/lohnzettel/${file.name}`, userId: p.id, monat });
+        }
+      }
+    }
+    setUploadedLohnzettel(allDocs);
+  };
 
   useEffect(() => {
     checkAdminAccess();
@@ -116,6 +135,11 @@ export default function Admin() {
     fetchEmployees();
     fetchSickNotes();
   }, []);
+
+  // Load lohnzettel when profiles are available
+  useEffect(() => {
+    if (profiles.length > 0) fetchLohnzettel();
+  }, [profiles]);
 
   const checkAdminAccess = async () => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -1092,6 +1116,7 @@ export default function Admin() {
                             });
                             toast({ title: `Lohnzettel ${monatLabel} ${lohnzettelJahr} für ${p.vorname} ${p.nachname} hochgeladen` });
                             e.target.value = "";
+                            fetchLohnzettel();
                           }}
                         />
                       </div>
@@ -1101,6 +1126,56 @@ export default function Admin() {
               </div>
             </CardContent>
           </Card>
+
+          {/* Hochgeladene Lohnzettel Übersicht */}
+          {uploadedLohnzettel.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg">Hochgeladene Lohnzettel</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2">
+                  {uploadedLohnzettel.map((doc) => {
+                    const profile = profiles.find(p => p.id === doc.userId);
+                    const displayName = profile ? `${profile.vorname} ${profile.nachname}` : doc.userId;
+                    return (
+                      <div key={doc.path} className="flex items-center justify-between p-3 rounded-lg border bg-card">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <Avatar>
+                            <AvatarFallback>{profile ? `${profile.vorname[0]}${profile.nachname[0]}` : "?"}</AvatarFallback>
+                          </Avatar>
+                          <div className="min-w-0">
+                            <p className="font-medium text-sm">{displayName}</p>
+                            {doc.monat && <Badge variant="secondary" className="text-xs">{doc.monat}</Badge>}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <Button variant="outline" size="sm" onClick={async () => {
+                            const { data } = await supabase.storage.from("employee-documents").createSignedUrl(doc.path, 300);
+                            if (data?.signedUrl) window.open(data.signedUrl, "_blank");
+                          }}>
+                            Ansehen
+                          </Button>
+                          <Button variant="ghost" size="sm" className="text-destructive" onClick={async () => {
+                            if (!confirm("Lohnzettel löschen?")) return;
+                            const { error } = await supabase.storage.from("employee-documents").remove([doc.path]);
+                            if (error) {
+                              toast({ variant: "destructive", title: "Fehler", description: error.message });
+                            } else {
+                              toast({ title: "Gelöscht" });
+                              fetchLohnzettel();
+                            }
+                          }}>
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </CardContent>
+            </Card>
+          )}
         </section>
 
         {/* ===== URLAUBSVERWALTUNG ===== */}
