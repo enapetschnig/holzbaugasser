@@ -1431,14 +1431,15 @@ export default function HoursReport() {
                           <th className="border-b px-3 py-2 text-right font-semibold">
                             Stunden
                           </th>
+                          <th className="border-b px-3 py-2 text-center font-semibold w-10">
+                          </th>
                         </tr>
                       </thead>
                       <tbody>
                         {filteredBerichte.map((b) => (
                           <tr
                             key={b.id}
-                            className="hover:bg-muted/30 cursor-pointer transition-colors"
-                            onClick={() => handleViewBerichtPDF(b.id)}
+                            className="hover:bg-muted/30 transition-colors"
                           >
                             <td className="border-b px-3 py-2 whitespace-nowrap">
                               {format(parseISO(b.datum), "dd.MM.yyyy", {
@@ -1461,6 +1462,16 @@ export default function HoursReport() {
                             </td>
                             <td className="border-b px-3 py-2 text-right font-medium">
                               {b.total_stunden.toFixed(1)} h
+                            </td>
+                            <td className="border-b px-3 py-2 text-center">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleViewBerichtPDF(b.id)}
+                              >
+                                <Download className="w-3.5 h-3.5 mr-1" />
+                                PDF
+                              </Button>
                             </td>
                           </tr>
                         ))}

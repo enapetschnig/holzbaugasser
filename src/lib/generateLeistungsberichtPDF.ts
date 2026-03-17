@@ -41,13 +41,14 @@ export type LeistungsberichtPDFData = {
 };
 
 // ── Color constants ──────────────────────────────────────────────────────────
-const DARK_GREEN: [number, number, number] = [43, 91, 44];
+const DARK_GREEN: [number, number, number] = [43, 91, 44]; // Only for sidebar + logo
+const TITLE_COLOR: [number, number, number] = [30, 30, 30]; // Section titles - dark like paper
 const BLACK: [number, number, number] = [0, 0, 0];
 const GRAY: [number, number, number] = [120, 120, 120];
 const RED: [number, number, number] = [200, 0, 0];
 const WHITE: [number, number, number] = [255, 255, 255];
 const ORANGE_RED: [number, number, number] = [210, 80, 0];
-const HEADER_GREEN_BG: [number, number, number] = [220, 235, 220];
+const HEADER_GREEN_BG: [number, number, number] = [245, 245, 245]; // Light gray like paper original
 const LINE_COLOR: [number, number, number] = [80, 80, 80];
 
 // ── Helper functions ─────────────────────────────────────────────────────────
@@ -160,7 +161,7 @@ export async function generateLeistungsberichtPDF(
   // TITLE
   // ════════════════════════════════════════════════════════════════════════════
   let y = 12;
-  doc.setTextColor(...DARK_GREEN);
+  doc.setTextColor(...TITLE_COLOR);
   doc.setFontSize(15);
   doc.setFont("helvetica", "bold");
   doc.text("Leistungsbericht:", mL, y);
@@ -175,7 +176,7 @@ export async function generateLeistungsberichtPDF(
   // BAUVORHABEN SECTION
   // ════════════════════════════════════════════════════════════════════════════
   y += 6;
-  doc.setTextColor(...DARK_GREEN);
+  doc.setTextColor(...TITLE_COLOR);
   doc.setFontSize(10);
   doc.setFont("helvetica", "bold");
   doc.text("Bauvorhaben:", mL, y);
@@ -233,7 +234,7 @@ export async function generateLeistungsberichtPDF(
   drawLine(doc, mL, y, contentRight, y, 0.4);
   y += 5;
 
-  doc.setTextColor(...DARK_GREEN);
+  doc.setTextColor(...TITLE_COLOR);
   doc.setFontSize(10);
   doc.setFont("helvetica", "bold");
   doc.text(pdfText("Tätigkeiten:"), mL, y);
@@ -368,7 +369,7 @@ export async function generateLeistungsberichtPDF(
   // Header text
   doc.setFontSize(5.5);
   doc.setFont("helvetica", "bold");
-  doc.setTextColor(...DARK_GREEN);
+  doc.setTextColor(...TITLE_COLOR);
 
   let hx = tableX;
 
@@ -509,7 +510,7 @@ export async function generateLeistungsberichtPDF(
   // ════════════════════════════════════════════════════════════════════════════
   // GESAMTSUMME
   // ════════════════════════════════════════════════════════════════════════════
-  doc.setTextColor(...DARK_GREEN);
+  doc.setTextColor(...TITLE_COLOR);
   doc.setFontSize(9);
   doc.setFont("helvetica", "bold");
   doc.text(
@@ -522,7 +523,7 @@ export async function generateLeistungsberichtPDF(
   // ════════════════════════════════════════════════════════════════════════════
   // GERAETEEINSATZ
   // ════════════════════════════════════════════════════════════════════════════
-  doc.setTextColor(...DARK_GREEN);
+  doc.setTextColor(...TITLE_COLOR);
   doc.setFontSize(8);
   doc.setFont("helvetica", "bold");
   doc.text(pdfText("Geräteeinsatz:"), mL, y);
@@ -596,7 +597,7 @@ export async function generateLeistungsberichtPDF(
   const halfW = (contentW - 4) / 2;
 
   // ── LEFT: Materialien ──────────────────────────────────────────────────
-  doc.setTextColor(...DARK_GREEN);
+  doc.setTextColor(...TITLE_COLOR);
   doc.setFontSize(7);
   doc.setFont("helvetica", "bold");
   doc.text(pdfText("Verbrauchte Materialien für Regiearbeiten:"), mL, y);
@@ -645,7 +646,7 @@ export async function generateLeistungsberichtPDF(
   const anmX = mL + halfW + 4;
   let anmY = matAnmY;
 
-  doc.setTextColor(...DARK_GREEN);
+  doc.setTextColor(...TITLE_COLOR);
   doc.setFontSize(7);
   doc.setFont("helvetica", "bold");
   doc.text("Anmerkungen:", anmX, anmY);
