@@ -1131,6 +1131,18 @@ export default function HoursReport() {
                           <th className="border border-border px-2 py-1 text-center font-semibold bg-gray-100 min-w-[50px]">
                             +/-
                           </th>
+                          <th className="border border-border px-1 py-1 text-center font-semibold bg-blue-50 min-w-[40px] text-[10px]" title="Fahrer (Tage)">
+                            F
+                          </th>
+                          <th className="border border-border px-1 py-1 text-center font-semibold bg-blue-50 min-w-[40px] text-[10px]" title="Werkstatt (Tage/Stunden)">
+                            W
+                          </th>
+                          <th className="border border-border px-1 py-1 text-center font-semibold bg-blue-50 min-w-[40px] text-[10px]" title="Schmutzzulage (Stunden)">
+                            SCH
+                          </th>
+                          <th className="border border-border px-1 py-1 text-center font-semibold bg-blue-50 min-w-[40px] text-[10px]" title="Regen (Stunden)">
+                            R
+                          </th>
                         </tr>
                         {/* Row 2: Weekday abbreviations */}
                         <tr className="bg-muted/40">
@@ -1153,19 +1165,21 @@ export default function HoursReport() {
                               </th>
                             );
                           })}
-                          <th className="border border-border px-2 py-0.5 text-center text-[10px] bg-gray-100">
-                            &nbsp;
-                          </th>
                           <th className="border border-border px-2 py-0.5 text-center text-[10px] bg-gray-100">&nbsp;</th>
                           <th className="border border-border px-2 py-0.5 text-center text-[10px] bg-gray-100">&nbsp;</th>
                           <th className="border border-border px-2 py-0.5 text-center text-[10px] bg-gray-100">&nbsp;</th>
+                          <th className="border border-border px-2 py-0.5 text-center text-[10px] bg-gray-100">&nbsp;</th>
+                          <th className="border border-border px-1 py-0.5 text-center text-[8px] bg-blue-50 text-muted-foreground">Tage</th>
+                          <th className="border border-border px-1 py-0.5 text-center text-[8px] bg-blue-50 text-muted-foreground">T/Std</th>
+                          <th className="border border-border px-1 py-0.5 text-center text-[8px] bg-blue-50 text-muted-foreground">Std</th>
+                          <th className="border border-border px-1 py-0.5 text-center text-[8px] bg-blue-50 text-muted-foreground">Std</th>
                         </tr>
                       </thead>
                       <tbody>
                         {gridEmployees.length === 0 ? (
                           <tr>
                             <td
-                              colSpan={daysInMonth + 5}
+                              colSpan={daysInMonth + 9}
                               className="text-center py-8 text-muted-foreground"
                             >
                               Keine Mitarbeiter gefunden
@@ -1175,11 +1189,27 @@ export default function HoursReport() {
                           gridEmployees.map((employee) => {
                             const employeeDays = gridDataMap[employee.id] || {};
                             let totalHours = 0;
+                            let fahrerTage = 0;
+                            let werkstattTage = 0;
+                            let werkstattStd = 0;
+                            let schmutzStd = 0;
+                            let regenStd = 0;
                             const monthlyTarget = weeklyToMonthlyTarget(employeeSollMap[employee.id] ?? null, gridYear, gridMonth);
                             for (let d = 1; d <= daysInMonth; d++) {
                               const dd = employeeDays[d];
                               if (dd) {
                                 totalHours += dd.stunden;
+                                if (dd.istFahrer) fahrerTage++;
+                                if (dd.istWerkstatt) {
+                                  werkstattTage++;
+                                  werkstattStd += dd.werkstattStunden != null ? dd.werkstattStunden : dd.stunden;
+                                }
+                                if (dd.schmutzzulage) {
+                                  schmutzStd += dd.schmutzzulageStunden != null ? dd.schmutzzulageStunden : dd.stunden;
+                                }
+                                if (dd.regenSchicht) {
+                                  regenStd += dd.regenStunden != null ? dd.regenStunden : dd.stunden;
+                                }
                               }
                             }
                             // "Ohne Überstunden": gedeckelt auf Soll
@@ -1240,6 +1270,19 @@ export default function HoursReport() {
                                   diff >= 0 ? "text-green-600" : "text-red-600"
                                 )}>
                                   {diff >= 0 ? "+" : ""}{formatNumber(diff)}
+                                </td>
+                                {/* Zulagen-Zusammenfassung */}
+                                <td className="border border-border px-1 py-1 text-center text-xs bg-blue-50 whitespace-nowrap">
+                                  {fahrerTage > 0 ? `${fahrerTage}` : ""}
+                                </td>
+                                <td className="border border-border px-1 py-1 text-center text-xs bg-blue-50 whitespace-nowrap">
+                                  {werkstattTage > 0 ? `${werkstattTage}/${formatNumber(werkstattStd)}` : ""}
+                                </td>
+                                <td className="border border-border px-1 py-1 text-center text-xs bg-blue-50 whitespace-nowrap">
+                                  {schmutzStd > 0 ? formatNumber(schmutzStd) : ""}
+                                </td>
+                                <td className="border border-border px-1 py-1 text-center text-xs bg-blue-50 whitespace-nowrap">
+                                  {regenStd > 0 ? formatNumber(regenStd) : ""}
                                 </td>
                               </tr>
                             );
