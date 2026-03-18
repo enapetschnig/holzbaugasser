@@ -871,7 +871,7 @@ const TimeTracking = () => {
       { position: 3, bezeichnung: "" },
       { position: 4, bezeichnung: "" },
     ]);
-    setMitarbeiterRows([createEmptyMitarbeiterRow()]);
+    setMitarbeiterRows([{ ...createEmptyMitarbeiterRow(), mitarbeiterId: currentUserId || "" }]);
     setGleicheStundenFuerAlle(false);
     setDatum(format(new Date(), "yyyy-MM-dd"));
   };
