@@ -1073,16 +1073,22 @@ const TimeTracking = () => {
   useEffect(() => {
     const checkExisting = async () => {
       if (!datum || !currentUserId) { setExistingEntriesWarning(""); return; }
-      // Nur für den eingeloggten User prüfen
+      // Für den eingeloggten User prüfen ob schon Arbeitszeit eingetragen
       const { data } = await supabase
         .from("time_entries")
         .select("stunden, taetigkeit")
         .eq("datum", datum)
-        .eq("user_id", currentUserId)
-        .not("taetigkeit", "in", '("Urlaub","Krankenstand","Fortbildung","Feiertag","Schule","Weiterbildung")');
+        .eq("user_id", currentUserId);
       if (data && data.length > 0) {
-        const total = data.reduce((s, e) => s + (parseFloat(e.stunden as any) || 0), 0);
-        setExistingEntriesWarning(`Für dich sind an diesem Tag bereits ${total}h eingetragen.`);
+        // Filter out absences client-side (more reliable than PostgREST .not())
+        const absTypes = ["Urlaub", "Krankenstand", "Fortbildung", "Feiertag", "Schule", "Weiterbildung"];
+        const workEntries = data.filter(e => !absTypes.includes(e.taetigkeit));
+        if (workEntries.length > 0) {
+          const total = workEntries.reduce((s, e) => s + (parseFloat(e.stunden as any) || 0), 0);
+          setExistingEntriesWarning(`Für dich sind an diesem Tag bereits ${total}h eingetragen.`);
+        } else {
+          setExistingEntriesWarning("");
+        }
       } else {
         setExistingEntriesWarning("");
       }
