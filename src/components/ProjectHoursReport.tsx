@@ -37,6 +37,11 @@ export default function ProjectHoursReport() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectData, setProjectData] = useState<DetailedProjectEntry[]>([]);
   const [totalHours, setTotalHours] = useState(0);
+  const [berichtExtras, setBerichtExtras] = useState<{
+    geraete: { datum: string; geraet: string; stunden: number }[];
+    materialien: { datum: string; bezeichnung: string; menge: string }[];
+    anmerkungen: { datum: string; text: string }[];
+  }>({ geraete: [], materialien: [], anmerkungen: [] });
   const [loading, setLoading] = useState(true);
   const [profiles, setProfiles] = useState<Record<string, { vorname: string; nachname: string }>>({});
   const [startDate, setStartDate] = useState<string>(() => {
@@ -168,6 +173,34 @@ export default function ProjectHoursReport() {
 
       setProjectData(detailedEntries);
       setTotalHours(total);
+    }
+
+    // Load extras from Leistungsberichte for this project
+    const { data: berichte } = await supabase
+      .from("leistungsberichte" as any)
+      .select("id, datum, anmerkungen")
+      .eq("projekt_id", selectedProjectId)
+      .gte("datum", startDate)
+      .lte("datum", endDate)
+      .order("datum");
+
+    if (berichte && berichte.length > 0) {
+      const berichtIds = berichte.map((b: any) => b.id);
+      const [{ data: geraeteData }, { data: matData }] = await Promise.all([
+        supabase.from("leistungsbericht_geraete" as any).select("bericht_id, geraet, stunden").in("bericht_id", berichtIds),
+        supabase.from("leistungsbericht_materialien" as any).select("bericht_id, bezeichnung, menge").in("bericht_id", berichtIds),
+      ]);
+
+      const berichtMap: Record<string, string> = {};
+      berichte.forEach((b: any) => { berichtMap[b.id] = b.datum; });
+
+      setBerichtExtras({
+        geraete: (geraeteData || []).map((g: any) => ({ datum: berichtMap[g.bericht_id] || "", geraet: g.geraet, stunden: parseFloat(g.stunden) || 0 })),
+        materialien: (matData || []).map((m: any) => ({ datum: berichtMap[m.bericht_id] || "", bezeichnung: m.bezeichnung, menge: m.menge || "" })),
+        anmerkungen: berichte.filter((b: any) => b.anmerkungen).map((b: any) => ({ datum: b.datum, text: b.anmerkungen })),
+      });
+    } else {
+      setBerichtExtras({ geraete: [], materialien: [], anmerkungen: [] });
     }
 
     setLoading(false);
@@ -475,6 +508,53 @@ export default function ProjectHoursReport() {
               </Table>
             </CardContent>
           </Card>
+          {/* Extras from Leistungsberichte */}
+          {(berichtExtras.geraete.length > 0 || berichtExtras.materialien.length > 0 || berichtExtras.anmerkungen.length > 0) && (
+            <Card className="mt-4">
+              <CardContent className="pt-4 space-y-4">
+                {berichtExtras.geraete.length > 0 && (
+                  <div>
+                    <h4 className="font-semibold text-sm mb-2 flex items-center gap-2">
+                      <Wrench className="w-4 h-4" /> Geräteeinsatz
+                    </h4>
+                    <div className="space-y-1">
+                      {berichtExtras.geraete.map((g, i) => (
+                        <div key={i} className="flex items-center justify-between text-sm border-b py-1">
+                          <span>{format(parseISO(g.datum), "dd.MM.yyyy")} — {g.geraet}</span>
+                          <Badge variant="secondary">{g.stunden}h</Badge>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {berichtExtras.materialien.length > 0 && (
+                  <div>
+                    <h4 className="font-semibold text-sm mb-2">Verbrauchte Materialien</h4>
+                    <div className="space-y-1">
+                      {berichtExtras.materialien.map((m, i) => (
+                        <div key={i} className="flex items-center justify-between text-sm border-b py-1">
+                          <span>{format(parseISO(m.datum), "dd.MM.yyyy")} — {m.bezeichnung}</span>
+                          <Badge variant="secondary">{m.menge}</Badge>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {berichtExtras.anmerkungen.length > 0 && (
+                  <div>
+                    <h4 className="font-semibold text-sm mb-2">Anmerkungen</h4>
+                    <div className="space-y-1">
+                      {berichtExtras.anmerkungen.map((a, i) => (
+                        <div key={i} className="text-sm border-b py-1">
+                          <span className="text-muted-foreground">{format(parseISO(a.datum), "dd.MM.yyyy")}:</span> {a.text}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
         ) : selectedProjectId ? (
           <div className="text-center py-12 text-muted-foreground">
             <Calendar className="w-12 h-12 mx-auto mb-4 opacity-50" />
