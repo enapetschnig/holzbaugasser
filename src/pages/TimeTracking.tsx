@@ -1325,7 +1325,7 @@ const TimeTracking = () => {
                     className="flex-1"
                   />
                 )}
-                {taetigkeiten.length > 1 && (
+                {taetigkeiten.length > 1 && t.position > 1 && (
                   <Button
                     variant="ghost"
                     size="icon"
@@ -1350,22 +1350,6 @@ const TimeTracking = () => {
                 >
                   <Plus className="h-4 w-4 mr-1" />
                   Tätigkeit
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-9"
-                  onClick={() => {
-                    // Add "Werk" activity + set W flag for all MA
-                    const nextPos = taetigkeiten.length + 1;
-                    if (nextPos > 8) return;
-                    setTaetigkeiten(prev => [...prev, { position: nextPos, bezeichnung: "Werk" }]);
-                    setMitarbeiterRows(prev => prev.map(r => ({ ...r, istWerkstatt: true })));
-                  }}
-                  disabled={taetigkeiten.length >= 8}
-                >
-                  <Plus className="h-4 w-4 mr-1" />
-                  Werk
                 </Button>
               </div>
             )}
@@ -1525,17 +1509,17 @@ const TimeTracking = () => {
                     <th className="sticky left-0 z-10 bg-muted/50 text-left px-2 py-2 font-medium whitespace-nowrap min-w-[160px]">
                       Name
                     </th>
-                    <th className="px-1 py-2 font-medium text-center min-w-[60px] text-xs">
-                      Fahrer
+                    <th className="px-1 py-2 font-medium text-center min-w-[50px]" title="Fahrer">
+                      F
                     </th>
-                    <th className="px-1 py-2 font-medium text-center min-w-[60px] text-xs">
-                      Werkstatt
+                    <th className="px-1 py-2 font-medium text-center min-w-[50px]" title="Werkstatt">
+                      W
                     </th>
-                    <th className="px-1 py-2 font-medium text-center min-w-[60px] text-xs">
-                      Schmutz
+                    <th className="px-1 py-2 font-medium text-center min-w-[50px]" title="Schmutzzulage">
+                      S
                     </th>
-                    <th className="px-1 py-2 font-medium text-center min-w-[60px] text-xs">
-                      Regen
+                    <th className="px-1 py-2 font-medium text-center min-w-[50px]" title="Regen/Wetterschicht">
+                      R
                     </th>
                     {taetigkeiten.map((t) => (
                       <th
