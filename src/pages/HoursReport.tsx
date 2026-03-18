@@ -300,7 +300,7 @@ export default function HoursReport() {
   const [gridEntries, setGridEntries] = useState<TimeEntry[]>([]);
   const [gridBerichtData, setGridBerichtData] = useState<BerichtMitarbeiterRow[]>([]);
   const [gridLoading, setGridLoading] = useState(false);
-  const [showWithZA, setShowWithZA] = useState(false);
+  const showWithZA = true; // App zeigt immer echte Stunden
 
   // Employee Soll override map
   const [employeeSollMap, setEmployeeSollMap] = useState<Record<string, number | null>>({});
@@ -911,7 +911,7 @@ export default function HoursReport() {
   // PDF Export (A3)
   // -------------------------------------------------------------------------
 
-  const handleExportPDF = async () => {
+  const handleExportPDF = async (withOvertime: boolean) => {
     const defaultMonthlyTarget = getMonthlyTargetHours(gridYear, gridMonth);
 
     const pdfData: StundenauswertungPDFData = {
@@ -921,6 +921,8 @@ export default function HoursReport() {
       mitarbeiter: gridEmployees.map((p) => {
         const employeeDays = gridDataMap[p.id] || {};
         let totalHours = 0;
+        let cappedTotalHours = 0;
+        const empWeekly = employeeSollMap[p.id];
 
         const tage = Array.from({ length: daysInMonth }, (_, i) => {
           const day = i + 1;
@@ -933,26 +935,44 @@ export default function HoursReport() {
 
           if (dd) {
             totalHours += dd.stunden;
+            // For "ohne Überstunden": cap work hours to daily target
+            if (!withOvertime && !dd.isAbsence) {
+              const standardDaily = dayOfWeek === 5 ? 7 : 8; // Fr=7, else=8
+              const dailyTarget = empWeekly != null ? Math.round((empWeekly / 39) * standardDaily * 10) / 10 : standardDaily;
+              cappedTotalHours += Math.min(dd.stunden, dailyTarget);
+            } else {
+              cappedTotalHours += dd.stunden;
+            }
+          }
+
+          // For "ohne Überstunden": show capped hours in content
+          let displayHours = cell.hours;
+          if (!withOvertime && dd && !dd.isAbsence && dd.stunden > 0) {
+            const standardDaily = dayOfWeek === 5 ? 7 : 8;
+            const dailyTarget = empWeekly != null ? Math.round((empWeekly / 39) * standardDaily * 10) / 10 : standardDaily;
+            if (dd.stunden > dailyTarget) {
+              displayHours = formatNumber(dailyTarget);
+            }
           }
 
           return {
             tag: day,
             wochentag: weekdays[dayOfWeek],
             isWeekend: dayOfWeek === 0 || dayOfWeek === 6,
-            content: cell.hours,
+            content: withOvertime ? cell.hours : displayHours,
             badges: cell.badges.join(" "),
           };
         });
 
         const employeeSoll = weeklyToMonthlyTarget(employeeSollMap[p.id] ?? null, gridYear, gridMonth);
-        const displayIst = showWithZA ? totalHours : Math.min(totalHours, employeeSoll);
+        const displayTotal = withOvertime ? totalHours : cappedTotalHours;
 
         return {
           name: `${p.nachname} ${p.vorname}`,
           tage,
-          summe: totalHours,
+          summe: displayTotal,
           soll: employeeSoll,
-          differenz: displayIst - employeeSoll,
+          differenz: displayTotal - employeeSoll,
         };
       }),
     };
@@ -962,7 +982,7 @@ export default function HoursReport() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `Stundenauswertung_${monthNames[gridMonth - 1]}_${gridYear}.pdf`;
+      a.download = `Stundenauswertung_${monthNames[gridMonth - 1]}_${gridYear}${withOvertime ? "_mit_UE" : "_ohne_UE"}.pdf`;
       a.click();
       URL.revokeObjectURL(url);
     } catch (err) {
@@ -1072,33 +1092,23 @@ export default function HoursReport() {
                     </SelectContent>
                   </Select>
 
-                  <div className="flex items-center gap-0">
-                    <Button
-                      variant={!showWithZA ? "default" : "outline"}
-                      size="sm"
-                      className="h-10 rounded-r-none"
-                      onClick={() => setShowWithZA(false)}
-                    >
-                      Ohne Überstunden
-                    </Button>
-                    <Button
-                      variant={showWithZA ? "default" : "outline"}
-                      size="sm"
-                      className="h-10 rounded-l-none"
-                      onClick={() => setShowWithZA(true)}
-                    >
-                      Mit Überstunden
-                    </Button>
-                  </div>
-
                   <Button
                     variant="outline"
                     size="sm"
                     className="h-10"
-                    onClick={handleExportPDF}
+                    onClick={() => handleExportPDF(true)}
                   >
                     <Download className="w-4 h-4 mr-2" />
-                    PDF Export (A3)
+                    PDF mit Überstunden
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-10"
+                    onClick={() => handleExportPDF(false)}
+                  >
+                    <Download className="w-4 h-4 mr-2" />
+                    PDF ohne Überstunden
                   </Button>
                 </div>
 
