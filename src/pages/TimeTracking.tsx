@@ -1325,7 +1325,7 @@ const TimeTracking = () => {
                     className="flex-1"
                   />
                 )}
-                {taetigkeiten.length > 1 && t.position > 1 && (
+                {taetigkeiten.length > 1 && (
                   <Button
                     variant="ghost"
                     size="icon"
@@ -1509,17 +1509,17 @@ const TimeTracking = () => {
                     <th className="sticky left-0 z-10 bg-muted/50 text-left px-2 py-2 font-medium whitespace-nowrap min-w-[160px]">
                       Name
                     </th>
-                    <th className="px-1 py-2 font-medium text-center min-w-[50px]" title="Fahrer">
-                      F
+                    <th className="px-1 py-2 font-medium text-center min-w-[60px] text-xs">
+                      Fahrer
                     </th>
-                    <th className="px-1 py-2 font-medium text-center min-w-[50px]" title="Werkstatt">
-                      W
+                    <th className="px-1 py-2 font-medium text-center min-w-[60px] text-xs">
+                      Werkstatt
                     </th>
-                    <th className="px-1 py-2 font-medium text-center min-w-[50px]" title="Schmutzzulage">
-                      S
+                    <th className="px-1 py-2 font-medium text-center min-w-[60px] text-xs">
+                      Schmutz
                     </th>
-                    <th className="px-1 py-2 font-medium text-center min-w-[50px]" title="Regen/Wetterschicht">
-                      R
+                    <th className="px-1 py-2 font-medium text-center min-w-[60px] text-xs">
+                      Regen
                     </th>
                     {taetigkeiten.map((t) => (
                       <th
