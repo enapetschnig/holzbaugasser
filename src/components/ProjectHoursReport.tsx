@@ -446,6 +446,7 @@ export default function ProjectHoursReport() {
         )}
 
         {projectData.length > 0 ? (
+          <>
           <Card>
             <CardContent className="pt-6 overflow-x-auto">
               <Table>
@@ -508,7 +509,6 @@ export default function ProjectHoursReport() {
               </Table>
             </CardContent>
           </Card>
-          {/* Extras from Leistungsberichte */}
           {(berichtExtras.geraete.length > 0 || berichtExtras.materialien.length > 0 || berichtExtras.anmerkungen.length > 0) && (
             <Card className="mt-4">
               <CardContent className="pt-4 space-y-4">
@@ -555,6 +555,7 @@ export default function ProjectHoursReport() {
               </CardContent>
             </Card>
           )}
+          </>
         ) : selectedProjectId ? (
           <div className="text-center py-12 text-muted-foreground">
             <Calendar className="w-12 h-12 mx-auto mb-4 opacity-50" />
