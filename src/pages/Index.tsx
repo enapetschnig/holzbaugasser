@@ -260,6 +260,18 @@ export default function Index() {
     }
   }, [loading, user, navigate]);
 
+  // Auto-open install dialog for new users waiting for activation
+  useEffect(() => {
+    if (isActivated === false) {
+      const isStandalone = window.matchMedia("(display-mode: standalone)").matches
+        || (navigator as any).standalone === true;
+      if (!isStandalone) {
+        const timer = setTimeout(() => handleRestartInstallGuide(), 800);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [isActivated]);
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -275,6 +287,7 @@ export default function Index() {
   if (isActivated === false) {
     const isStandalone = window.matchMedia("(display-mode: standalone)").matches
       || (navigator as any).standalone === true;
+
 
     return (
       <div className="min-h-screen bg-background flex items-center justify-center p-4">
