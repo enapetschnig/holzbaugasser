@@ -582,13 +582,6 @@ const Projects = () => {
                     </span>
                   </div>
                   <div className="flex flex-col items-center gap-1 p-2">
-                    <Package className="w-5 h-5 text-primary" />
-                    <span className="text-xs font-medium">Material</span>
-                    <span className="text-xs text-muted-foreground">
-                      {project.fileCount?.materials || 0}
-                    </span>
-                  </div>
-                  <div className="flex flex-col items-center gap-1 p-2">
                     <Image className="w-5 h-5 text-primary" />
                     <span className="text-xs font-medium">Fotos</span>
                     <span className="text-xs text-muted-foreground">
@@ -648,28 +641,9 @@ const Projects = () => {
                       <FileText className="w-4 h-4 mr-2" />
                       📄 Regieberichte hochladen
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={(e) => {
-                      e.stopPropagation();
-                      setQuickUploadProject({ projectId: project.id, documentType: 'materials' });
-                    }}>
-                      <Package className="w-4 h-4 mr-2" />
-                      📦 Materiallisten hochladen
-                    </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
 
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="w-full gap-2 mt-2"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setMaterialDialogProject(project.id);
-                  }}
-                >
-                  <Package className="w-4 h-4" />
-                  + Material hinzufügen
-                </Button>
 
                 <div
                   className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2 border-t mt-3"
@@ -778,13 +752,6 @@ const Projects = () => {
                           <span className="text-xs font-medium">Berichte</span>
                           <span className="text-xs text-muted-foreground">
                             {project.fileCount?.reports || 0}
-                          </span>
-                        </div>
-                        <div className="flex flex-col items-center gap-1 p-2">
-                          <Package className="w-5 h-5 text-primary" />
-                          <span className="text-xs font-medium">Material</span>
-                          <span className="text-xs text-muted-foreground">
-                            {project.fileCount?.materials || 0}
                           </span>
                         </div>
                         <div className="flex flex-col items-center gap-1 p-2">
@@ -909,74 +876,6 @@ const Projects = () => {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Material Dialog */}
-      <Dialog open={!!materialDialogProject} onOpenChange={(open) => { if (!open) { setMaterialDialogProject(null); setSelectedMaterial(""); setCustomMaterial(""); setNewMenge(""); } }}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Package className="h-5 w-5" />
-              Material hinzufügen
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 pt-2">
-            <div className="space-y-2">
-              <Label>Material</Label>
-              <Select value={selectedMaterial} onValueChange={(val) => { setSelectedMaterial(val); if (val !== "__custom__") setCustomMaterial(""); }}>
-                <SelectTrigger className="h-12 text-base">
-                  <SelectValue placeholder="Material auswählen" />
-                </SelectTrigger>
-                <SelectContent>
-                  {materialCatalog.map(c => (
-                    <SelectItem key={c.id} value={c.name} className="text-base py-3">
-                      {c.name} ({c.einheit})
-                    </SelectItem>
-                  ))}
-                  <SelectItem value="__custom__" className="text-base py-3 font-medium">
-                    Anderes Material...
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-              {selectedMaterial === "__custom__" && (
-                <Input
-                  placeholder="Material eingeben"
-                  value={customMaterial}
-                  onChange={(e) => setCustomMaterial(e.target.value)}
-                  autoFocus
-                  className="h-12 text-base"
-                />
-              )}
-            </div>
-            <div className="space-y-2">
-              <Label>Menge</Label>
-              <Input
-                placeholder={(() => {
-                  const item = materialCatalog.find(c => c.name === selectedMaterial);
-                  return item ? `z.B. 10 ${item.einheit}` : "z.B. 10 Stück";
-                })()}
-                value={newMenge}
-                onChange={(e) => setNewMenge(e.target.value)}
-                className="h-12 text-base"
-              />
-            </div>
-            <div className="flex gap-2 pt-2">
-              <Button
-                className="flex-1 h-12 text-base"
-                onClick={handleAddMaterial}
-                disabled={submittingMaterial || !(selectedMaterial === "__custom__" ? customMaterial.trim() : selectedMaterial)}
-              >
-                {submittingMaterial ? "Speichert..." : "Speichern"}
-              </Button>
-              <Button
-                className="flex-1 h-12 text-base"
-                variant="outline"
-                onClick={() => { setMaterialDialogProject(null); setSelectedMaterial(""); setCustomMaterial(""); setNewMenge(""); }}
-              >
-                Abbrechen
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 };
