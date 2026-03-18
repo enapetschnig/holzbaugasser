@@ -1099,7 +1099,7 @@ export default function HoursReport() {
                     onClick={() => handleExportPDF(true)}
                   >
                     <Download className="w-4 h-4 mr-2" />
-                    PDF mit Überstunden
+                    PDF mit ZA
                   </Button>
                   <Button
                     variant="outline"
@@ -1108,7 +1108,7 @@ export default function HoursReport() {
                     onClick={() => handleExportPDF(false)}
                   >
                     <Download className="w-4 h-4 mr-2" />
-                    PDF ohne Überstunden
+                    PDF ohne ZA
                   </Button>
                 </div>
 

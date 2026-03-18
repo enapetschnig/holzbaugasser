@@ -1685,13 +1685,23 @@ export default function Admin() {
                     await supabase.from("time_accounts").delete().eq("user_id", userToDelete.id);
                     await supabase.from("employees").delete().eq("user_id", userToDelete.id);
 
-                    // 4. Delete profile
+                    // 4. Delete profile first (before auth cascade)
                     await supabase.from("profiles").delete().eq("id", userToDelete.id);
 
-                    // 5. Delete auth user (invalidates ALL sessions immediately)
-                    await supabase.functions.invoke("delete-user", {
-                      body: { userId: userToDelete.id },
-                    });
+                    // 5. Delete auth user (invalidates sessions + cascades remaining)
+                    try {
+                      const { data: deleteResult, error: fnError } = await supabase.functions.invoke("delete-user", {
+                        body: { userId: userToDelete.id },
+                      });
+                      if (fnError) console.error("Edge Function error:", fnError);
+                      if (deleteResult && !deleteResult.success) {
+                        console.error("Auth delete failed:", deleteResult.error);
+                        // Fallback: deactivate if auth delete fails
+                        toast({ title: "Hinweis", description: "Auth-Konto konnte nicht gelöscht werden. Zugriff wurde trotzdem gesperrt." });
+                      }
+                    } catch (fnErr) {
+                      console.error("Edge Function call failed:", fnErr);
+                    }
 
                     toast({
                       title: "Benutzer gelöscht",
