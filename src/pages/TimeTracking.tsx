@@ -387,6 +387,25 @@ const TimeTracking = () => {
         prev.map((r) => (r.id === id ? { ...r, [field]: value } : r))
       );
     }
+
+    // Sync werkstattStunden → "Werk" activity row
+    if (field === "werkstattStunden" && value) {
+      const werkPos = taetigkeiten.find(t => t.bezeichnung === "Werk")?.position;
+      if (werkPos) {
+        const hours = parseFloat(value) || 0;
+        if (hours > 0) {
+          if (gleicheStundenFuerAlle) {
+            setMitarbeiterRows(prev => prev.map(r => ({
+              ...r, stunden: { ...r.stunden, [werkPos]: value }
+            })));
+          } else {
+            setMitarbeiterRows(prev => prev.map(r =>
+              r.id === id ? { ...r, stunden: { ...r.stunden, [werkPos]: value } } : r
+            ));
+          }
+        }
+      }
+    }
   };
 
   const updateMitarbeiterStunden = (
@@ -1529,7 +1548,7 @@ const TimeTracking = () => {
                       Fahrer
                     </th>
                     <th className="px-1 py-2 font-medium text-center min-w-[60px] text-xs">
-                      Werkstatt
+                      Werk
                     </th>
                     <th className="px-1 py-2 font-medium text-center min-w-[60px] text-xs">
                       Schmutz
