@@ -1073,17 +1073,16 @@ const TimeTracking = () => {
   useEffect(() => {
     const checkExisting = async () => {
       if (!datum || !currentUserId) { setExistingEntriesWarning(""); return; }
+      // Nur für den eingeloggten User prüfen
       const { data } = await supabase
         .from("time_entries")
-        .select("user_id, stunden, taetigkeit")
+        .select("stunden, taetigkeit")
         .eq("datum", datum)
+        .eq("user_id", currentUserId)
         .not("taetigkeit", "in", '("Urlaub","Krankenstand","Fortbildung","Feiertag","Schule","Weiterbildung")');
       if (data && data.length > 0) {
-        const details = data.map(e => {
-          const p = profiles.find(pr => pr.id === e.user_id);
-          return `${p ? `${p.vorname} ${p.nachname}` : "?"}: ${e.stunden}h`;
-        });
-        setExistingEntriesWarning(`Für diesen Tag sind bereits Stunden eingetragen:\n${[...new Set(details)].join(", ")}`);
+        const total = data.reduce((s, e) => s + (parseFloat(e.stunden as any) || 0), 0);
+        setExistingEntriesWarning(`Für dich sind an diesem Tag bereits ${total}h eingetragen.`);
       } else {
         setExistingEntriesWarning("");
       }
