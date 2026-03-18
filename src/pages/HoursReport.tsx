@@ -111,7 +111,6 @@ const ABSENCE_TYPES = [
   "Krankenstand",
   "Berufsschule",
   "Feiertag",
-  "Weiterbildung",
   "Fortbildung",
 ];
 
@@ -120,7 +119,6 @@ const ABSENCE_SHORT: Record<string, string> = {
   Krankenstand: "K",
   Berufsschule: "Schule",
   Feiertag: "Feiertag",
-  Weiterbildung: "WB",
   Fortbildung: "FB",
 };
 
@@ -130,6 +128,45 @@ const ABSENCE_SHORT: Record<string, string> = {
 
 function getDaysInMonth(year: number, month: number): number {
   return new Date(year, month, 0).getDate();
+}
+
+/** Austrian public holidays + Kärnten specific (10. Oktober) */
+function getAustrianHolidays(year: number): Record<string, string> {
+  const holidays: Record<string, string> = {};
+  const add = (m: number, d: number, name: string) => {
+    holidays[`${year}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`] = name;
+  };
+  // Fixed holidays
+  add(1, 1, "Neujahr");
+  add(1, 6, "Heilige Drei Könige");
+  add(5, 1, "Staatsfeiertag");
+  add(8, 15, "Mariä Himmelfahrt");
+  add(10, 10, "Tag der Volksabstimmung"); // Kärnten
+  add(10, 26, "Nationalfeiertag");
+  add(11, 1, "Allerheiligen");
+  add(12, 8, "Mariä Empfängnis");
+  add(12, 25, "Christtag");
+  add(12, 26, "Stefanitag");
+  // Easter-based (Gauss algorithm)
+  const a = year % 19, b = Math.floor(year / 100), c = year % 100;
+  const d = Math.floor(b / 4), e = b % 4, f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3), h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4), k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7;
+  const m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const month = Math.floor((h + l - 7 * m + 114) / 31);
+  const day = ((h + l - 7 * m + 114) % 31) + 1;
+  const easter = new Date(year, month - 1, day);
+  const addEaster = (offset: number, name: string) => {
+    const d = new Date(easter);
+    d.setDate(d.getDate() + offset);
+    add(d.getMonth() + 1, d.getDate(), name);
+  };
+  addEaster(1, "Ostermontag");
+  addEaster(39, "Christi Himmelfahrt");
+  addEaster(50, "Pfingstmontag");
+  addEaster(60, "Fronleichnam");
+  return holidays;
 }
 
 function isWeekend(year: number, month: number, day: number): boolean {
@@ -533,6 +570,7 @@ export default function HoursReport() {
   }, [gridEmployee, profiles, profileMap]);
 
   const daysInMonth = getDaysInMonth(gridYear, gridMonth);
+  const holidays = useMemo(() => getAustrianHolidays(gridYear), [gridYear]);
   const workingDays = countWorkingDays(gridYear, gridMonth);
 
   // -------------------------------------------------------------------------
@@ -1107,12 +1145,16 @@ export default function HoursReport() {
                           {Array.from({ length: daysInMonth }, (_, i) => {
                             const day = i + 1;
                             const we = isWeekend(gridYear, gridMonth, day);
+                            const dateKey = `${gridYear}-${String(gridMonth).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+                            const holiday = holidays[dateKey];
                             return (
                               <th
                                 key={day}
+                                title={holiday || ""}
                                 className={cn(
                                   "border border-border px-0.5 py-1 text-center font-semibold min-w-[60px] w-[60px]",
-                                  we && "bg-orange-100"
+                                  we && "bg-orange-100",
+                                  holiday && !we && "bg-red-50"
                                 )}
                               >
                                 {day}
@@ -1225,6 +1267,8 @@ export default function HoursReport() {
                                 {Array.from({ length: daysInMonth }, (_, i) => {
                                   const day = i + 1;
                                   const we = isWeekend(gridYear, gridMonth, day);
+                                  const dateKey = `${gridYear}-${String(gridMonth).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+                                  const holiday = holidays[dateKey];
                                   const dd = employeeDays[day] || null;
                                   const cell = formatCell(dd);
 
@@ -1235,6 +1279,7 @@ export default function HoursReport() {
                                         "border border-border px-0.5 py-1 text-center whitespace-nowrap",
                                         we && !dd && "bg-orange-50",
                                         we && dd && "bg-orange-100",
+                                        !we && holiday && !dd && "bg-red-50",
                                         cell.className,
                                         isAdmin && "cursor-pointer hover:ring-2 hover:ring-primary/40 hover:ring-inset"
                                       )}
@@ -1252,7 +1297,11 @@ export default function HoursReport() {
                                           {cell.badges.join(" ")}
                                         </div>
                                       )}
-                                      <span className={cell.className}>{cell.hours}</span>
+                                      {cell.hours ? (
+                                        <span className={cell.className}>{cell.hours}</span>
+                                      ) : holiday && !we ? (
+                                        <span className="text-red-400 text-[9px] font-medium">FT</span>
+                                      ) : null}
                                     </td>
                                   );
                                 })}
@@ -1641,7 +1690,6 @@ export default function HoursReport() {
                   <SelectContent>
                     <SelectItem value="Urlaub">Urlaub (U)</SelectItem>
                     <SelectItem value="Krankenstand">Krankenstand (K)</SelectItem>
-                    <SelectItem value="Fortbildung">Fortbildung</SelectItem>
                     <SelectItem value="Fortbildung">Fortbildung</SelectItem>
                     <SelectItem value="Feiertag">Feiertag</SelectItem>
                     <SelectItem value="Schule">Berufsschule</SelectItem>
