@@ -1677,11 +1677,7 @@ export default function Admin() {
                     await supabase.from("user_roles").delete().eq("user_id", userToDelete.id);
                     await supabase.from("notifications").delete().eq("user_id", userToDelete.id);
                     await supabase.from("leave_balances").delete().eq("user_id", userToDelete.id);
-                    const { data: taIds } = await supabase.from("time_accounts").select("id").eq("user_id", userToDelete.id);
-                    if (taIds && taIds.length > 0) {
-                      await supabase.from("time_account_transactions").delete()
-                        .in("account_id", taIds.map((a: any) => a.id));
-                    }
+                    await supabase.from("time_account_transactions").delete().eq("user_id", userToDelete.id);
                     await supabase.from("time_accounts").delete().eq("user_id", userToDelete.id);
                     await supabase.from("employees").delete().eq("user_id", userToDelete.id);
 
