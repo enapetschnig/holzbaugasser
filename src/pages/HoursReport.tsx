@@ -83,6 +83,7 @@ interface ExistingBericht {
   ersteller_name: string;
   mitarbeiter_count: number;
   total_stunden: number;
+  archived: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -335,6 +336,8 @@ export default function HoursReport() {
   const [berichteVorarbeiter, setBerichteVorarbeiter] = useState("all");
   const [berichteMitarbeiter, setBerichteMitarbeiter] = useState("all");
   const [berichteProjekt, setBerichteProjekt] = useState("all");
+  const [selectedBerichte, setSelectedBerichte] = useState<Set<string>>(new Set());
+  const [showArchived, setShowArchived] = useState(false);
   const [berichteProjects, setBerichteProjects] = useState<{ id: string; name: string }[]>([]);
 
   const years = Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - 2 + i);
@@ -591,7 +594,7 @@ export default function HoursReport() {
     const { data, error } = await supabase
       .from("leistungsberichte" as any)
       .select(
-        "id, datum, objekt, projekt_id, erstellt_von, projects:projekt_id(name)"
+        "id, datum, objekt, projekt_id, erstellt_von, archived, projects:projekt_id(name)"
       )
       .gte("datum", berichteStartDate)
       .lte("datum", berichteEndDate)
@@ -630,6 +633,7 @@ export default function HoursReport() {
           (s: number, m: any) => s + (m.summe_stunden || 0),
           0
         ),
+        archived: b.archived || false,
       };
     });
 
@@ -644,15 +648,11 @@ export default function HoursReport() {
   // Filter berichte
   const filteredBerichte = useMemo(() => {
     return berichte.filter((b) => {
-      if (berichteVorarbeiter !== "all" && !b.ersteller_name.includes(
-        profileMap[berichteVorarbeiter]
-          ? `${profileMap[berichteVorarbeiter].vorname} ${profileMap[berichteVorarbeiter].nachname}`
-          : ""
-      )) return false;
+      if (b.archived !== showArchived) return false;
       if (berichteProjekt !== "all" && b.projekt_name !== berichteProjects.find(p => p.id === berichteProjekt)?.name) return false;
       return true;
     });
-  }, [berichte, berichteVorarbeiter, berichteProjekt, profileMap, berichteProjects]);
+  }, [berichte, berichteProjekt, berichteProjects, showArchived]);
 
   // -------------------------------------------------------------------------
   // Cell editing
@@ -800,6 +800,26 @@ export default function HoursReport() {
   // -------------------------------------------------------------------------
   // Leistungsbericht PDF anzeigen
   // -------------------------------------------------------------------------
+
+  const handleArchiveBerichte = async (archive: boolean) => {
+    if (selectedBerichte.size === 0) return;
+    const ids = Array.from(selectedBerichte);
+    await supabase
+      .from("leistungsberichte" as any)
+      .update({ archived: archive })
+      .in("id", ids);
+    setSelectedBerichte(new Set());
+    toast({ title: archive ? `${ids.length} Bericht(e) archiviert` : `${ids.length} Bericht(e) wiederhergestellt` });
+    fetchBerichte();
+  };
+
+  const toggleBerichtSelection = (id: string) => {
+    setSelectedBerichte(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
 
   const handleViewBerichtPDF = async (berichtId: string) => {
     try {
@@ -1494,6 +1514,31 @@ export default function HoursReport() {
                   </Button>
                 </div>
 
+                {/* Active/Archived toggle + actions */}
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div className="flex gap-2">
+                    <Button variant={!showArchived ? "default" : "outline"} size="sm" onClick={() => { setShowArchived(false); setSelectedBerichte(new Set()); }}>
+                      Aktiv
+                    </Button>
+                    <Button variant={showArchived ? "default" : "outline"} size="sm" onClick={() => { setShowArchived(true); setSelectedBerichte(new Set()); }}>
+                      Archiv
+                    </Button>
+                  </div>
+                  {selectedBerichte.size > 0 && (
+                    <div className="flex gap-2">
+                      {!showArchived ? (
+                        <Button variant="outline" size="sm" onClick={() => handleArchiveBerichte(true)}>
+                          {selectedBerichte.size} archivieren
+                        </Button>
+                      ) : (
+                        <Button variant="outline" size="sm" onClick={() => handleArchiveBerichte(false)}>
+                          {selectedBerichte.size} wiederherstellen
+                        </Button>
+                      )}
+                    </div>
+                  )}
+                </div>
+
                 {/* Table */}
                 {berichteLoading ? (
                   <div className="flex items-center justify-center py-16">
@@ -1512,6 +1557,15 @@ export default function HoursReport() {
                     <table className="w-full text-sm">
                       <thead>
                         <tr className="bg-muted/60">
+                          <th className="border-b px-2 py-2 w-8">
+                            <Checkbox
+                              checked={filteredBerichte.length > 0 && selectedBerichte.size === filteredBerichte.length}
+                              onCheckedChange={(v) => {
+                                if (v) setSelectedBerichte(new Set(filteredBerichte.map(b => b.id)));
+                                else setSelectedBerichte(new Set());
+                              }}
+                            />
+                          </th>
                           <th className="border-b px-3 py-2 text-left font-semibold">
                             Datum
                           </th>
@@ -1537,6 +1591,12 @@ export default function HoursReport() {
                             key={b.id}
                             className="hover:bg-muted/30 transition-colors"
                           >
+                            <td className="border-b px-2 py-2">
+                              <Checkbox
+                                checked={selectedBerichte.has(b.id)}
+                                onCheckedChange={() => toggleBerichtSelection(b.id)}
+                              />
+                            </td>
                             <td className="border-b px-3 py-2 whitespace-nowrap">
                               {format(parseISO(b.datum), "dd.MM.yyyy", {
                                 locale: de,
