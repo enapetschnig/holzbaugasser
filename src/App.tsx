@@ -48,6 +48,23 @@ function AppContent() {
     ensureProfile();
   }, []);
 
+  // Check if user still exists (handles deleted users)
+  useEffect(() => {
+    const checkUserExists = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      // Try to get user from auth - if deleted, this will fail
+      const { error } = await supabase.auth.getUser();
+      if (error) {
+        // User was deleted - force logout
+        await supabase.auth.signOut();
+        window.location.href = "/auth";
+      }
+    };
+    const interval = setInterval(checkUserExists, 30000); // Every 30s
+    return () => clearInterval(interval);
+  }, []);
+
   // Realtime listener for in-app notifications (popup)
   useEffect(() => {
     let channel: ReturnType<typeof supabase.channel> | null = null;

@@ -125,7 +125,10 @@ export default function Index() {
     if (profileData) {
       setIsActivated(profileData.is_active !== false);
     } else {
-      setIsActivated(true); // Fallback: neues Profil noch nicht angelegt
+      // No profile = user was deleted → force logout
+      await supabase.auth.signOut();
+      navigate("/auth");
+      return;
     }
 
     if (profileData) {
