@@ -182,6 +182,7 @@ const TimeTracking = () => {
   // Saving state
   const [saving, setSaving] = useState(false);
   const [existingEntriesWarning, setExistingEntriesWarning] = useState("");
+  const [maExistingHours, setMaExistingHours] = useState<Record<string, number>>({});
 
   // Editing existing report
   const [editingBerichtId, setEditingBerichtId] = useState<string | null>(null);
@@ -1073,28 +1074,46 @@ const TimeTracking = () => {
   useEffect(() => {
     const checkExisting = async () => {
       if (!datum || !currentUserId) { setExistingEntriesWarning(""); return; }
-      // Für den eingeloggten User prüfen ob schon Arbeitszeit eingetragen
+      // Nur für den eingeloggten User prüfen (nicht für alle MA)
+      const absTypes = ["Urlaub", "Krankenstand", "Fortbildung", "Feiertag", "Schule", "Weiterbildung"];
       const { data } = await supabase
         .from("time_entries")
         .select("stunden, taetigkeit")
         .eq("datum", datum)
         .eq("user_id", currentUserId);
-      if (data && data.length > 0) {
-        // Filter out absences client-side (more reliable than PostgREST .not())
-        const absTypes = ["Urlaub", "Krankenstand", "Fortbildung", "Feiertag", "Schule", "Weiterbildung"];
-        const workEntries = data.filter(e => !absTypes.includes(e.taetigkeit));
-        if (workEntries.length > 0) {
-          const total = workEntries.reduce((s, e) => s + (parseFloat(e.stunden as any) || 0), 0);
-          setExistingEntriesWarning(`Für dich sind an diesem Tag bereits ${total}h eingetragen.`);
-        } else {
-          setExistingEntriesWarning("");
-        }
+      const workEntries = (data || []).filter(e => !absTypes.includes(e.taetigkeit));
+      if (workEntries.length > 0) {
+        const total = workEntries.reduce((s, e) => s + (parseFloat(e.stunden as any) || 0), 0);
+        setExistingEntriesWarning(`Für dich sind an diesem Tag bereits ${total}h eingetragen.`);
       } else {
         setExistingEntriesWarning("");
       }
     };
     checkExisting();
-  }, [datum, currentUserId, profiles]);
+  }, [datum, currentUserId]);
+
+  // Check existing hours for all selected MA
+  useEffect(() => {
+    const checkMaHours = async () => {
+      if (!datum) { setMaExistingHours({}); return; }
+      const selectedIds = mitarbeiterRows.filter(r => r.mitarbeiterId && r.mitarbeiterId !== currentUserId).map(r => r.mitarbeiterId);
+      if (selectedIds.length === 0) { setMaExistingHours({}); return; }
+      const absTypes = ["Urlaub", "Krankenstand", "Fortbildung", "Feiertag", "Schule", "Weiterbildung"];
+      const { data } = await supabase
+        .from("time_entries")
+        .select("user_id, stunden, taetigkeit")
+        .eq("datum", datum)
+        .in("user_id", selectedIds);
+      const hours: Record<string, number> = {};
+      for (const e of (data || [])) {
+        if (!absTypes.includes(e.taetigkeit)) {
+          hours[e.user_id] = (hours[e.user_id] || 0) + (parseFloat(e.stunden as any) || 0);
+        }
+      }
+      setMaExistingHours(hours);
+    };
+    checkMaHours();
+  }, [datum, mitarbeiterRows, currentUserId]);
 
   // -------------------------------------------------------------------------
   // Render
@@ -1404,6 +1423,12 @@ const TimeTracking = () => {
                         </Button>
                       )}
                     </div>
+                    {/* Warning if this MA already has hours */}
+                    {row.mitarbeiterId && maExistingHours[row.mitarbeiterId] > 0 && (
+                      <div className="bg-amber-50 border border-amber-200 rounded px-2 py-1 text-xs text-amber-800">
+                        Bereits {maExistingHours[row.mitarbeiterId]}h eingetragen
+                      </div>
+                    )}
 
                     {/* Flags: F nur Checkbox, W/SCH/R mit Stunden */}
                     <div className="flex flex-wrap gap-x-4 gap-y-2">
