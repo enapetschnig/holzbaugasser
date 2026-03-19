@@ -365,11 +365,12 @@ export default function HoursReport() {
       .eq("user_id", user.id)
       .single();
 
-    if (data?.role !== "administrator") {
+    const role = data?.role;
+    if (role !== "administrator" && role !== "projektleiter") {
       navigate("/");
       return;
     }
-    setIsAdmin(true);
+    setIsAdmin(role === "administrator");
     setCheckingAdmin(false);
   };
 
@@ -1034,12 +1035,14 @@ export default function HoursReport() {
       <PageHeader title="Stundenauswertung" />
 
       <div className="container mx-auto p-4 space-y-6">
-        <Tabs defaultValue="arbeitszeiterfassung" className="w-full">
-          <TabsList className="grid w-full grid-cols-3">
+        <Tabs defaultValue={isAdmin ? "arbeitszeiterfassung" : "leistungsberichte"} className="w-full">
+          <TabsList className={`grid w-full ${isAdmin ? "grid-cols-3" : "grid-cols-2"}`}>
+            {isAdmin && (
             <TabsTrigger value="arbeitszeiterfassung" className="text-xs sm:text-sm">
               <FileSpreadsheet className="w-4 h-4 mr-1 sm:mr-2 shrink-0" />
               <span className="truncate">Arbeitszeiterfassung</span>
             </TabsTrigger>
+            )}
             <TabsTrigger value="leistungsberichte" className="text-xs sm:text-sm">
               <ClipboardList className="w-4 h-4 mr-1 sm:mr-2 shrink-0" />
               <span className="truncate">Leistungsberichte</span>

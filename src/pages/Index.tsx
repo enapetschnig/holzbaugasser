@@ -318,8 +318,10 @@ export default function Index() {
 
   const isAdmin = userRole === "administrator";
   const isVorarbeiter = userRole === "vorarbeiter";
+  const isProjektleiter = userRole === "projektleiter";
   const canManageTime = isAdmin || isVorarbeiter;
-  const canCreateProjects = isAdmin || isVorarbeiter;
+  const canCreateProjects = isAdmin || isVorarbeiter || isProjektleiter;
+  const canViewHoursReport = isAdmin || isProjektleiter;
 
   return (
     <div className="min-h-screen bg-background">
@@ -525,8 +527,8 @@ export default function Index() {
           )}
 
 
-          {/* Admin: Stundenauswertung */}
-          {isAdmin && (
+          {/* Admin/Projektleiter: Stundenauswertung */}
+          {canViewHoursReport && (
             <Card 
               className="cursor-pointer hover:shadow-lg transition-all hover:border-primary/50" 
               onClick={() => navigate("/hours-report")}

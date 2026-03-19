@@ -784,6 +784,7 @@ export default function Admin() {
                           <SelectContent>
                             <SelectItem value="administrator">Administrator</SelectItem>
                             <SelectItem value="vorarbeiter">Vorarbeiter</SelectItem>
+                            <SelectItem value="projektleiter">Projektleiter</SelectItem>
                             <SelectItem value="mitarbeiter">Mitarbeiter</SelectItem>
                           </SelectContent>
                         </Select>
@@ -912,7 +913,7 @@ export default function Admin() {
                           )}
                         </p>
                         <p className="text-sm text-muted-foreground">
-                          {userRoles[profile.id] === "administrator" ? "Administrator" : userRoles[profile.id] === "vorarbeiter" ? "Vorarbeiter" : "Mitarbeiter"}
+                          {userRoles[profile.id] === "administrator" ? "Administrator" : userRoles[profile.id] === "vorarbeiter" ? "Vorarbeiter" : userRoles[profile.id] === "projektleiter" ? "Projektleiter" : "Mitarbeiter"}
                         </p>
                       </div>
                     </div>
