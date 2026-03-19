@@ -928,6 +928,7 @@ export default function Admin() {
                         <SelectContent>
                           <SelectItem value="administrator">Administrator</SelectItem>
                           <SelectItem value="vorarbeiter">Vorarbeiter</SelectItem>
+                          <SelectItem value="projektleiter">Projektleiter</SelectItem>
                           <SelectItem value="mitarbeiter">Mitarbeiter</SelectItem>
                         </SelectContent>
                       </Select>
