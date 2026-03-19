@@ -95,15 +95,15 @@ export default function LeaveManagement({ profiles }: LeaveManagementProps) {
     const newTotal = (bal.total_days || 0) + daysPerMonth;
     const creditDateStr = format(nextCredit, "dd.MM.yyyy");
 
-    // Calculate next credit date (1 month later)
-    const nextMonth = new Date(nextCredit);
-    nextMonth.setMonth(nextMonth.getMonth() + 1);
+    // Calculate next credit date (last day of next month)
+    const nextCreditMonth = new Date(nextCredit);
+    nextCreditMonth.setMonth(nextCreditMonth.getMonth() + 2, 0); // Last day of next month
 
     await supabase.from("leave_balances")
       .update({
         total_days: Math.round(newTotal * 100) / 100,
         last_credit_date: bal.next_credit_date,
-        next_credit_date: nextMonth.toISOString().split("T")[0],
+        next_credit_date: nextCreditMonth.toISOString().split("T")[0],
       })
       .eq("id", bal.id);
 
@@ -135,7 +135,8 @@ export default function LeaveManagement({ profiles }: LeaveManagementProps) {
     if (existing) return;
 
     const now = new Date();
-    const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    // Last day of current month
+    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
 
     await supabase.from("leave_balances").insert({
       user_id: userId,
@@ -143,7 +144,7 @@ export default function LeaveManagement({ profiles }: LeaveManagementProps) {
       total_days: 0,
       used_days: 0,
       days_per_month: 2.08,
-      next_credit_date: nextMonth.toISOString().split("T")[0],
+      next_credit_date: endOfMonth.toISOString().split("T")[0],
     });
 
     // Log
