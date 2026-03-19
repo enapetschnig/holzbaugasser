@@ -129,10 +129,14 @@ export default function TimeAccountManagement({ profiles }: TimeAccountManagemen
       }
     }
 
-    // Update time_accounts with calculated overtime (only positive = Überstunden)
+    // Load fresh accounts from DB (not from state which may be stale)
+    const { data: freshAccounts } = await supabase.from("time_accounts").select("*");
+    if (!freshAccounts) return;
+
+    // Update time_accounts with calculated overtime
     for (const [userId, data] of Object.entries(overtimePerUser)) {
       const overtime = Math.round(data.total * 100) / 100;
-      let account = accounts.find(a => a.user_id === userId);
+      const account = (freshAccounts as TimeAccount[]).find(a => a.user_id === userId);
       if (!account) continue;
 
       // Only update if changed
