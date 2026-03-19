@@ -76,12 +76,9 @@ export default function TimeAccountManagement({ profiles }: TimeAccountManagemen
     const currentYear = now.getFullYear();
     const currentMonth = now.getMonth() + 1; // 1-based
 
-    // Load all time entries for this year (up to last completed month)
-    const lastCompletedMonth = currentMonth - 1;
-    if (lastCompletedMonth < 1) return; // January not done yet
-
+    // Load all time entries for this year (including current month = live)
     const startDate = `${currentYear}-01-01`;
-    const endDate = `${currentYear}-${String(lastCompletedMonth).padStart(2, "0")}-${new Date(currentYear, lastCompletedMonth, 0).getDate()}`;
+    const endDate = `${currentYear}-${String(currentMonth).padStart(2, "0")}-${new Date(currentYear, currentMonth, 0).getDate()}`;
 
     const { data: entries } = await supabase
       .from("time_entries")
@@ -99,7 +96,7 @@ export default function TimeAccountManagement({ profiles }: TimeAccountManagemen
     // Calculate total overtime per user across all completed months
     const overtimePerUser: Record<string, { total: number; details: string[] }> = {};
 
-    for (let m = 1; m <= lastCompletedMonth; m++) {
+    for (let m = 1; m <= currentMonth; m++) {
       const monthStart = `${currentYear}-${String(m).padStart(2, "0")}-01`;
       const daysInMonth = new Date(currentYear, m, 0).getDate();
       const monthEnd = `${currentYear}-${String(m).padStart(2, "0")}-${daysInMonth}`;
