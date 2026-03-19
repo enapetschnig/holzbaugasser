@@ -93,16 +93,19 @@ export default function TimeAccountManagement({ profiles }: TimeAccountManagemen
     const weeklyMap: Record<string, number | null> = {};
     if (employees) employees.forEach((e: any) => { if (e.user_id) weeklyMap[e.user_id] = e.monats_soll_stunden; });
 
-    // Calculate total overtime per user across all completed months
-    const overtimePerUser: Record<string, { total: number; details: string[] }> = {};
+    // Calculate overtime per user per month (only POSITIVE = Überstunden)
+    const monthNames = ["Jänner","Feber","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember"];
+    const overtimePerUser: Record<string, number> = {};
+
+    const { data: { user: currentUser } } = await supabase.auth.getUser();
 
     for (let m = 1; m <= currentMonth; m++) {
       const monthStart = `${currentYear}-${String(m).padStart(2, "0")}-01`;
       const daysInMonth = new Date(currentYear, m, 0).getDate();
       const monthEnd = `${currentYear}-${String(m).padStart(2, "0")}-${daysInMonth}`;
-      const monthNames = ["Jänner","Feber","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember"];
+      const monthLabel = `${monthNames[m - 1]} ${currentYear}`;
+      const txKey = `Überstunden ${monthLabel}`;
 
-      // Calculate Soll for this month
       let monthSoll = 0;
       for (let d = 1; d <= daysInMonth; d++) {
         const dow = new Date(currentYear, m - 1, d).getDay();
@@ -110,7 +113,6 @@ export default function TimeAccountManagement({ profiles }: TimeAccountManagemen
         monthSoll += dow === 5 ? 7 : 8;
       }
 
-      // Sum hours per user for this month
       const monthEntries = entries.filter(e => e.datum >= monthStart && e.datum <= monthEnd);
       const hoursPerUser: Record<string, number> = {};
       for (const e of monthEntries) {
@@ -121,29 +123,60 @@ export default function TimeAccountManagement({ profiles }: TimeAccountManagemen
         const weekly = weeklyMap[userId];
         const soll = weekly != null ? Math.round((weekly / 39) * monthSoll * 10) / 10 : monthSoll;
         const diff = Math.round((ist - soll) * 100) / 100;
-        if (!overtimePerUser[userId]) overtimePerUser[userId] = { total: 0, details: [] };
-        overtimePerUser[userId].total += diff;
-        if (diff !== 0) {
-          overtimePerUser[userId].details.push(`${monthNames[m - 1]}: ${ist}h - ${soll}h = ${diff >= 0 ? "+" : ""}${diff}h`);
+
+        // Only count positive overtime (no minus)
+        if (diff > 0) {
+          overtimePerUser[userId] = (overtimePerUser[userId] || 0) + diff;
+
+          // Log transaction if not already logged for this month
+          const { data: existingTx } = await supabase
+            .from("time_account_transactions")
+            .select("id, hours")
+            .eq("user_id", userId)
+            .eq("change_type", txKey)
+            .maybeSingle();
+
+          if (!existingTx) {
+            // New entry
+            await supabase.from("time_account_transactions").insert({
+              user_id: userId,
+              changed_by: currentUser?.id,
+              change_type: txKey,
+              hours: diff,
+              balance_before: 0,
+              balance_after: 0,
+              reason: `${monthLabel}: ${ist}h gearbeitet - ${soll}h Soll = +${diff}h Überstunden`,
+            });
+          } else if (Math.abs((parseFloat(existingTx.hours as any) || 0) - diff) > 0.01) {
+            // Update if hours changed
+            await supabase.from("time_account_transactions")
+              .update({
+                hours: diff,
+                reason: `${monthLabel}: ${ist}h gearbeitet - ${soll}h Soll = +${diff}h Überstunden`,
+              })
+              .eq("id", existingTx.id);
+          }
         }
       }
     }
 
-    // Load fresh accounts from DB (not from state which may be stale)
+    // Load fresh accounts and update balances
     const { data: freshAccounts } = await supabase.from("time_accounts").select("*");
     if (!freshAccounts) return;
 
-    // Update time_accounts with calculated overtime
-    for (const [userId, data] of Object.entries(overtimePerUser)) {
-      const overtime = Math.round(data.total * 100) / 100;
+    for (const [userId, overtime] of Object.entries(overtimePerUser)) {
       const account = (freshAccounts as TimeAccount[]).find(a => a.user_id === userId);
       if (!account) continue;
+      const rounded = Math.round(overtime * 100) / 100;
+      if (Math.abs((account.balance_hours || 0) - rounded) > 0.01) {
+        await supabase.from("time_accounts").update({ balance_hours: rounded }).eq("id", account.id);
+      }
+    }
 
-      // Only update if changed
-      if (Math.abs((account.balance_hours || 0) - overtime) > 0.01) {
-        await supabase.from("time_accounts")
-          .update({ balance_hours: overtime })
-          .eq("id", account.id);
+    // Reset accounts with no overtime to 0
+    for (const acc of freshAccounts as TimeAccount[]) {
+      if (!overtimePerUser[acc.user_id] && (acc.balance_hours || 0) !== 0) {
+        await supabase.from("time_accounts").update({ balance_hours: 0 }).eq("id", acc.id);
       }
     }
   };
