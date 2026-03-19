@@ -282,6 +282,7 @@ export default function HoursReport() {
 
   // Admin check
   const [isAdmin, setIsAdmin] = useState(false);
+  const [canAccessPage, setCanAccessPage] = useState(false);
   const [checkingAdmin, setCheckingAdmin] = useState(true);
 
   // Shared data
@@ -371,6 +372,7 @@ export default function HoursReport() {
       return;
     }
     setIsAdmin(role === "administrator");
+    setCanAccessPage(true);
     setCheckingAdmin(false);
   };
 
@@ -1028,7 +1030,7 @@ export default function HoursReport() {
     );
   }
 
-  if (!isAdmin) return null;
+  if (!canAccessPage) return null;
 
   return (
     <div className="min-h-screen bg-background">

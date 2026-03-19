@@ -319,7 +319,7 @@ export default function Index() {
   const isAdmin = userRole === "administrator";
   const isVorarbeiter = userRole === "vorarbeiter";
   const isProjektleiter = userRole === "projektleiter";
-  const canManageTime = isAdmin || isVorarbeiter;
+  const canManageTime = isAdmin || isVorarbeiter || isProjektleiter;
   const canCreateProjects = isAdmin || isVorarbeiter || isProjektleiter;
   const canViewHoursReport = isAdmin || isProjektleiter;
 
