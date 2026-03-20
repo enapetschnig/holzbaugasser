@@ -89,8 +89,11 @@ function calcPauseMinutes(von: string, bis: string): number {
   return Math.max(0, diff);
 }
 
-function sumStunden(row: MitarbeiterRow): number {
-  return Object.values(row.stunden).reduce((a, b) => a + (typeof b === "string" ? parseFloat(b) || 0 : b || 0), 0);
+function sumStunden(row: MitarbeiterRow, excludePositions?: Set<number>): number {
+  return Object.entries(row.stunden).reduce((a, [posStr, b]) => {
+    if (excludePositions?.has(Number(posStr))) return a;
+    return a + (typeof b === "string" ? parseFloat(b) || 0 : b || 0);
+  }, 0);
 }
 
 function parseStunden(val: number | string): number {
@@ -203,6 +206,15 @@ const TimeTracking = () => {
     () => calcPauseMinutes(pauseVon, pauseBis),
     [pauseVon, pauseBis]
   );
+
+  // Positions tagged as schmutz or regen (Zulagen - don't count as work hours)
+  const zulagePositions = useMemo(() => {
+    const set = new Set<number>();
+    for (const t of taetigkeiten) {
+      if (t.tag === "schmutz" || t.tag === "regen") set.add(t.position);
+    }
+    return set;
+  }, [taetigkeiten]);
 
   // Auto-fill position 1 text
   const pos1Text = useMemo(
@@ -752,7 +764,7 @@ const TimeTracking = () => {
           werkstatt_stunden: werkstattH > 0 ? werkstattH : null,
           schmutzzulage_stunden: schmutzH > 0 ? schmutzH : null,
           regen_stunden: regenH > 0 ? regenH : null,
-          summe_stunden: sumStunden(r),
+          summe_stunden: sumStunden(r, zulagePositions),
         };
       });
 
@@ -810,7 +822,7 @@ const TimeTracking = () => {
           user_id: r.mitarbeiterId,
           project_id: projektId,
           datum,
-          stunden: sumStunden(r),
+          stunden: sumStunden(r, zulagePositions),
           taetigkeit: parts.join(", ") || taetigkeitLabels.join(", "),
           start_time: ankunftZeit,
           end_time: abfahrtZeit,
@@ -1486,7 +1498,7 @@ const TimeTracking = () => {
             {/* ===== MOBILE: Card-Layout (< sm) ===== */}
             <div className="sm:hidden space-y-3">
               {mitarbeiterRows.map((row) => {
-                const total = sumStunden(row);
+                const total = sumStunden(row, zulagePositions);
                 const selectedProfile = profiles.find(p => p.id === row.mitarbeiterId);
                 return (
                   <div key={row.id} className="border-2 rounded-xl p-4 bg-card space-y-3">
@@ -1605,7 +1617,7 @@ const TimeTracking = () => {
                 </thead>
                 <tbody>
                   {mitarbeiterRows.map((row) => {
-                    const total = sumStunden(row);
+                    const total = sumStunden(row, zulagePositions);
                     return (
                       <tr key={row.id} className="border-b hover:bg-muted/30">
                         {/* Name select */}
