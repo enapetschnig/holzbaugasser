@@ -16,6 +16,7 @@ import { getTargetHoursForDate } from "@/lib/workingHours";
 const ABSENCE_TYPES = [
   { value: "urlaub", label: "Urlaub", icon: Sun, color: "text-green-600" },
   { value: "krankenstand", label: "Krankenstand", icon: Thermometer, color: "text-red-600" },
+  { value: "zeitausgleich", label: "Zeitausgleich", icon: Clock, color: "text-purple-600" },
   { value: "fortbildung", label: "Fortbildung", icon: BookOpen, color: "text-blue-600" },
   { value: "feiertag", label: "Feiertag", icon: PartyPopper, color: "text-orange-600" },
   { value: "schule", label: "Berufsschule", icon: GraduationCap, color: "text-cyan-600" },
@@ -46,6 +47,7 @@ function capitalizeType(type: AbsenceType): string {
   switch (type) {
     case "urlaub": return "Urlaub";
     case "krankenstand": return "Krankenstand";
+    case "zeitausgleich": return "ZA";
     case "fortbildung": return "Fortbildung";
     case "feiertag": return "Feiertag";
     case "schule": return "Schule";
@@ -67,6 +69,9 @@ export default function Absence() {
   const [existingAbsences, setExistingAbsences] = useState<ExistingAbsence[]>([]);
   const [currentUserId, setCurrentUserId] = useState("");
   const [weeklyHours, setWeeklyHours] = useState<number | null>(null); // null = standard 39h
+  const [zaMode, setZaMode] = useState<"ganztag" | "teilzeit">("ganztag");
+  const [zaStunden, setZaStunden] = useState("");
+  const [zeitkontoBalance, setZeitkontoBalance] = useState(0);
 
   useEffect(() => {
     const init = async () => {
@@ -85,6 +90,14 @@ export default function Absence() {
       if (empData?.monats_soll_stunden) {
         setWeeklyHours(empData.monats_soll_stunden);
       }
+      // Load Zeitkonto balance
+      const { data: zaData } = await supabase
+        .from("time_accounts")
+        .select("balance_hours")
+        .eq("user_id", user.id)
+        .maybeSingle();
+      if (zaData) setZeitkontoBalance(zaData.balance_hours || 0);
+
       await Promise.all([
         loadLeaveBalance(user.id),
         loadExistingAbsences(user.id),
@@ -119,7 +132,7 @@ export default function Absence() {
       .eq("user_id", userId)
       .gte("datum", startOfMonth)
       .lte("datum", endStr)
-      .in("taetigkeit", ["Urlaub", "Krankenstand", "Fortbildung", "ZA", "Feiertag", "Schule"])
+      .in("taetigkeit", ["Urlaub", "Krankenstand", "Fortbildung", "ZA", "Zeitausgleich", "Feiertag", "Schule"])
       .order("datum", { ascending: false });
 
     if (data) {
@@ -180,23 +193,34 @@ export default function Absence() {
     try {
       // Build entries for each working day
       const entries: any[] = [];
+      let totalZaHours = 0;
       const d = new Date(startDate + "T00:00:00");
       const endD = new Date(endDate + "T00:00:00");
       while (d <= endD) {
         const day = d.getDay();
         if (day !== 0 && day !== 6) {
-          // Berechne Tages-Soll basierend auf Wochenstunden
           const standardTarget = getTargetHoursForDate(d); // 8h Mo-Do, 7h Fr
           const targetHours = weeklyHours != null
             ? Math.round((weeklyHours / 39) * standardTarget * 10) / 10
             : standardTarget;
           const isFriday = day === 5;
           const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+          // ZA Teilzeit: Manuelle Stunden, nur 1 Tag
+          let hoursForDay = targetHours;
+          if (absenceType === "zeitausgleich" && zaMode === "teilzeit" && zaStunden) {
+            hoursForDay = parseFloat(zaStunden.replace(",", ".")) || targetHours;
+          }
+
+          if (absenceType === "zeitausgleich") {
+            totalZaHours += hoursForDay;
+          }
+
           entries.push({
             user_id: currentUserId,
             datum: dateStr,
             taetigkeit: capitalizeType(absenceType),
-            stunden: targetHours,
+            stunden: hoursForDay,
             start_time: "07:00",
             end_time: isFriday ? "14:00" : "15:00",
             pause_minutes: 0,
@@ -209,6 +233,31 @@ export default function Absence() {
 
       const { error: insertError } = await supabase.from("time_entries").insert(entries);
       if (insertError) throw insertError;
+
+      // ZA: Stunden vom Zeitkonto abziehen + Transaktion loggen
+      if (absenceType === "zeitausgleich" && totalZaHours > 0) {
+        const { data: account } = await supabase
+          .from("time_accounts")
+          .select("id, balance_hours")
+          .eq("user_id", currentUserId)
+          .maybeSingle();
+        if (account) {
+          const newBalance = (account.balance_hours || 0) - totalZaHours;
+          await supabase.from("time_accounts")
+            .update({ balance_hours: newBalance })
+            .eq("id", account.id);
+          await supabase.from("time_account_transactions").insert({
+            user_id: currentUserId,
+            changed_by: currentUserId,
+            change_type: "ZA genommen",
+            hours: -totalZaHours,
+            balance_before: account.balance_hours || 0,
+            balance_after: newBalance,
+            reason: `Zeitausgleich: ${totalZaHours}h (${startDate}${startDate !== endDate ? ` bis ${endDate}` : ""})`,
+          });
+          setZeitkontoBalance(newBalance);
+        }
+      }
 
       // Update leave balance for urlaub
       if (absenceType === "urlaub") {
@@ -429,6 +478,60 @@ export default function Absence() {
                   ) : (
                     <p className="text-sm text-muted-foreground">
                       Noch kein Urlaubskonto vorhanden (Standard: 25 Tage)
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Zeitausgleich Options */}
+            {absenceType === "zeitausgleich" && (
+              <Card className="bg-purple-50 border-purple-200">
+                <CardContent className="p-4 space-y-3">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Clock className="h-5 w-5 text-purple-600" />
+                    <span className="font-semibold text-purple-800">Zeitkonto</span>
+                    <Badge variant="outline" className="ml-auto text-purple-700 border-purple-300">
+                      {zeitkontoBalance >= 0 ? "+" : ""}{zeitkontoBalance.toFixed(1)}h
+                    </Badge>
+                  </div>
+                  <RadioGroup value={zaMode} onValueChange={(v) => setZaMode(v as "ganztag" | "teilzeit")} className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <RadioGroupItem value="ganztag" id="za-ganztag" />
+                      <Label htmlFor="za-ganztag" className="text-sm">
+                        Ganzer Tag ({startDate ? (() => {
+                          const dow = new Date(startDate + "T00:00:00").getDay();
+                          const std = getTargetHoursForDate(new Date(startDate + "T00:00:00"));
+                          const target = weeklyHours != null ? Math.round((weeklyHours / 39) * std * 10) / 10 : std;
+                          return `${target}h`;
+                        })() : "8h"} werden abgezogen)
+                      </Label>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <RadioGroupItem value="teilzeit" id="za-teilzeit" />
+                      <Label htmlFor="za-teilzeit" className="text-sm">Bestimmte Stunden</Label>
+                    </div>
+                  </RadioGroup>
+                  {zaMode === "teilzeit" && (
+                    <div className="flex items-center gap-2">
+                      <Input
+                        type="text"
+                        inputMode="decimal"
+                        placeholder="z.B. 4"
+                        value={zaStunden}
+                        onChange={(e) => setZaStunden(e.target.value)}
+                        className="w-24"
+                      />
+                      <span className="text-sm text-muted-foreground">Stunden ZA</span>
+                    </div>
+                  )}
+                  {startDate && (
+                    <p className="text-xs text-purple-600">
+                      {zaMode === "ganztag"
+                        ? `Es werden ${workingDays > 1 ? `${workingDays} Tage` : "1 Tag"} ZA vom Zeitkonto abgezogen`
+                        : zaStunden
+                          ? `${parseFloat(zaStunden.replace(",", ".")) || 0}h werden vom Zeitkonto abgezogen`
+                          : "Bitte Stunden eingeben"}
                     </p>
                   )}
                 </CardContent>
