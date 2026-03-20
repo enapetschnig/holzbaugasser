@@ -944,46 +944,49 @@ export default function HoursReport() {
   // Excel Export (Arbeitszeit pro Mitarbeiter)
   // -------------------------------------------------------------------------
   const [excelExporting, setExcelExporting] = useState(false);
+  const [showExcelDialog, setShowExcelDialog] = useState(false);
+  const [excelSelectedUsers, setExcelSelectedUsers] = useState<string[]>([]);
 
-  const handleExportExcel = async () => {
-    if (gridEmployee === "all") {
-      toast({ variant: "destructive", title: "Bitte einen Mitarbeiter auswählen", description: "Die Arbeitszeit-Excel wird pro Mitarbeiter erstellt." });
+  const handleOpenExcelDialog = () => {
+    setExcelSelectedUsers([]);
+    setShowExcelDialog(true);
+  };
+
+  const toggleExcelUser = (userId: string) => {
+    setExcelSelectedUsers(prev =>
+      prev.includes(userId) ? prev.filter(id => id !== userId) : [...prev, userId]
+    );
+  };
+
+  const selectAllExcelUsers = () => {
+    if (excelSelectedUsers.length === profiles.length) {
+      setExcelSelectedUsers([]);
+    } else {
+      setExcelSelectedUsers(profiles.map(p => p.id));
+    }
+  };
+
+  const handleExportExcelSelected = async () => {
+    if (excelSelectedUsers.length === 0) {
+      toast({ variant: "destructive", title: "Bitte mindestens einen Mitarbeiter auswählen" });
       return;
     }
     setExcelExporting(true);
     try {
-      const profile = profileMap[gridEmployee];
-      if (!profile) return;
-      const name = `${profile.nachname} ${profile.vorname}`;
-      await generateArbeitszeitExcel({
-        userId: gridEmployee,
-        userName: name,
-        year: gridYear,
-        month: gridMonth,
-        weeklyHours: employeeSollMap[gridEmployee] ?? null,
-      });
-      toast({ title: "Excel heruntergeladen" });
-    } catch (err: any) {
-      toast({ variant: "destructive", title: "Fehler beim Export", description: err.message });
-    } finally {
-      setExcelExporting(false);
-    }
-  };
-
-  const handleExportExcelAll = async () => {
-    setExcelExporting(true);
-    try {
-      for (const profile of profiles) {
+      for (const userId of excelSelectedUsers) {
+        const profile = profileMap[userId];
+        if (!profile) continue;
         const name = `${profile.nachname} ${profile.vorname}`;
         await generateArbeitszeitExcel({
-          userId: profile.id,
+          userId,
           userName: name,
           year: gridYear,
           month: gridMonth,
-          weeklyHours: employeeSollMap[profile.id] ?? null,
+          weeklyHours: employeeSollMap[userId] ?? null,
         });
       }
-      toast({ title: `${profiles.length} Excel-Dateien heruntergeladen` });
+      toast({ title: `${excelSelectedUsers.length} Excel-Datei(en) heruntergeladen` });
+      setShowExcelDialog(false);
     } catch (err: any) {
       toast({ variant: "destructive", title: "Fehler beim Export", description: err.message });
     } finally {
@@ -1199,24 +1202,11 @@ export default function HoursReport() {
                     variant="outline"
                     size="sm"
                     className="h-10"
-                    onClick={handleExportExcel}
-                    disabled={excelExporting}
+                    onClick={handleOpenExcelDialog}
                   >
                     <FileSpreadsheet className="w-4 h-4 mr-2" />
-                    {excelExporting ? "Exportiere..." : "Arbeitszeit Excel"}
+                    Arbeitszeit Excel
                   </Button>
-                  {gridEmployee === "all" && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-10"
-                      onClick={handleExportExcelAll}
-                      disabled={excelExporting}
-                    >
-                      <FileSpreadsheet className="w-4 h-4 mr-2" />
-                      {excelExporting ? "Exportiere..." : "Alle Excel"}
-                    </Button>
-                  )}
                 </div>
 
                 {/* Grid */}
@@ -1885,6 +1875,52 @@ export default function HoursReport() {
             </Button>
             <Button onClick={handleSaveCell} disabled={savingCell}>
               {savingCell ? "Speichert..." : "Speichern"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Excel Export Dialog */}
+      <Dialog open={showExcelDialog} onOpenChange={setShowExcelDialog}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Arbeitszeit Excel exportieren</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              {monthNames[gridMonth - 1]} {gridYear} — Mitarbeiter auswählen:
+            </p>
+            <div className="flex items-center gap-2 pb-2 border-b">
+              <Checkbox
+                checked={excelSelectedUsers.length === profiles.length}
+                onCheckedChange={selectAllExcelUsers}
+              />
+              <span className="text-sm font-medium">Alle auswählen</span>
+            </div>
+            <div className="max-h-60 overflow-y-auto space-y-2">
+              {profiles.map((p) => (
+                <div key={p.id} className="flex items-center gap-2">
+                  <Checkbox
+                    checked={excelSelectedUsers.includes(p.id)}
+                    onCheckedChange={() => toggleExcelUser(p.id)}
+                  />
+                  <span className="text-sm">{p.nachname} {p.vorname}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowExcelDialog(false)}>
+              Abbrechen
+            </Button>
+            <Button
+              onClick={handleExportExcelSelected}
+              disabled={excelExporting || excelSelectedUsers.length === 0}
+            >
+              <FileSpreadsheet className="w-4 h-4 mr-2" />
+              {excelExporting
+                ? "Exportiere..."
+                : `${excelSelectedUsers.length} Excel herunterladen`}
             </Button>
           </DialogFooter>
         </DialogContent>

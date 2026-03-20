@@ -196,14 +196,8 @@ export async function generateArbeitszeitExcel(options: ExportOptions) {
     ]);
   }
 
-  // Footer summaries
+  // Footer - nur Gesamtsumme
   rows.push(["", "", "", "", "", "", "", ""]);
-  rows.push(["", "", "", "", "", "SUMME", sumGesamt, ""]);
-  rows.push(["", "", "", "", "", "Summe Arbeitsstunden", sumArbeit, ""]);
-  rows.push(["", "", "", "", "", "Summe Urlaub", sumUrlaub, ""]);
-  rows.push(["", "", "", "", "", "Summe Krankenstand", sumKrankenstand, ""]);
-  rows.push(["", "", "", "", "", "Summe Weiterbildung", sumWeiterbildung, ""]);
-  rows.push(["", "", "", "", "", "Summe Zeitausgleich", sumZA, ""]);
   rows.push(["", "", "", "", "", "Gesamtsumme", sumGesamt, ""]);
   rows.push(["", "", "", "", "", "", "", ""]);
   rows.push(["", "", "", "", "", "", "", ""]);
