@@ -377,15 +377,24 @@ export default function HoursReport() {
   };
 
   const fetchProfiles = async () => {
+    // Load roles to filter out administrators and projektleiter
+    const { data: rolesData } = await supabase
+      .from("user_roles")
+      .select("user_id, role")
+      .in("role", ["administrator", "projektleiter"]);
+    const excludeIds = new Set((rolesData || []).map((r: any) => r.user_id));
+
     const { data } = await supabase
       .from("profiles")
       .select("id, vorname, nachname")
       .eq("is_active", true)
       .order("nachname");
     if (data) {
-      setProfiles(data);
+      // Filter out administrators and projektleiter
+      const filtered = data.filter((p) => !excludeIds.has(p.id));
+      setProfiles(filtered);
       const map: Record<string, Profile> = {};
-      data.forEach((p) => {
+      filtered.forEach((p) => {
         map[p.id] = p;
       });
       setProfileMap(map);
