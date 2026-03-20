@@ -1229,6 +1229,9 @@ export default function HoursReport() {
                           <th className="border border-border px-1 py-1 text-center font-semibold bg-blue-50 min-w-[40px] text-[10px]" title="Regen (Stunden)">
                             R
                           </th>
+                          <th className="border border-border px-1 py-1 text-center font-semibold bg-green-50 min-w-[50px] text-[10px]" title="Montagestunden (Gesamt minus Werkstatt)">
+                            Montage
+                          </th>
                         </tr>
                         {/* Row 2: Weekday abbreviations */}
                         <tr className="bg-muted/40">
@@ -1259,13 +1262,14 @@ export default function HoursReport() {
                           <th className="border border-border px-1 py-0.5 text-center text-[8px] bg-blue-50 text-muted-foreground">T/Std</th>
                           <th className="border border-border px-1 py-0.5 text-center text-[8px] bg-blue-50 text-muted-foreground">Std</th>
                           <th className="border border-border px-1 py-0.5 text-center text-[8px] bg-blue-50 text-muted-foreground">Std</th>
+                          <th className="border border-border px-1 py-0.5 text-center text-[8px] bg-green-50 text-muted-foreground">Std</th>
                         </tr>
                       </thead>
                       <tbody>
                         {gridEmployees.length === 0 ? (
                           <tr>
                             <td
-                              colSpan={daysInMonth + 9}
+                              colSpan={daysInMonth + 10}
                               className="text-center py-8 text-muted-foreground"
                             >
                               Keine Mitarbeiter gefunden
@@ -1280,6 +1284,7 @@ export default function HoursReport() {
                             let werkstattStd = 0;
                             let schmutzStd = 0;
                             let regenStd = 0;
+                            let montageStd = 0;
                             const monthlyTarget = weeklyToMonthlyTarget(employeeSollMap[employee.id] ?? null, gridYear, gridMonth);
                             for (let d = 1; d <= daysInMonth; d++) {
                               const dd = employeeDays[d];
@@ -1298,6 +1303,7 @@ export default function HoursReport() {
                                 }
                               }
                             }
+                            montageStd = totalHours - werkstattStd;
                             // "Ohne Überstunden": gedeckelt auf Soll
                             // "Mit Überstunden": echte Stunden
                             const displayIst = showWithZA ? totalHours : Math.min(totalHours, monthlyTarget);
@@ -1376,6 +1382,9 @@ export default function HoursReport() {
                                 </td>
                                 <td className="border border-border px-1 py-1 text-center text-xs bg-blue-50 whitespace-nowrap">
                                   {regenStd > 0 ? formatNumber(regenStd) : ""}
+                                </td>
+                                <td className="border border-border px-1 py-1 text-center text-xs font-semibold bg-green-50 whitespace-nowrap">
+                                  {montageStd > 0 ? formatNumber(montageStd) : ""}
                                 </td>
                               </tr>
                             );
