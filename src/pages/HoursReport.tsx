@@ -1217,6 +1217,10 @@ export default function HoursReport() {
                   </div>
                 ) : (
                   <div className="relative">
+                    {/* Montage Info */}
+                    <div className="mb-3 p-3 bg-green-50 border border-green-200 rounded-lg text-xs text-green-800">
+                      <strong>Montagestunden</strong> = Gesamtstunden &minus; Werkstatt-Stunden &minus; Regenstunden
+                    </div>
                     {/* Scroll buttons */}
                     <div className="flex justify-between mb-2">
                       <Button
@@ -1366,7 +1370,7 @@ export default function HoursReport() {
                                 }
                               }
                             }
-                            montageStd = totalHours - werkstattStd;
+                            montageStd = totalHours - werkstattStd - regenStd;
                             // "Ohne Überstunden": gedeckelt auf Soll
                             // "Mit Überstunden": echte Stunden
                             const displayIst = showWithZA ? totalHours : Math.min(totalHours, monthlyTarget);
