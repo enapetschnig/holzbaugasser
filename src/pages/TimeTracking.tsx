@@ -1226,10 +1226,10 @@ const TimeTracking = () => {
                   value={datum}
                   onChange={(e) => {
                     setDatum(e.target.value);
-                    // Reset stunden when date changes (new day = fresh start)
+                    // Reset stunden when date changes (new day = fresh start, keep 0.5h for Tätigkeit 1)
                     if (!editingBerichtId) {
                       setMitarbeiterRows((prev) =>
-                        prev.map((row) => ({ ...row, stunden: {} }))
+                        prev.map((row) => ({ ...row, stunden: { 1: 0.5 } }))
                       );
                     }
                   }}
@@ -1496,17 +1496,6 @@ const TimeTracking = () => {
             </div>
           </CardHeader>
           <CardContent>
-            {/* Anleitung */}
-            <details className="mb-4 text-sm">
-              <summary className="cursor-pointer text-muted-foreground hover:text-foreground font-medium">
-                Anleitung anzeigen
-              </summary>
-              <div className="mt-2 p-3 bg-muted rounded-lg space-y-1 text-xs text-muted-foreground">
-                <p><strong>F</strong> (Fahrer) — Häkchen setzen wenn der Mitarbeiter gefahren ist</p>
-                <p>Die Stundenspalten (1, 2, 3, ...) entsprechen den Tätigkeiten oben</p>
-                <p>Schmutzzulage, Regen und Werkstatt werden oben bei den Tätigkeiten über den Button hinzugefügt — die Stunden dort wirken sich nicht auf die Arbeitszeit aus (Zulagen)</p>
-              </div>
-            </details>
             {/* Gleiche Stunden toggle */}
             <div className="flex items-center gap-3 mb-4">
               <Switch
