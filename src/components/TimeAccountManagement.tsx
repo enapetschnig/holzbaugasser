@@ -160,23 +160,23 @@ export default function TimeAccountManagement({ profiles }: TimeAccountManagemen
       }
     }
 
-    // Load fresh accounts and update balances
+    // Load fresh accounts and ALL transactions to compute real balance
     const { data: freshAccounts } = await supabase.from("time_accounts").select("*");
     if (!freshAccounts) return;
 
-    for (const [userId, overtime] of Object.entries(overtimePerUser)) {
-      const account = (freshAccounts as TimeAccount[]).find(a => a.user_id === userId);
-      if (!account) continue;
-      const rounded = Math.round(overtime * 100) / 100;
-      if (Math.abs((account.balance_hours || 0) - rounded) > 0.01) {
-        await supabase.from("time_accounts").update({ balance_hours: rounded }).eq("id", account.id);
+    // For each account, compute balance = sum of all transactions
+    const { data: allTx } = await supabase.from("time_account_transactions").select("user_id, hours");
+    const txSumPerUser: Record<string, number> = {};
+    if (allTx) {
+      for (const tx of allTx) {
+        txSumPerUser[tx.user_id] = (txSumPerUser[tx.user_id] || 0) + (parseFloat(tx.hours as any) || 0);
       }
     }
 
-    // Reset accounts with no overtime to 0
     for (const acc of freshAccounts as TimeAccount[]) {
-      if (!overtimePerUser[acc.user_id] && (acc.balance_hours || 0) !== 0) {
-        await supabase.from("time_accounts").update({ balance_hours: 0 }).eq("id", acc.id);
+      const realBalance = Math.round((txSumPerUser[acc.user_id] || 0) * 100) / 100;
+      if (Math.abs((acc.balance_hours || 0) - realBalance) > 0.01) {
+        await supabase.from("time_accounts").update({ balance_hours: realBalance }).eq("id", acc.id);
       }
     }
   };
