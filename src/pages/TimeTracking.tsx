@@ -1491,9 +1491,17 @@ const TimeTracking = () => {
         <Card>
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
-              <CardTitle className="text-lg">
-                Mitarbeiter & Stunden
-              </CardTitle>
+              <div>
+                <CardTitle className="text-lg">Mitarbeiter & Stunden</CardTitle>
+                <p className="text-sm text-muted-foreground mt-0.5">
+                  {(() => {
+                    const d = new Date(datum + "T00:00:00");
+                    const days = ["Sonntag", "Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag"];
+                    const isFr = d.getDay() === 5;
+                    return `${days[d.getDay()]}, ${d.toLocaleDateString("de-AT")} — Regelarbeitszeit: ${isFr ? "7" : "8"} Stunden`;
+                  })()}
+                </p>
+              </div>
               <Button variant="outline" size="sm" onClick={openMitarbeiterDialog}>
                 <Plus className="h-4 w-4 mr-1" />
                 Mitarbeiter
@@ -1628,7 +1636,10 @@ const TimeTracking = () => {
                       </th>
                     ))}
                     <th className="px-2 py-2 font-medium text-center whitespace-nowrap min-w-[80px]">
-                      Summe
+                      <div>Summe</div>
+                      <div className="text-[10px] font-normal text-muted-foreground">
+                        Soll: {new Date(datum + "T00:00:00").getDay() === 5 ? "7h" : "8h"}
+                      </div>
                     </th>
                     <th className="px-1 py-2 w-10"></th>
                   </tr>

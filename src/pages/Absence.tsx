@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
-import { Calendar, Upload, Trash2, Sun, Thermometer, BookOpen, Clock, GraduationCap, PartyPopper } from "lucide-react";
+import { Calendar, Upload, Trash2, Sun, Thermometer, BookOpen, Clock, GraduationCap, PartyPopper, PenLine } from "lucide-react";
 import { getTargetHoursForDate } from "@/lib/workingHours";
 
 const ABSENCE_TYPES = [
@@ -20,6 +20,7 @@ const ABSENCE_TYPES = [
   { value: "fortbildung", label: "Fortbildung", icon: BookOpen, color: "text-blue-600" },
   { value: "feiertag", label: "Feiertag", icon: PartyPopper, color: "text-orange-600" },
   { value: "schule", label: "Berufsschule", icon: GraduationCap, color: "text-cyan-600" },
+  { value: "sonstiges", label: "Eigener Grund", icon: PenLine, color: "text-gray-600" },
 ] as const;
 
 type AbsenceType = (typeof ABSENCE_TYPES)[number]["value"];
@@ -43,7 +44,7 @@ function countWorkingDays(start: string, end: string): number {
   return count;
 }
 
-function capitalizeType(type: AbsenceType): string {
+function capitalizeType(type: AbsenceType, customReason?: string): string {
   switch (type) {
     case "urlaub": return "Urlaub";
     case "krankenstand": return "Krankenstand";
@@ -51,6 +52,7 @@ function capitalizeType(type: AbsenceType): string {
     case "fortbildung": return "Fortbildung";
     case "feiertag": return "Feiertag";
     case "schule": return "Schule";
+    case "sonstiges": return customReason || "Sonstiges";
     default: return type;
   }
 }
@@ -72,6 +74,7 @@ export default function Absence() {
   const [zaMode, setZaMode] = useState<"ganztag" | "teilzeit">("ganztag");
   const [zaStunden, setZaStunden] = useState("");
   const [zeitkontoBalance, setZeitkontoBalance] = useState(0);
+  const [customAbsenceReason, setCustomAbsenceReason] = useState("");
 
   useEffect(() => {
     const init = async () => {
@@ -132,7 +135,8 @@ export default function Absence() {
       .eq("user_id", userId)
       .gte("datum", startOfMonth)
       .lte("datum", endStr)
-      .in("taetigkeit", ["Urlaub", "Krankenstand", "Fortbildung", "ZA", "Zeitausgleich", "Feiertag", "Schule"])
+      .not("taetigkeit", "like", "Rüstzeit%")
+      .not("taetigkeit", "eq", "Arbeit")
       .order("datum", { ascending: false });
 
     if (data) {
@@ -149,6 +153,10 @@ export default function Absence() {
     }
     if (startDate > endDate) {
       toast({ title: "Das Von-Datum muss vor dem Bis-Datum liegen", variant: "destructive" });
+      return;
+    }
+    if (absenceType === "sonstiges" && !customAbsenceReason.trim()) {
+      toast({ title: "Bitte einen Grund eingeben", variant: "destructive" });
       return;
     }
     if (workingDays === 0) {
@@ -219,7 +227,7 @@ export default function Absence() {
           entries.push({
             user_id: currentUserId,
             datum: dateStr,
-            taetigkeit: capitalizeType(absenceType),
+            taetigkeit: capitalizeType(absenceType, customAbsenceReason),
             stunden: hoursForDay,
             start_time: "07:00",
             end_time: isFriday ? "14:00" : "15:00",
@@ -536,6 +544,19 @@ export default function Absence() {
                   )}
                 </CardContent>
               </Card>
+            )}
+
+            {/* Eigener Grund (sonstiges only) */}
+            {absenceType === "sonstiges" && (
+              <div className="space-y-2">
+                <Label htmlFor="custom-reason">Grund eingeben</Label>
+                <Input
+                  id="custom-reason"
+                  value={customAbsenceReason}
+                  onChange={(e) => setCustomAbsenceReason(e.target.value)}
+                  placeholder="z.B. Behördengang, Umzug, ..."
+                />
+              </div>
             )}
 
             {/* Krankmeldung Upload (krankenstand only) */}
