@@ -387,6 +387,21 @@ const TimeTracking = () => {
       // Re-number positions
       return filtered.map((t, i) => ({ ...t, position: i + 1 }));
     });
+    // Clean up stunden in all mitarbeiter rows - re-map positions
+    setMitarbeiterRows((prev) =>
+      prev.map((row) => {
+        const newStunden: Record<number, string | number> = {};
+        const oldPositions = taetigkeiten
+          .filter((t) => t.position !== position)
+          .map((t) => t.position);
+        oldPositions.forEach((oldPos, newIdx) => {
+          if (row.stunden[oldPos] != null) {
+            newStunden[newIdx + 1] = row.stunden[oldPos];
+          }
+        });
+        return { ...row, stunden: newStunden };
+      })
+    );
   };
 
   // -------------------------------------------------------------------------
@@ -1209,7 +1224,15 @@ const TimeTracking = () => {
                 <Input
                   type="date"
                   value={datum}
-                  onChange={(e) => setDatum(e.target.value)}
+                  onChange={(e) => {
+                    setDatum(e.target.value);
+                    // Reset stunden when date changes (new day = fresh start)
+                    if (!editingBerichtId) {
+                      setMitarbeiterRows((prev) =>
+                        prev.map((row) => ({ ...row, stunden: {} }))
+                      );
+                    }
+                  }}
                   className="w-auto"
                 />
               </div>
