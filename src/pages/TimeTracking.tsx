@@ -135,8 +135,8 @@ const TimeTracking = () => {
   const [objekt, setObjekt] = useState("");
   const [ankunftZeit, setAnkunftZeit] = useState("07:00");
   const [abfahrtZeit, setAbfahrtZeit] = useState("16:00");
-  const [pauseVon, setPauseVon] = useState("11:00");
-  const [pauseBis, setPauseBis] = useState("11:30");
+  const [pauseVon, setPauseVon] = useState("12:00");
+  const [pauseBis, setPauseBis] = useState("12:30");
   const [wetter, setWetter] = useState("");
   const [schmutzzulageAlle, setSchmutzzulageAlle] = useState(false);
   const [regenSchichtAlle, setRegenSchichtAlle] = useState(false);
@@ -856,8 +856,8 @@ const TimeTracking = () => {
     setObjekt("");
     setAnkunftZeit("07:00");
     setAbfahrtZeit("16:00");
-    setPauseVon("11:00");
-    setPauseBis("11:30");
+    setPauseVon("12:00");
+    setPauseBis("12:30");
     setWetter("");
     setSchmutzzulageAlle(false);
     setRegenSchichtAlle(false);
@@ -896,8 +896,8 @@ const TimeTracking = () => {
       setObjekt(b.objekt || "");
       setAnkunftZeit(b.ankunft_zeit || "07:00");
       setAbfahrtZeit(b.abfahrt_zeit || "16:00");
-      setPauseVon(b.pause_von || "11:00");
-      setPauseBis(b.pause_bis || "11:30");
+      setPauseVon(b.pause_von || "12:00");
+      setPauseBis(b.pause_bis || "12:30");
       setWetter(b.wetter || "");
       setSchmutzzulageAlle(b.schmutzzulage_alle || false);
       setRegenSchichtAlle(b.regen_schicht_alle || false);
@@ -1577,20 +1577,7 @@ const TimeTracking = () => {
                                 )
                               }
                             />
-                            {row.istFahrer && (
-                              <Input
-                                type="number"
-                                step="0.25"
-                                min="0"
-                                inputMode="decimal"
-                                className="h-7 w-12 text-center text-xs px-0.5"
-                                value={row.fahrerStunden}
-                                onChange={(e) =>
-                                  updateMitarbeiterField(row.id, "fahrerStunden", e.target.value)
-                                }
-                                placeholder="alle"
-                              />
-                            )}
+                            {/* F = nur Toggle, keine Stunden-Eingabe */}
                           </div>
                         </td>
                         {/* W - Werkstatt */}

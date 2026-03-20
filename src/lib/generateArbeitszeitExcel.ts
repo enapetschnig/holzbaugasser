@@ -55,11 +55,12 @@ export async function generateArbeitszeitExcel(options: ExportOptions) {
 
   const berichtIds = (berichtMitarbeiter || []).map((bm: any) => bm.bericht_id);
   let projektMap: Record<string, string> = {}; // datum -> projekt name
+  let pauseMap: Record<string, { von: string; bis: string }> = {}; // datum -> pause times
 
   if (berichtIds.length > 0) {
     const { data: berichte } = await supabase
       .from("leistungsberichte" as any)
-      .select("id, datum, projekt_id")
+      .select("id, datum, projekt_id, pause_von, pause_bis")
       .in("id", berichtIds)
       .gte("datum", monthStart)
       .lte("datum", monthEnd);
@@ -76,6 +77,9 @@ export async function generateArbeitszeitExcel(options: ExportOptions) {
         (berichte as any[]).forEach((b: any) => {
           if (b.projekt_id && projNameMap[b.projekt_id]) {
             projektMap[b.datum] = projNameMap[b.projekt_id];
+          }
+          if (b.pause_von && b.pause_bis) {
+            pauseMap[b.datum] = { von: b.pause_von.slice(0, 5), bis: b.pause_bis.slice(0, 5) };
           }
         });
       }
@@ -165,20 +169,29 @@ export async function generateArbeitszeitExcel(options: ExportOptions) {
     let nachmittagEnde = "";
 
     if (hours > 0) {
+      // Use pause from Leistungsbericht if available, else default 12:00-12:30
+      const berichtPause = pauseMap[dateStr];
+      const pVon = berichtPause?.von || "12:00";
+      const pBis = berichtPause?.bis || "12:30";
+      const pVonH = parseInt(pVon.split(":")[0]) + parseInt(pVon.split(":")[1]) / 60;
+      const pBisH = parseInt(pBis.split(":")[0]) + parseInt(pBis.split(":")[1]) / 60;
+      const pauseDuration = pBisH - pVonH;
+      const morningHours = pVonH - 7; // From 07:00 to pause start
+
       vormittagBeginn = "07:00";
-      if (hours <= 5) {
-        // Only morning
+      if (hours <= morningHours) {
+        // Only morning, no pause needed
         vormittagEnde = timeFromHours(7, hours);
         pause = "";
         nachmittagBeginn = "";
         nachmittagEnde = vormittagEnde;
       } else {
-        // Morning + afternoon
-        vormittagEnde = "12:00";
-        pause = "12:00 - 13:00";
-        nachmittagBeginn = "13:00";
-        const afternoonHours = hours - 5; // 5h morning
-        nachmittagEnde = timeFromHours(13, afternoonHours);
+        // Morning + pause + afternoon
+        vormittagEnde = pVon;
+        pause = `${pVon} - ${pBis}`;
+        nachmittagBeginn = pBis;
+        const afternoonHours = hours - morningHours;
+        nachmittagEnde = timeFromHours(pBisH, afternoonHours);
       }
     }
 
