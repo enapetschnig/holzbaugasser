@@ -207,11 +207,12 @@ const TimeTracking = () => {
     [pauseVon, pauseBis]
   );
 
-  // Positions tagged as schmutz or regen (Zulagen - don't count as work hours)
+  // Positions tagged as schmutz (only Zulagen - don't count as work hours)
+  // Regen IS work hours (Wetterschicht), just marked differently
   const zulagePositions = useMemo(() => {
     const set = new Set<number>();
     for (const t of taetigkeiten) {
-      if (t.tag === "schmutz" || t.tag === "regen") set.add(t.position);
+      if (t.tag === "schmutz") set.add(t.position);
     }
     return set;
   }, [taetigkeiten]);
