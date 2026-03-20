@@ -25,6 +25,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { getMonthlyTargetHours, getWorkingDaysInMonth, getTargetHoursForDate } from "@/lib/workingHours";
 import { generateStundenauswertungPDF, StundenauswertungPDFData } from "@/lib/generateStundenauswertungPDF";
 import { generateLeistungsberichtPDF, LeistungsberichtPDFData } from "@/lib/generateLeistungsberichtPDF";
+import { generateArbeitszeitExcel } from "@/lib/generateArbeitszeitExcel";
 import { format, parseISO } from "date-fns";
 import { de } from "date-fns/locale";
 
@@ -940,6 +941,56 @@ export default function HoursReport() {
   };
 
   // -------------------------------------------------------------------------
+  // Excel Export (Arbeitszeit pro Mitarbeiter)
+  // -------------------------------------------------------------------------
+  const [excelExporting, setExcelExporting] = useState(false);
+
+  const handleExportExcel = async () => {
+    if (gridEmployee === "all") {
+      toast({ variant: "destructive", title: "Bitte einen Mitarbeiter auswählen", description: "Die Arbeitszeit-Excel wird pro Mitarbeiter erstellt." });
+      return;
+    }
+    setExcelExporting(true);
+    try {
+      const profile = profileMap[gridEmployee];
+      if (!profile) return;
+      const name = `${profile.nachname} ${profile.vorname}`;
+      await generateArbeitszeitExcel({
+        userId: gridEmployee,
+        userName: name,
+        year: gridYear,
+        month: gridMonth,
+        weeklyHours: employeeSollMap[gridEmployee] ?? null,
+      });
+      toast({ title: "Excel heruntergeladen" });
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Fehler beim Export", description: err.message });
+    } finally {
+      setExcelExporting(false);
+    }
+  };
+
+  const handleExportExcelAll = async () => {
+    setExcelExporting(true);
+    try {
+      for (const profile of profiles) {
+        const name = `${profile.nachname} ${profile.vorname}`;
+        await generateArbeitszeitExcel({
+          userId: profile.id,
+          userName: name,
+          year: gridYear,
+          month: gridMonth,
+          weeklyHours: employeeSollMap[profile.id] ?? null,
+        });
+      }
+      toast({ title: `${profiles.length} Excel-Dateien heruntergeladen` });
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Fehler beim Export", description: err.message });
+    } finally {
+      setExcelExporting(false);
+    }
+  };
+
   // PDF Export (A3)
   // -------------------------------------------------------------------------
 
@@ -1144,6 +1195,28 @@ export default function HoursReport() {
                     <Download className="w-4 h-4 mr-2" />
                     PDF ohne ZA
                   </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-10"
+                    onClick={handleExportExcel}
+                    disabled={excelExporting}
+                  >
+                    <FileSpreadsheet className="w-4 h-4 mr-2" />
+                    {excelExporting ? "Exportiere..." : "Arbeitszeit Excel"}
+                  </Button>
+                  {gridEmployee === "all" && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-10"
+                      onClick={handleExportExcelAll}
+                      disabled={excelExporting}
+                    >
+                      <FileSpreadsheet className="w-4 h-4 mr-2" />
+                      {excelExporting ? "Exportiere..." : "Alle Excel"}
+                    </Button>
+                  )}
                 </div>
 
                 {/* Grid */}
