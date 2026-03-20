@@ -467,15 +467,20 @@ const TimeTracking = () => {
       setShowMitarbeiterDialog(false);
       return;
     }
-    const newRows: MitarbeiterRow[] = Array.from(selectedNewMitarbeiter).map(
-      (profileId) => ({
-        ...createEmptyMitarbeiterRow(),
-        mitarbeiterId: profileId,
-      })
-    );
     setMitarbeiterRows((prev) => {
       // Remove the initial empty row if it exists and has no mitarbeiterId
       const cleaned = prev.filter((r) => r.mitarbeiterId !== "");
+      // If "gleiche Stunden" is active, copy first row's stunden to new rows
+      const firstStunden = gleicheStundenFuerAlle && cleaned.length > 0
+        ? { ...cleaned[0].stunden }
+        : { 1: 0.5 };
+      const newRows: MitarbeiterRow[] = Array.from(selectedNewMitarbeiter).map(
+        (profileId) => ({
+          ...createEmptyMitarbeiterRow(),
+          mitarbeiterId: profileId,
+          stunden: { ...firstStunden },
+        })
+      );
       return [...cleaned, ...newRows];
     });
     setShowMitarbeiterDialog(false);
