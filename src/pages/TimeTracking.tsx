@@ -1852,18 +1852,6 @@ const TimeTracking = () => {
           </CardContent>
         </Card>
 
-        {/* ---------- BAUVORHABEN FERTIGGESTELLT ---------- */}
-        <div className="flex items-center gap-2">
-          <Checkbox
-            id="fertiggestellt"
-            checked={fertiggestellt}
-            onCheckedChange={(v) => setFertiggestellt(v === true)}
-          />
-          <Label htmlFor="fertiggestellt" className="text-sm cursor-pointer font-medium">
-            Bauvorhaben fertiggestellt
-          </Label>
-        </div>
-
         {/* ---------- SICHERHEITSHINWEIS ---------- */}
         <Card className="bg-muted">
           <CardContent className="pt-4">
