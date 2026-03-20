@@ -53,15 +53,17 @@ function AppContent() {
     const checkUserExists = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
-      // Try to get user from auth - if deleted, this will fail
       const { error } = await supabase.auth.getUser();
       if (error) {
-        // User was deleted - force logout
-        await supabase.auth.signOut();
-        window.location.href = "/auth";
+        // Only logout on auth errors (user deleted/token invalid), not network errors
+        const status = (error as any)?.status;
+        if (status === 401 || status === 403 || error.message?.includes("User not found")) {
+          await supabase.auth.signOut();
+          window.location.href = "/auth";
+        }
       }
     };
-    const interval = setInterval(checkUserExists, 30000); // Every 30s
+    const interval = setInterval(checkUserExists, 120000); // Every 2 min
     return () => clearInterval(interval);
   }, []);
 

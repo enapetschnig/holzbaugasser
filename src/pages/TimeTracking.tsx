@@ -51,6 +51,7 @@ type Profile = {
 type Taetigkeit = {
   position: number;
   bezeichnung: string;
+  tag?: "werkstatt" | "schmutz" | "regen";
 };
 
 type MitarbeiterRow = {
@@ -351,6 +352,19 @@ const TimeTracking = () => {
     const nextPos = taetigkeiten.length + 1;
     setTaetigkeiten((prev) => [...prev, { position: nextPos, bezeichnung: "" }]);
   };
+
+  const addZulage = (type: "werkstatt" | "schmutz" | "regen") => {
+    if (taetigkeiten.length >= 8) return;
+    const labels: Record<string, string> = {
+      werkstatt: "Werkstatt",
+      schmutz: "Schmutzzulage",
+      regen: "Regen",
+    };
+    const nextPos = taetigkeiten.length + 1;
+    setTaetigkeiten((prev) => [...prev, { position: nextPos, bezeichnung: labels[type], tag: type }]);
+  };
+
+  const [showZulageMenu, setShowZulageMenu] = useState(false);
 
   const removeTaetigkeit = (position: number) => {
     if (taetigkeiten.length <= 1) return;
@@ -666,13 +680,13 @@ const TimeTracking = () => {
       const berichtId = (berichtData as any).id;
 
       // 2. Build final taetigkeiten list with auto-fills
-      const finalTaetigkeiten: { position: number; bezeichnung: string }[] = [];
+      const finalTaetigkeiten: { position: number; bezeichnung: string; tag?: string }[] = [];
       for (const t of taetigkeiten) {
         const bez = t.position === 1
           ? pos1Text
           : t.bezeichnung.trim();
         if (bez) {
-          finalTaetigkeiten.push({ position: t.position, bezeichnung: bez });
+          finalTaetigkeiten.push({ position: t.position, bezeichnung: bez, tag: t.tag });
         }
       }
 
@@ -680,7 +694,7 @@ const TimeTracking = () => {
       const pausePos = finalTaetigkeiten.length + 1;
       finalTaetigkeiten.push({ position: pausePos, bezeichnung: pauseText });
 
-      // 3. Create taetigkeiten records
+      // 3. Create taetigkeiten records (with tag)
       const { data: taetigkeitenData, error: taetigkeitenError } = await supabase
         .from("leistungsbericht_taetigkeiten" as any)
         .insert(
@@ -688,6 +702,7 @@ const TimeTracking = () => {
             bericht_id: berichtId,
             position: t.position,
             bezeichnung: t.bezeichnung,
+            tag: t.tag || null,
           }))
         )
         .select("id, position");
@@ -700,21 +715,45 @@ const TimeTracking = () => {
         positionToTaetigkeitId[t.position] = t.id;
       }
 
-      // 4. Create mitarbeiter records
+      // 4. Create mitarbeiter records - compute W/SCH/R flags from tagged activities
       const activeMitarbeiter = mitarbeiterRows.filter((r) => r.mitarbeiterId);
-      const mitarbeiterInserts = activeMitarbeiter.map((r) => ({
-        bericht_id: berichtId,
-        mitarbeiter_id: r.mitarbeiterId,
-        ist_fahrer: r.istFahrer,
-        ist_werkstatt: r.istWerkstatt,
-        schmutzzulage: r.schmutzzulage,
-        regen_schicht: r.regenSchicht,
-        fahrer_stunden: r.fahrerStunden ? parseFloat(r.fahrerStunden) : null,
-        werkstatt_stunden: r.werkstattStunden ? parseFloat(r.werkstattStunden) : null,
-        schmutzzulage_stunden: r.schmutzzulageStunden ? parseFloat(r.schmutzzulageStunden) : null,
-        regen_stunden: r.regenStunden ? parseFloat(r.regenStunden) : null,
-        summe_stunden: sumStunden(r),
-      }));
+
+      // Build tag-to-positions map
+      const tagPositions: Record<string, number[]> = {};
+      for (const t of taetigkeiten) {
+        if (t.tag) {
+          if (!tagPositions[t.tag]) tagPositions[t.tag] = [];
+          tagPositions[t.tag].push(t.position);
+        }
+      }
+
+      const mitarbeiterInserts = activeMitarbeiter.map((r) => {
+        // Calculate hours per tag from the stunden matrix
+        let werkstattH = 0, schmutzH = 0, regenH = 0;
+        for (const [posStr, rawH] of Object.entries(r.stunden)) {
+          const pos = Number(posStr);
+          const h = parseStunden(rawH);
+          if (h > 0) {
+            if (tagPositions.werkstatt?.includes(pos)) werkstattH += h;
+            if (tagPositions.schmutz?.includes(pos)) schmutzH += h;
+            if (tagPositions.regen?.includes(pos)) regenH += h;
+          }
+        }
+
+        return {
+          bericht_id: berichtId,
+          mitarbeiter_id: r.mitarbeiterId,
+          ist_fahrer: r.istFahrer,
+          ist_werkstatt: werkstattH > 0,
+          schmutzzulage: schmutzH > 0,
+          regen_schicht: regenH > 0,
+          fahrer_stunden: null,
+          werkstatt_stunden: werkstattH > 0 ? werkstattH : null,
+          schmutzzulage_stunden: schmutzH > 0 ? schmutzH : null,
+          regen_stunden: regenH > 0 ? regenH : null,
+          summe_stunden: sumStunden(r),
+        };
+      });
 
       const { error: mitarbeiterError } = await supabase
         .from("leistungsbericht_mitarbeiter" as any)
@@ -921,6 +960,7 @@ const TimeTracking = () => {
         const mapped = manualT.map((t: any) => ({
           position: t.position,
           bezeichnung: t.bezeichnung,
+          tag: t.tag || undefined,
         }));
         setTaetigkeiten(
           mapped.length > 0
@@ -1308,23 +1348,22 @@ const TimeTracking = () => {
                 <span className="w-8 text-center font-mono text-sm font-bold text-muted-foreground shrink-0">
                   {t.position}.
                 </span>
-                {t.position === 1 ? (
-                  <Input
-                    value={t.bezeichnung}
-                    onChange={(e) => updateTaetigkeit(t.position, e.target.value)}
-                    placeholder={pos1Text}
-                    className="flex-1"
-                  />
-                ) : (
-                  <Input
-                    value={t.bezeichnung}
-                    onChange={(e) =>
-                      updateTaetigkeit(t.position, e.target.value)
-                    }
-                    placeholder={`Tätigkeit ${t.position}...`}
-                    className="flex-1"
-                  />
+                {t.tag && (
+                  <Badge variant="outline" className={cn(
+                    "shrink-0 text-[10px] px-1.5",
+                    t.tag === "werkstatt" && "border-blue-300 text-blue-700 bg-blue-50",
+                    t.tag === "schmutz" && "border-amber-300 text-amber-700 bg-amber-50",
+                    t.tag === "regen" && "border-cyan-300 text-cyan-700 bg-cyan-50",
+                  )}>
+                    {t.tag === "werkstatt" ? "W" : t.tag === "schmutz" ? "SCH" : "R"}
+                  </Badge>
                 )}
+                <Input
+                  value={t.bezeichnung}
+                  onChange={(e) => updateTaetigkeit(t.position, e.target.value)}
+                  placeholder={t.position === 1 ? pos1Text : `Tätigkeit ${t.position}...`}
+                  className="flex-1"
+                />
                 {taetigkeiten.length > 1 && (
                   <Button
                     variant="ghost"
@@ -1338,9 +1377,9 @@ const TimeTracking = () => {
               </div>
             ))}
 
-            {/* + Zeile Button */}
+            {/* + Zeile Buttons */}
             {taetigkeiten.length < 8 && (
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <span className="w-8 shrink-0" />
                 <Button
                   variant="outline"
@@ -1351,6 +1390,42 @@ const TimeTracking = () => {
                   <Plus className="h-4 w-4 mr-1" />
                   Tätigkeit
                 </Button>
+                <div className="relative">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-9 border-dashed"
+                    onClick={() => setShowZulageMenu(!showZulageMenu)}
+                  >
+                    <Plus className="h-4 w-4 mr-1" />
+                    Zulage
+                  </Button>
+                  {showZulageMenu && (
+                    <div className="absolute top-full left-0 mt-1 z-50 bg-white border rounded-lg shadow-lg p-1 min-w-[160px]">
+                      <button
+                        className="w-full text-left px-3 py-2 text-sm rounded hover:bg-muted flex items-center gap-2"
+                        onClick={() => { addZulage("werkstatt"); setShowZulageMenu(false); }}
+                      >
+                        <span className="w-5 text-center font-bold text-blue-600 text-xs">W</span>
+                        Werkstatt
+                      </button>
+                      <button
+                        className="w-full text-left px-3 py-2 text-sm rounded hover:bg-muted flex items-center gap-2"
+                        onClick={() => { addZulage("schmutz"); setShowZulageMenu(false); }}
+                      >
+                        <span className="w-5 text-center font-bold text-amber-600 text-xs">SCH</span>
+                        Schmutzzulage
+                      </button>
+                      <button
+                        className="w-full text-left px-3 py-2 text-sm rounded hover:bg-muted flex items-center gap-2"
+                        onClick={() => { addZulage("regen"); setShowZulageMenu(false); }}
+                      >
+                        <span className="w-5 text-center font-bold text-cyan-600 text-xs">R</span>
+                        Regen
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 
@@ -1380,6 +1455,17 @@ const TimeTracking = () => {
             </div>
           </CardHeader>
           <CardContent>
+            {/* Anleitung */}
+            <details className="mb-4 text-sm">
+              <summary className="cursor-pointer text-muted-foreground hover:text-foreground font-medium">
+                Anleitung anzeigen
+              </summary>
+              <div className="mt-2 p-3 bg-muted rounded-lg space-y-1 text-xs text-muted-foreground">
+                <p><strong>F</strong> (Fahrer) — Häkchen setzen wenn der Mitarbeiter gefahren ist</p>
+                <p><strong>W</strong> (Werkstatt), <strong>SCH</strong> (Schmutzzulage), <strong>R</strong> (Regen) — über den Button <em>+ Zulage</em> bei den Tätigkeiten hinzufügen und die Stunden pro Mitarbeiter eintragen</p>
+                <p>Die Stundenspalten entsprechen den Tätigkeiten oben (1, 2, 3, ...)</p>
+              </div>
+            </details>
             {/* Gleiche Stunden toggle */}
             <div className="flex items-center gap-3 mb-4">
               <Switch
@@ -1430,44 +1516,11 @@ const TimeTracking = () => {
                       </div>
                     )}
 
-                    {/* Flags: F nur Checkbox, W/SCH/R mit Stunden */}
+                    {/* Flags: Nur F (Fahrer) als Toggle */}
                     <div className="flex flex-wrap gap-x-4 gap-y-2">
                       <label className="flex items-center gap-2 text-sm font-medium">
                         <Checkbox checked={row.istFahrer} onCheckedChange={(v) => updateMitarbeiterField(row.id, "istFahrer", v === true)} />
                         Fahrer
-                      </label>
-                      <label className="flex items-center gap-2 text-sm">
-                        <Checkbox checked={row.istWerkstatt} onCheckedChange={(v) => updateMitarbeiterField(row.id, "istWerkstatt", v === true)} />
-                        Werk
-                        {row.istWerkstatt && (
-                          <Input type="number" step="0.5" min="0" inputMode="decimal"
-                            className="h-8 w-14 text-center text-sm"
-                            value={row.werkstattStunden}
-                            onChange={(e) => updateMitarbeiterField(row.id, "werkstattStunden", e.target.value)}
-                            placeholder="h" />
-                        )}
-                      </label>
-                      <label className="flex items-center gap-2 text-sm">
-                        <Checkbox checked={row.schmutzzulage} onCheckedChange={(v) => updateMitarbeiterField(row.id, "schmutzzulage", v === true)} />
-                        Schmutzzulage
-                        {row.schmutzzulage && (
-                          <Input type="number" step="0.5" min="0" inputMode="decimal"
-                            className="h-8 w-14 text-center text-sm"
-                            value={row.schmutzzulageStunden}
-                            onChange={(e) => updateMitarbeiterField(row.id, "schmutzzulageStunden", e.target.value)}
-                            placeholder="h" />
-                        )}
-                      </label>
-                      <label className="flex items-center gap-2 text-sm">
-                        <Checkbox checked={row.regenSchicht} onCheckedChange={(v) => updateMitarbeiterField(row.id, "regenSchicht", v === true)} />
-                        Regen
-                        {row.regenSchicht && (
-                          <Input type="number" step="0.5" min="0" inputMode="decimal"
-                            className="h-8 w-14 text-center text-sm"
-                            value={row.regenStunden}
-                            onChange={(e) => updateMitarbeiterField(row.id, "regenStunden", e.target.value)}
-                            placeholder="h" />
-                        )}
                       </label>
                     </div>
 
@@ -1509,28 +1562,34 @@ const TimeTracking = () => {
                     <th className="sticky left-0 z-10 bg-muted/50 text-left px-2 py-2 font-medium whitespace-nowrap min-w-[160px]">
                       Name
                     </th>
-                    <th className="px-1 py-2 font-medium text-center min-w-[60px] text-xs">
+                    <th className="px-1 py-2 font-medium text-center min-w-[50px] text-xs">
                       Fahrer
-                    </th>
-                    <th className="px-1 py-2 font-medium text-center min-w-[60px] text-xs">
-                      Werkstatt
-                    </th>
-                    <th className="px-1 py-2 font-medium text-center min-w-[60px] text-xs">
-                      Schmutz
-                    </th>
-                    <th className="px-1 py-2 font-medium text-center min-w-[60px] text-xs">
-                      Regen
                     </th>
                     {taetigkeiten.map((t) => (
                       <th
                         key={t.position}
-                        className="px-1 py-2 font-medium text-center w-16"
+                        className={cn(
+                          "px-1 py-2 font-medium text-center w-16",
+                          t.tag === "werkstatt" && "bg-blue-50",
+                          t.tag === "schmutz" && "bg-amber-50",
+                          t.tag === "regen" && "bg-cyan-50",
+                        )}
                         title={
                           t.bezeichnung ||
                           (t.position === 1 ? pos1Text : `Tätigkeit ${t.position}`)
                         }
                       >
-                        {t.position}
+                        <div className="text-xs">{t.position}</div>
+                        {t.tag && (
+                          <div className={cn(
+                            "text-[9px] font-bold",
+                            t.tag === "werkstatt" && "text-blue-600",
+                            t.tag === "schmutz" && "text-amber-600",
+                            t.tag === "regen" && "text-cyan-600",
+                          )}>
+                            {t.tag === "werkstatt" ? "W" : t.tag === "schmutz" ? "SCH" : "R"}
+                          </div>
+                        )}
                       </th>
                     ))}
                     <th className="px-2 py-2 font-medium text-center whitespace-nowrap min-w-[80px]">
@@ -1580,93 +1639,7 @@ const TimeTracking = () => {
                             {/* F = nur Toggle, keine Stunden-Eingabe */}
                           </div>
                         </td>
-                        {/* W - Werkstatt */}
-                        <td className="px-1 py-1.5 text-center">
-                          <div className="flex items-center justify-center gap-0.5">
-                            <Checkbox
-                              checked={row.istWerkstatt}
-                              onCheckedChange={(v) =>
-                                updateMitarbeiterField(
-                                  row.id,
-                                  "istWerkstatt",
-                                  v === true
-                                )
-                              }
-                            />
-                            {row.istWerkstatt && (
-                              <Input
-                                type="number"
-                                step="0.25"
-                                min="0"
-                                inputMode="decimal"
-                                className="h-7 w-12 text-center text-xs px-0.5"
-                                value={row.werkstattStunden}
-                                onChange={(e) =>
-                                  updateMitarbeiterField(row.id, "werkstattStunden", e.target.value)
-                                }
-                                placeholder="alle"
-                              />
-                            )}
-                          </div>
-                        </td>
-                        {/* S - Schmutzzulage */}
-                        <td className="px-1 py-1.5 text-center">
-                          <div className="flex items-center justify-center gap-0.5">
-                            <Checkbox
-                              checked={row.schmutzzulage}
-                              onCheckedChange={(v) =>
-                                updateMitarbeiterField(
-                                  row.id,
-                                  "schmutzzulage",
-                                  v === true
-                                )
-                              }
-                            />
-                            {row.schmutzzulage && (
-                              <Input
-                                type="number"
-                                step="0.25"
-                                min="0"
-                                inputMode="decimal"
-                                className="h-7 w-12 text-center text-xs px-0.5"
-                                value={row.schmutzzulageStunden}
-                                onChange={(e) =>
-                                  updateMitarbeiterField(row.id, "schmutzzulageStunden", e.target.value)
-                                }
-                                placeholder="alle"
-                              />
-                            )}
-                          </div>
-                        </td>
-                        {/* R - Regen/Wetterschicht */}
-                        <td className="px-1 py-1.5 text-center">
-                          <div className="flex items-center justify-center gap-0.5">
-                            <Checkbox
-                              checked={row.regenSchicht}
-                              onCheckedChange={(v) =>
-                                updateMitarbeiterField(
-                                  row.id,
-                                  "regenSchicht",
-                                  v === true
-                                )
-                              }
-                            />
-                            {row.regenSchicht && (
-                              <Input
-                                type="number"
-                                step="0.25"
-                                min="0"
-                                inputMode="decimal"
-                                className="h-7 w-12 text-center text-xs px-0.5"
-                                value={row.regenStunden}
-                                onChange={(e) =>
-                                  updateMitarbeiterField(row.id, "regenStunden", e.target.value)
-                                }
-                                placeholder="alle"
-                              />
-                            )}
-                          </div>
-                        </td>
+                        {/* W/SCH/R removed - now handled via Tätigkeiten with tags */}
                         {/* Hours per activity */}
                         {taetigkeiten.map((t) => (
                           <td key={t.position} className="px-1 py-1.5 text-center">
