@@ -1399,7 +1399,7 @@ const TimeTracking = () => {
                     onClick={() => setShowZulageMenu(!showZulageMenu)}
                   >
                     <Plus className="h-4 w-4 mr-1" />
-                    Zulage
+                    Schmutz / Regen / Werkstatt
                   </Button>
                   {showZulageMenu && (
                     <div className="absolute top-full left-0 mt-1 z-50 bg-white border rounded-lg shadow-lg p-1 min-w-[160px]">
@@ -1429,6 +1429,10 @@ const TimeTracking = () => {
                 </div>
               </div>
             )}
+
+            <p className="text-xs text-muted-foreground ml-8">
+              Schmutzzulage, Regen oder Werkstatt? Bitte über den Button oben hinzufügen — nicht als Tätigkeit reinschreiben.
+            </p>
 
             {/* Auto-displayed Pause info */}
             <div className="flex items-center gap-2 opacity-60">
@@ -1463,8 +1467,8 @@ const TimeTracking = () => {
               </summary>
               <div className="mt-2 p-3 bg-muted rounded-lg space-y-1 text-xs text-muted-foreground">
                 <p><strong>F</strong> (Fahrer) — Häkchen setzen wenn der Mitarbeiter gefahren ist</p>
-                <p><strong>W</strong> (Werkstatt), <strong>SCH</strong> (Schmutzzulage), <strong>R</strong> (Regen) — über den Button <em>+ Zulage</em> bei den Tätigkeiten hinzufügen und die Stunden pro Mitarbeiter eintragen</p>
-                <p>Die Stundenspalten entsprechen den Tätigkeiten oben (1, 2, 3, ...)</p>
+                <p>Die Stundenspalten (1, 2, 3, ...) entsprechen den Tätigkeiten oben</p>
+                <p>Schmutzzulage, Regen und Werkstatt werden oben bei den Tätigkeiten über den Button hinzugefügt — die Stunden dort wirken sich nicht auf die Arbeitszeit aus (Zulagen)</p>
               </div>
             </details>
             {/* Gleiche Stunden toggle */}
