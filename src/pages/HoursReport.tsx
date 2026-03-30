@@ -603,12 +603,10 @@ export default function HoursReport() {
       .order("name");
     setBerichteProjects(projectsData || []);
 
-    // Load berichte
+    // Load berichte (without FK join - projekt_id can be null)
     const { data, error } = await supabase
       .from("leistungsberichte" as any)
-      .select(
-        "id, datum, objekt, projekt_id, erstellt_von, archived, projects:projekt_id(name)"
-      )
+      .select("id, datum, objekt, projekt_id, erstellt_von, archived")
       .gte("datum", berichteStartDate)
       .lte("datum", berichteEndDate)
       .order("datum", { ascending: false });
@@ -617,6 +615,14 @@ export default function HoursReport() {
       console.error("Error loading berichte:", error);
       setBerichteLoading(false);
       return;
+    }
+
+    // Load project names separately
+    const projektIds = [...new Set(data.map((b: any) => b.projekt_id).filter(Boolean))];
+    const projektNameMap: Record<string, string> = {};
+    if (projektIds.length > 0) {
+      const { data: projData } = await supabase.from("projects").select("id, name").in("id", projektIds);
+      if (projData) projData.forEach((p: any) => { projektNameMap[p.id] = p.name; });
     }
 
     // Load mitarbeiter counts and total hours
@@ -637,7 +643,7 @@ export default function HoursReport() {
         id: b.id,
         datum: b.datum,
         objekt: b.objekt || null,
-        projekt_name: b.projects?.name || "-",
+        projekt_name: b.projekt_id ? (projektNameMap[b.projekt_id] || "-") : "-",
         ersteller_name: erstellerProfile
           ? `${erstellerProfile.vorname} ${erstellerProfile.nachname}`
           : "-",
