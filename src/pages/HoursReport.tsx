@@ -834,7 +834,7 @@ export default function HoursReport() {
     });
   };
 
-  const handleViewBerichtPDF = async (berichtId: string) => {
+  const handleViewBerichtPDF = async (berichtId: string, withOvertime: boolean = true) => {
     try {
       // Load bericht data
       const { data: bericht } = await supabase
@@ -852,7 +852,7 @@ export default function HoursReport() {
 
       const { data: taetigkeitenData } = await supabase
         .from("leistungsbericht_taetigkeiten" as any)
-        .select("position, bezeichnung")
+        .select("position, bezeichnung, tag")
         .eq("bericht_id", berichtId)
         .order("position");
 
@@ -930,6 +930,33 @@ export default function HoursReport() {
         anmerkungen: b.anmerkungen || "",
         fertiggestellt: b.fertiggestellt || false,
       };
+
+      // Ohne ZA: Stunden auf Regelarbeitszeit kürzen
+      if (!withOvertime) {
+        const dow = new Date(b.datum).getDay();
+        const tagesMax = dow === 5 ? 7 : 8; // Fr=7h, sonst=8h
+        // Positions with schmutz-Tag are Zulagen (don't count as work time)
+        const zulagenPositions = new Set(
+          (taetigkeitenData || []).filter((t: any) => t.tag === "schmutz").map((t: any) => t.position)
+        );
+
+        for (const ma of pdfData.mitarbeiter) {
+          const arbeitsStunden = ma.stunden
+            .filter(s => !zulagenPositions.has(s.position))
+            .reduce((sum, s) => sum + s.stunden, 0);
+
+          if (arbeitsStunden > tagesMax) {
+            const faktor = tagesMax / arbeitsStunden;
+            for (const s of ma.stunden) {
+              if (!zulagenPositions.has(s.position)) {
+                s.stunden = Math.round(s.stunden * faktor * 2) / 2; // auf 0.5 runden
+              }
+            }
+            ma.summe = ma.stunden.reduce((sum, s) => sum + s.stunden, 0);
+          }
+        }
+        pdfData.gesamtstunden = pdfData.mitarbeiter.reduce((s, m) => s + m.summe, 0);
+      }
 
       const blob = await generateLeistungsberichtPDF(pdfData);
       const url = URL.createObjectURL(blob);
@@ -1707,14 +1734,24 @@ export default function HoursReport() {
                               {b.total_stunden.toFixed(1)} h
                             </td>
                             <td className="border-b px-3 py-2 text-center">
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => handleViewBerichtPDF(b.id)}
-                              >
-                                <Download className="w-3.5 h-3.5 mr-1" />
-                                PDF
-                              </Button>
+                              <div className="flex gap-1 justify-center">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleViewBerichtPDF(b.id, true)}
+                                >
+                                  <Download className="w-3.5 h-3.5 mr-1" />
+                                  mit ZA
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleViewBerichtPDF(b.id, false)}
+                                >
+                                  <Download className="w-3.5 h-3.5 mr-1" />
+                                  ohne ZA
+                                </Button>
+                              </div>
                             </td>
                           </tr>
                         ))}
