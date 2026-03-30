@@ -278,13 +278,13 @@ const TimeTracking = () => {
         .order("name"),
       supabase
         .from("profiles")
-        .select("id, vorname, nachname")
+        .select("id, vorname, nachname, is_hidden")
         .eq("is_active", true)
         .order("nachname"),
     ]);
 
     if (projectsRes.data) setProjects(projectsRes.data);
-    if (profilesRes.data) setProfiles(profilesRes.data);
+    if (profilesRes.data) setProfiles(profilesRes.data.filter((p: any) => !p.is_hidden));
   }, []);
 
   useEffect(() => {

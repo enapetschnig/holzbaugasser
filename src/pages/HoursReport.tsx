@@ -387,12 +387,12 @@ export default function HoursReport() {
 
     const { data } = await supabase
       .from("profiles")
-      .select("id, vorname, nachname")
+      .select("id, vorname, nachname, is_hidden")
       .eq("is_active", true)
       .order("nachname");
     if (data) {
-      // Filter out administrators and projektleiter
-      const filtered = data.filter((p) => !excludeIds.has(p.id));
+      // Filter out administrators, projektleiter, and hidden profiles
+      const filtered = data.filter((p) => !excludeIds.has(p.id) && !(p as any).is_hidden);
       setProfiles(filtered);
       const map: Record<string, Profile> = {};
       filtered.forEach((p) => {
