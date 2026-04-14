@@ -43,7 +43,9 @@ const Projects = () => {
   const [showNewDialog, setShowNewDialog] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [isVorarbeiter, setIsVorarbeiter] = useState(false);
-  const canCreateProjects = isAdmin || isVorarbeiter;
+  const [isProjektleiter, setIsProjektleiter] = useState(false);
+  const canCreateProjects = isAdmin || isVorarbeiter || isProjektleiter;
+  const canManageProjects = isAdmin || isProjektleiter;
   const [searchQuery, setSearchQuery] = useState("");
   const [newProject, setNewProject] = useState({
     name: "",
@@ -134,6 +136,7 @@ const Projects = () => {
 
     setIsAdmin(data?.role === "administrator");
     setIsVorarbeiter(data?.role === "vorarbeiter");
+    setIsProjektleiter(data?.role === "projektleiter");
   };
 
   const fetchProjects = async () => {
@@ -566,7 +569,7 @@ const Projects = () => {
                   </p>
                 )}
                 
-                <div className={`grid ${isAdmin ? 'grid-cols-5' : 'grid-cols-2 sm:grid-cols-4'} gap-2 sm:gap-3 mb-4`}>
+                <div className={`grid ${canManageProjects ? 'grid-cols-5' : 'grid-cols-2 sm:grid-cols-4'} gap-2 sm:gap-3 mb-4`}>
                   <div className="flex flex-col items-center gap-1 p-2">
                     <FileText className="w-5 h-5 text-primary" />
                     <span className="text-xs font-medium">Pläne</span>
@@ -588,7 +591,7 @@ const Projects = () => {
                       {project.fileCount?.photos || 0}
                     </span>
                   </div>
-                  {isAdmin && (
+                  {canManageProjects && (
                     <div className="flex flex-col items-center gap-1 p-2">
                       <Lock className="w-5 h-5 text-primary" />
                       <span className="text-xs font-medium">Chef</span>
@@ -652,7 +655,7 @@ const Projects = () => {
                   <p className="text-xs text-muted-foreground">
                     Aktualisiert: {formatDate(project.updated_at)}
                   </p>
-                  {isAdmin && (
+                  {canManageProjects && (
                     <Button
                       variant={project.status === 'aktiv' ? 'ghost' : 'default'}
                       size="sm"
@@ -770,7 +773,7 @@ const Projects = () => {
                         <p className="text-xs text-muted-foreground">
                           Aktualisiert: {formatDate(project.updated_at)}
                         </p>
-                        {isAdmin && (
+                        {canManageProjects && (
                           <div className="flex gap-2 self-end sm:self-auto">
                             <Button
                               variant="default"
