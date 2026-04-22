@@ -41,11 +41,11 @@ type Project = {
 type Block = {
   id: string;
   datum: string;
-  start_zeit: string | null;
-  end_zeit: string | null;
-  pause_minuten: number;
+  start_time: string | null;
+  end_time: string | null;
+  pause_minutes: number;
   stunden: number;
-  projekt_id: string | null;
+  project_id: string | null;
   projekt_name?: string;
   entry_typ: string;
 };
@@ -197,10 +197,10 @@ export default function ProjektleiterTimeTracking() {
 
     const { data: entries } = await supabase
       .from("time_entries")
-      .select("id, datum, start_zeit, end_zeit, pause_minuten, stunden, projekt_id, entry_typ")
+      .select("id, datum, start_time, end_time, pause_minutes, stunden, project_id, entry_typ, taetigkeit")
       .eq("user_id", userId)
       .eq("datum", date)
-      .order("start_zeit", { ascending: true });
+      .order("start_time", { ascending: true });
 
     if (!entries) {
       setBlocks([]);
@@ -225,15 +225,16 @@ export default function ProjektleiterTimeTracking() {
           taetigkeit: (e as any).taetigkeit || "",
         });
       } else if ((e as any).entry_typ === "projektleiter") {
+        const pid = (e as any).project_id;
         plBlocks.push({
           id: e.id,
           datum: e.datum,
-          start_zeit: (e as any).start_zeit,
-          end_zeit: (e as any).end_zeit,
-          pause_minuten: (e as any).pause_minuten || 0,
+          start_time: (e as any).start_time,
+          end_time: (e as any).end_time,
+          pause_minutes: (e as any).pause_minutes || 0,
           stunden: parseFloat(e.stunden as any) || 0,
-          projekt_id: e.projekt_id || null,
-          projekt_name: e.projekt_id ? projMap[e.projekt_id] : undefined,
+          project_id: pid || null,
+          projekt_name: pid ? projMap[pid] : undefined,
           entry_typ: (e as any).entry_typ,
         });
       }
@@ -290,10 +291,10 @@ export default function ProjektleiterTimeTracking() {
 
   const openEditBlock = (b: Block) => {
     setEditingBlock(b);
-    setStartZeit(b.start_zeit?.substring(0, 5) || "07:00");
-    setEndZeit(b.end_zeit?.substring(0, 5) || "16:30");
-    setPauseMin(b.pause_minuten);
-    setProjektId(b.projekt_id || "none");
+    setStartZeit(b.start_time?.substring(0, 5) || "07:00");
+    setEndZeit(b.end_time?.substring(0, 5) || "16:30");
+    setPauseMin(b.pause_minutes);
+    setProjektId(b.project_id || "none");
     setDialogOpen(true);
   };
 
@@ -329,10 +330,10 @@ export default function ProjektleiterTimeTracking() {
         ? blocks.filter((b) => b.id !== editingBlock.id)
         : blocks;
       const overlapping = otherBlocks.filter((b) => {
-        if (!b.start_zeit || !b.end_zeit) return false;
+        if (!b.start_time || !b.end_time) return false;
         return blocksOverlap(
           { start: startZeit, end: endZeit },
-          { start: b.start_zeit.substring(0, 5), end: b.end_zeit.substring(0, 5) }
+          { start: b.start_time.substring(0, 5), end: b.end_time.substring(0, 5) }
         );
       });
       if (overlapping.length > 0) {
@@ -375,11 +376,11 @@ export default function ProjektleiterTimeTracking() {
         const { error } = await supabase
           .from("time_entries")
           .update({
-            start_zeit: startZeit,
-            end_zeit: endZeit,
-            pause_minuten: pauseMin,
+            start_time: startZeit,
+            end_time: endZeit,
+            pause_minutes: pauseMin,
             stunden: hours,
-            projekt_id: projId,
+            project_id: projId,
             taetigkeit: taetigkeitText,
           })
           .eq("id", editingBlock.id);
@@ -389,11 +390,11 @@ export default function ProjektleiterTimeTracking() {
         const { error } = await supabase.from("time_entries").insert({
           user_id: userId,
           datum: date,
-          start_zeit: startZeit,
-          end_zeit: endZeit,
-          pause_minuten: pauseMin,
+          start_time: startZeit,
+          end_time: endZeit,
+          pause_minutes: pauseMin,
           stunden: hours,
-          projekt_id: projId,
+          project_id: projId,
           taetigkeit: taetigkeitText,
           entry_typ: "projektleiter",
         });
@@ -420,7 +421,7 @@ export default function ProjektleiterTimeTracking() {
     setConfirmState({
       open: true,
       title: "Block löschen?",
-      message: `${block.start_zeit?.substring(0, 5)} – ${block.end_zeit?.substring(0, 5)} (${formatHours(block.stunden)}) wird gelöscht.`,
+      message: `${block.start_time?.substring(0, 5)} – ${block.end_time?.substring(0, 5)} (${formatHours(block.stunden)}) wird gelöscht.`,
       onConfirm: async () => {
         setConfirmState(null);
         const { error } = await supabase.from("time_entries").delete().eq("id", block.id);
@@ -539,12 +540,12 @@ export default function ProjektleiterTimeTracking() {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-baseline gap-2 flex-wrap">
                     <span className="font-semibold text-base">
-                      {b.start_zeit?.substring(0, 5)} – {b.end_zeit?.substring(0, 5)}
+                      {b.start_time?.substring(0, 5)} – {b.end_time?.substring(0, 5)}
                     </span>
                     <Badge variant="secondary">{formatHours(b.stunden)}</Badge>
-                    {b.pause_minuten > 0 && (
+                    {b.pause_minutes > 0 && (
                       <span className="text-xs text-muted-foreground">
-                        Pause {b.pause_minuten} min
+                        Pause {b.pause_minutes} min
                       </span>
                     )}
                   </div>

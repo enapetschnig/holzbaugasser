@@ -34,11 +34,11 @@ type Block = {
   id: string;
   user_id: string;
   datum: string;
-  start_zeit: string | null;
-  end_zeit: string | null;
-  pause_minuten: number;
+  start_time: string | null;
+  end_time: string | null;
+  pause_minutes: number;
   stunden: number;
-  projekt_id: string | null;
+  project_id: string | null;
 };
 
 function formatHours(h: number): string {
@@ -149,7 +149,7 @@ export default function ProjektleiterAuswertung() {
     const monthEnd = `${year}-${String(month).padStart(2, "0")}-${String(daysInMonth).padStart(2, "0")}`;
     const { data: blocksData } = await supabase
       .from("time_entries")
-      .select("id, user_id, datum, start_zeit, end_zeit, pause_minuten, stunden, projekt_id, entry_typ")
+      .select("id, user_id, datum, start_time, end_time, pause_minutes, stunden, project_id, entry_typ")
       .in("user_id", plIds)
       .eq("entry_typ", "projektleiter")
       .gte("datum", monthStart)
@@ -159,11 +159,11 @@ export default function ProjektleiterAuswertung() {
       id: b.id,
       user_id: b.user_id,
       datum: b.datum,
-      start_zeit: b.start_zeit,
-      end_zeit: b.end_zeit,
-      pause_minuten: b.pause_minuten || 0,
+      start_time: b.start_time,
+      end_time: b.end_time,
+      pause_minutes: b.pause_minutes || 0,
       stunden: parseFloat(b.stunden) || 0,
-      projekt_id: b.projekt_id || null,
+      project_id: b.project_id || null,
     })));
   }, [year, month, daysInMonth]);
 
@@ -226,10 +226,10 @@ export default function ProjektleiterAuswertung() {
 
   const openEditBlock = (block: Block) => {
     setBlockDialog({ open: true, block, userId: block.user_id, date: block.datum });
-    setStartZeit(block.start_zeit?.substring(0, 5) || "07:00");
-    setEndZeit(block.end_zeit?.substring(0, 5) || "16:30");
-    setPauseMin(block.pause_minuten);
-    setProjektId(block.projekt_id || "none");
+    setStartZeit(block.start_time?.substring(0, 5) || "07:00");
+    setEndZeit(block.end_time?.substring(0, 5) || "16:30");
+    setPauseMin(block.pause_minutes);
+    setProjektId(block.project_id || "none");
   };
 
   const saveBlock = async () => {
@@ -247,11 +247,11 @@ export default function ProjektleiterAuswertung() {
       const { error } = await supabase
         .from("time_entries")
         .update({
-          start_zeit: startZeit,
-          end_zeit: endZeit,
-          pause_minuten: pauseMin,
+          start_time: startZeit,
+          end_time: endZeit,
+          pause_minutes: pauseMin,
           stunden: hours,
-          projekt_id: projId,
+          project_id: projId,
           taetigkeit,
         })
         .eq("id", blockDialog.block.id);
@@ -263,11 +263,11 @@ export default function ProjektleiterAuswertung() {
       const { error } = await supabase.from("time_entries").insert({
         user_id: blockDialog.userId,
         datum: blockDialog.date,
-        start_zeit: startZeit,
-        end_zeit: endZeit,
-        pause_minuten: pauseMin,
+        start_time: startZeit,
+        end_time: endZeit,
+        pause_minutes: pauseMin,
         stunden: hours,
-        projekt_id: projId,
+        project_id: projId,
         taetigkeit,
         entry_typ: "projektleiter",
       });
@@ -433,19 +433,19 @@ export default function ProjektleiterAuswertung() {
               <div className="text-center text-muted-foreground py-4">Keine Buchungen</div>
             ) : (
               detailBlocks.map((b) => {
-                const proj = projects.find((p) => p.id === b.projekt_id);
+                const proj = projects.find((p) => p.id === b.project_id);
                 return (
                   <div key={b.id} className="border rounded p-3 flex items-center gap-2">
                     <div className="flex-1">
                       <div className="font-semibold">
-                        {b.start_zeit?.substring(0, 5)} – {b.end_zeit?.substring(0, 5)}{" "}
+                        {b.start_time?.substring(0, 5)} – {b.end_time?.substring(0, 5)}{" "}
                         <Badge variant="secondary" className="ml-1">
                           {formatHours(b.stunden)}h
                         </Badge>
                       </div>
                       <div className="text-xs text-muted-foreground">
                         {proj?.name || "Büro"}
-                        {b.pause_minuten > 0 && ` · Pause ${b.pause_minuten}min`}
+                        {b.pause_minutes > 0 && ` · Pause ${b.pause_minutes}min`}
                       </div>
                     </div>
                     <Button variant="ghost" size="icon" onClick={() => { setDetailDialog(null); openEditBlock(b); }}>

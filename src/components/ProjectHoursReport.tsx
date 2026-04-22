@@ -189,8 +189,8 @@ export default function ProjectHoursReport() {
     // Load Projektleiter-Blöcke für dieses Projekt
     const { data: plData } = await supabase
       .from("time_entries")
-      .select("id, user_id, datum, start_zeit, end_zeit, pause_minuten, stunden, entry_typ, projekt_id")
-      .eq("projekt_id", selectedProjectId)
+      .select("id, user_id, datum, start_time, end_time, pause_minutes, stunden, entry_typ, project_id")
+      .eq("project_id", selectedProjectId)
       .eq("entry_typ", "projektleiter")
       .gte("datum", startDate)
       .lte("datum", endDate)
@@ -206,9 +206,9 @@ export default function ProjectHoursReport() {
           userId: e.user_id,
           employeeName: profile ? `${profile.vorname} ${profile.nachname}` : "?",
           datum: e.datum,
-          startZeit: e.start_zeit,
-          endZeit: e.end_zeit,
-          pauseMin: e.pause_minuten || 0,
+          startZeit: e.start_time,
+          endZeit: e.end_time,
+          pauseMin: e.pause_minutes || 0,
           stunden: parseFloat(e.stunden) || 0,
         };
       });
