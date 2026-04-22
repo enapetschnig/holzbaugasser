@@ -1,8 +1,23 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableFooter,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import {
   Dialog,
   DialogContent,
@@ -14,15 +29,16 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { ChevronLeft, ChevronRight, Plus, Pencil, Trash2 } from "lucide-react";
+import { Download, Pencil, Trash2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { getTagesSoll } from "@/lib/workingHours";
+import * as XLSX from "xlsx-js-style";
+import { format, parseISO } from "date-fns";
+import { de } from "date-fns/locale";
 
 type Profile = {
   id: string;
   vorname: string;
   nachname: string;
-  monats_soll_stunden?: number | null;
 };
 
 type Project = {
@@ -33,478 +49,546 @@ type Project = {
 type Block = {
   id: string;
   user_id: string;
+  user_name: string;
   datum: string;
   start_time: string | null;
   end_time: string | null;
+  pause_start: string | null;
+  pause_end: string | null;
   pause_minutes: number;
   stunden: number;
   project_id: string | null;
+  project_name: string;
 };
 
-function formatHours(h: number): string {
-  if (h === 0) return "";
-  if (h === Math.floor(h)) return `${h}`;
-  return h.toString().replace(".", ",");
+const MONTHS = [
+  "Jänner", "Feber", "März", "April", "Mai", "Juni",
+  "Juli", "August", "September", "Oktober", "November", "Dezember",
+];
+
+function formatTime(t: string | null): string {
+  if (!t) return "";
+  return t.substring(0, 5);
 }
 
 function computeHours(start: string, end: string, pauseMin: number): number {
   if (!start || !end) return 0;
   const [sh, sm] = start.split(":").map(Number);
   const [eh, em] = end.split(":").map(Number);
-  const total = eh * 60 + em - (sh * 60 + sm) - pauseMin;
-  return total > 0 ? Math.round((total / 60) * 100) / 100 : 0;
+  const min = eh * 60 + em - (sh * 60 + sm) - pauseMin;
+  return min > 0 ? Math.round((min / 60) * 100) / 100 : 0;
 }
 
-const MONTHS = ["Jänner", "Feber", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Dezember"];
-const WEEKDAYS_SHORT = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"];
+function pauseMinutesFromTimes(ps: string, pe: string): number {
+  if (!ps || !pe) return 0;
+  const [sh, sm] = ps.split(":").map(Number);
+  const [eh, em] = pe.split(":").map(Number);
+  return Math.max(0, eh * 60 + em - (sh * 60 + sm));
+}
 
 export default function ProjektleiterAuswertung() {
   const { toast } = useToast();
   const today = new Date();
-  const [year, setYear] = useState(today.getFullYear());
-  const [month, setMonth] = useState(today.getMonth() + 1);
 
-  const [projektleiter, setProjektleiter] = useState<Profile[]>([]);
+  // Filters
+  const [startDate, setStartDate] = useState(() =>
+    new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split("T")[0]
+  );
+  const [endDate, setEndDate] = useState(() =>
+    new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().split("T")[0]
+  );
+  const [selectedUserId, setSelectedUserId] = useState<string>("all");
+
+  // Data
+  const [users, setUsers] = useState<Profile[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [blocks, setBlocks] = useState<Block[]>([]);
+  const [loading, setLoading] = useState(false);
 
-  // Day detail dialog
-  const [detailDialog, setDetailDialog] = useState<{
-    open: boolean;
-    userId: string;
-    userName: string;
-    date: string;
-  } | null>(null);
-
-  // Block edit dialog
-  const [blockDialog, setBlockDialog] = useState<{
-    open: boolean;
-    block: Block | null;
-    userId: string;
-    date: string;
-  } | null>(null);
-
-  const [startZeit, setStartZeit] = useState("07:00");
-  const [endZeit, setEndZeit] = useState("16:30");
-  const [pauseMin, setPauseMin] = useState(30);
-  const [projektId, setProjektId] = useState<string>("none");
-
-  const daysInMonth = useMemo(() => new Date(year, month, 0).getDate(), [year, month]);
-  const days = useMemo(() => Array.from({ length: daysInMonth }, (_, i) => i + 1), [daysInMonth]);
+  // Edit dialog
+  const [editBlock, setEditBlock] = useState<Block | null>(null);
+  const [editStart, setEditStart] = useState("");
+  const [editEnd, setEditEnd] = useState("");
+  const [editPauseFrom, setEditPauseFrom] = useState("");
+  const [editPauseTo, setEditPauseTo] = useState("");
+  const [editProjectId, setEditProjectId] = useState<string>("none");
 
   // -----------------------------------------------------------------
-  // Load projektleiter users + their hours
+  // Load users (projektleiter + administrator, exclude hidden)
   // -----------------------------------------------------------------
 
-  const loadData = useCallback(async () => {
-    // 1. Get all projektleiter user IDs
+  const loadUsers = useCallback(async () => {
     const { data: roles } = await supabase
       .from("user_roles")
-      .select("user_id")
-      .eq("role", "projektleiter");
+      .select("user_id, role")
+      .in("role", ["projektleiter", "administrator"]);
 
     if (!roles || roles.length === 0) {
-      setProjektleiter([]);
-      setBlocks([]);
+      setUsers([]);
       return;
     }
 
-    const plIds = roles.map((r) => r.user_id);
-
-    // 2. Load their profiles (skip hidden)
+    const ids = [...new Set(roles.map((r) => r.user_id))];
     const { data: profilesData } = await supabase
       .from("profiles")
-      .select("id, vorname, nachname, is_hidden")
-      .in("id", plIds)
+      .select("id, vorname, nachname, is_active, is_hidden")
+      .in("id", ids)
       .eq("is_active", true);
 
-    const filteredProfiles = (profilesData || []).filter((p: any) => !p.is_hidden);
+    const filtered = (profilesData || []).filter((p: any) => !p.is_hidden);
+    filtered.sort((a, b) => a.nachname.localeCompare(b.nachname));
+    setUsers(filtered);
+  }, []);
 
-    // 3. Load their weekly hours from employees
-    const { data: empData } = await supabase
-      .from("employees")
-      .select("user_id, monats_soll_stunden")
-      .in("user_id", filteredProfiles.map((p) => p.id));
-    const weeklyMap: Record<string, number> = {};
-    (empData || []).forEach((e: any) => {
-      if (e.user_id) weeklyMap[e.user_id] = e.monats_soll_stunden || 40;
-    });
+  // -----------------------------------------------------------------
+  // Load projects
+  // -----------------------------------------------------------------
 
-    const withWeekly = filteredProfiles.map((p: any) => ({
-      ...p,
-      monats_soll_stunden: weeklyMap[p.id] || 40,
-    }));
-    withWeekly.sort((a, b) => a.nachname.localeCompare(b.nachname));
-    setProjektleiter(withWeekly);
-
-    // 4. Load projects
-    const { data: projData } = await supabase
+  const loadProjects = useCallback(async () => {
+    const { data } = await supabase
       .from("projects")
       .select("id, name")
       .order("name");
-    setProjects(projData || []);
-
-    // 5. Load blocks for month
-    const monthStart = `${year}-${String(month).padStart(2, "0")}-01`;
-    const monthEnd = `${year}-${String(month).padStart(2, "0")}-${String(daysInMonth).padStart(2, "0")}`;
-    const { data: blocksData } = await supabase
-      .from("time_entries")
-      .select("id, user_id, datum, start_time, end_time, pause_minutes, stunden, project_id, entry_typ")
-      .in("user_id", plIds)
-      .eq("entry_typ", "projektleiter")
-      .gte("datum", monthStart)
-      .lte("datum", monthEnd);
-
-    setBlocks((blocksData || []).map((b: any) => ({
-      id: b.id,
-      user_id: b.user_id,
-      datum: b.datum,
-      start_time: b.start_time,
-      end_time: b.end_time,
-      pause_minutes: b.pause_minutes || 0,
-      stunden: parseFloat(b.stunden) || 0,
-      project_id: b.project_id || null,
-    })));
-  }, [year, month, daysInMonth]);
-
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
+    setProjects(data || []);
+  }, []);
 
   // -----------------------------------------------------------------
-  // Computed: blocks per user per day
+  // Load blocks for current filters
   // -----------------------------------------------------------------
 
-  const blocksByUserDay = useMemo(() => {
-    const map: Record<string, Record<number, Block[]>> = {};
-    for (const b of blocks) {
-      const day = parseInt(b.datum.substring(8, 10));
-      if (!map[b.user_id]) map[b.user_id] = {};
-      if (!map[b.user_id][day]) map[b.user_id][day] = [];
-      map[b.user_id][day].push(b);
+  const loadBlocks = useCallback(async () => {
+    if (users.length === 0) return;
+
+    setLoading(true);
+    let userIds = users.map((u) => u.id);
+    if (selectedUserId !== "all") {
+      userIds = [selectedUserId];
     }
-    return map;
-  }, [blocks]);
+
+    const { data } = await supabase
+      .from("time_entries")
+      .select("id, user_id, datum, start_time, end_time, pause_start, pause_end, pause_minutes, stunden, project_id, entry_typ")
+      .in("user_id", userIds)
+      .eq("entry_typ", "projektleiter")
+      .gte("datum", startDate)
+      .lte("datum", endDate)
+      .order("datum", { ascending: false })
+      .order("start_time", { ascending: true });
+
+    const userMap: Record<string, string> = {};
+    users.forEach((u) => { userMap[u.id] = `${u.nachname} ${u.vorname}`; });
+
+    const projMap: Record<string, string> = {};
+    projects.forEach((p) => { projMap[p.id] = p.name; });
+
+    const result: Block[] = (data || []).map((e: any) => ({
+      id: e.id,
+      user_id: e.user_id,
+      user_name: userMap[e.user_id] || "?",
+      datum: e.datum,
+      start_time: e.start_time,
+      end_time: e.end_time,
+      pause_start: e.pause_start,
+      pause_end: e.pause_end,
+      pause_minutes: e.pause_minutes || 0,
+      stunden: parseFloat(e.stunden) || 0,
+      project_id: e.project_id || null,
+      project_name: e.project_id ? (projMap[e.project_id] || "Unbekannt") : "Büro",
+    }));
+
+    setBlocks(result);
+    setLoading(false);
+  }, [users, projects, selectedUserId, startDate, endDate]);
+
+  useEffect(() => { loadUsers(); loadProjects(); }, [loadUsers, loadProjects]);
+  useEffect(() => { loadBlocks(); }, [loadBlocks]);
+
+  // -----------------------------------------------------------------
+  // Quick-filter buttons
+  // -----------------------------------------------------------------
+
+  const setThisMonth = () => {
+    const now = new Date();
+    setStartDate(new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split("T")[0]);
+    setEndDate(new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split("T")[0]);
+  };
+  const setLastMonth = () => {
+    const now = new Date();
+    setStartDate(new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().split("T")[0]);
+    setEndDate(new Date(now.getFullYear(), now.getMonth(), 0).toISOString().split("T")[0]);
+  };
+  const setThisYear = () => {
+    const now = new Date();
+    setStartDate(`${now.getFullYear()}-01-01`);
+    setEndDate(`${now.getFullYear()}-12-31`);
+  };
+
+  // -----------------------------------------------------------------
+  // Total per user
+  // -----------------------------------------------------------------
 
   const totalsByUser = useMemo(() => {
-    const map: Record<string, { ist: number; soll: number; diff: number }> = {};
-    for (const pl of projektleiter) {
-      let ist = 0;
-      let soll = 0;
-      const weekly = pl.monats_soll_stunden || 40;
-      const factor = weekly / 40;
-      for (let d = 1; d <= daysInMonth; d++) {
-        const dow = new Date(year, month - 1, d).getDay();
-        const fullSoll = getTagesSoll("projektleiter", dow);
-        soll += fullSoll * factor;
-        const dayBlocks = blocksByUserDay[pl.id]?.[d] || [];
-        ist += dayBlocks.reduce((s, b) => s + b.stunden, 0);
-      }
-      soll = Math.round(soll * 100) / 100;
-      ist = Math.round(ist * 100) / 100;
-      map[pl.id] = { ist, soll, diff: Math.round((ist - soll) * 100) / 100 };
+    const map: Record<string, { name: string; stunden: number; count: number }> = {};
+    for (const b of blocks) {
+      if (!map[b.user_id]) map[b.user_id] = { name: b.user_name, stunden: 0, count: 0 };
+      map[b.user_id].stunden += b.stunden;
+      map[b.user_id].count += 1;
     }
-    return map;
-  }, [projektleiter, blocksByUserDay, year, month, daysInMonth]);
+    return Object.entries(map).map(([uid, d]) => ({ uid, ...d }));
+  }, [blocks]);
+
+  const grandTotal = useMemo(() => blocks.reduce((s, b) => s + b.stunden, 0), [blocks]);
 
   // -----------------------------------------------------------------
-  // Day detail dialog
+  // Excel Export
   // -----------------------------------------------------------------
 
-  const openDayDetail = (userId: string, userName: string, day: number) => {
-    const dateStr = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-    setDetailDialog({ open: true, userId, userName, date: dateStr });
+  const exportToExcel = () => {
+    if (blocks.length === 0) {
+      toast({ variant: "destructive", title: "Keine Daten", description: "Keine Blöcke im gewählten Zeitraum." });
+      return;
+    }
+
+    const label = selectedUserId === "all"
+      ? "Alle Projektleiter"
+      : users.find((u) => u.id === selectedUserId)
+        ? `${users.find((u) => u.id === selectedUserId)!.nachname} ${users.find((u) => u.id === selectedUserId)!.vorname}`
+        : "";
+
+    const rows: any[][] = [
+      ["Projektleiter-Zeiterfassung"],
+      ["Mitarbeiter:", label],
+      ["Zeitraum:", `${format(parseISO(startDate), "dd.MM.yyyy")} – ${format(parseISO(endDate), "dd.MM.yyyy")}`],
+      [],
+      ["Datum", "Wochentag", "Mitarbeiter", "Start", "Ende", "Pause von", "Pause bis", "Stunden", "Projekt"],
+    ];
+
+    for (const b of blocks) {
+      const d = parseISO(b.datum);
+      rows.push([
+        format(d, "dd.MM.yyyy"),
+        format(d, "EEEE", { locale: de }),
+        b.user_name,
+        formatTime(b.start_time),
+        formatTime(b.end_time),
+        formatTime(b.pause_start),
+        formatTime(b.pause_end),
+        b.stunden.toFixed(2).replace(".", ","),
+        b.project_name,
+      ]);
+    }
+
+    rows.push([]);
+    rows.push(["", "", "", "", "", "", "Gesamt", grandTotal.toFixed(2).replace(".", ","), ""]);
+
+    // Per-user totals (nur bei "Alle")
+    if (selectedUserId === "all" && totalsByUser.length > 1) {
+      rows.push([]);
+      rows.push(["Zusammenfassung pro Mitarbeiter:"]);
+      rows.push(["Mitarbeiter", "Buchungen", "Stunden"]);
+      for (const t of totalsByUser) {
+        rows.push([t.name, t.count, t.stunden.toFixed(2).replace(".", ",")]);
+      }
+    }
+
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    ws["!cols"] = [
+      { wch: 12 }, // Datum
+      { wch: 12 }, // Wochentag
+      { wch: 22 }, // Mitarbeiter
+      { wch: 8 },  // Start
+      { wch: 8 },  // Ende
+      { wch: 10 }, // Pause von
+      { wch: 10 }, // Pause bis
+      { wch: 10 }, // Stunden
+      { wch: 30 }, // Projekt
+    ];
+
+    // Header row bold
+    const headerRow = 5;
+    const cols = ["A", "B", "C", "D", "E", "F", "G", "H", "I"];
+    for (const c of cols) {
+      const cell = ws[`${c}${headerRow}`];
+      if (cell) {
+        cell.s = {
+          font: { bold: true },
+          fill: { fgColor: { rgb: "E0E0E0" } },
+          border: {
+            top: { style: "thin", color: { rgb: "000000" } },
+            bottom: { style: "thin", color: { rgb: "000000" } },
+            left: { style: "thin", color: { rgb: "000000" } },
+            right: { style: "thin", color: { rgb: "000000" } },
+          },
+          alignment: { horizontal: "center", vertical: "center" },
+        };
+      }
+    }
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Projektleiter");
+
+    const fileName = `PL_Zeiterfassung_${startDate}_${endDate}${selectedUserId !== "all" ? "_" + label.replace(/\s+/g, "_") : ""}.xlsx`;
+    XLSX.writeFile(wb, fileName);
+
+    toast({ title: "Excel erstellt", description: fileName });
   };
 
-  const openNewBlock = (userId: string, date: string) => {
-    setBlockDialog({ open: true, block: null, userId, date });
-    setStartZeit("07:00");
-    setEndZeit("16:30");
-    setPauseMin(30);
-    setProjektId("none");
+  // -----------------------------------------------------------------
+  // Edit Block
+  // -----------------------------------------------------------------
+
+  const openEdit = (b: Block) => {
+    setEditBlock(b);
+    setEditStart(formatTime(b.start_time));
+    setEditEnd(formatTime(b.end_time));
+    setEditPauseFrom(formatTime(b.pause_start));
+    setEditPauseTo(formatTime(b.pause_end));
+    setEditProjectId(b.project_id || "none");
   };
 
-  const openEditBlock = (block: Block) => {
-    setBlockDialog({ open: true, block, userId: block.user_id, date: block.datum });
-    setStartZeit(block.start_time?.substring(0, 5) || "07:00");
-    setEndZeit(block.end_time?.substring(0, 5) || "16:30");
-    setPauseMin(block.pause_minutes);
-    setProjektId(block.project_id || "none");
-  };
-
-  const saveBlock = async () => {
-    if (!blockDialog) return;
-    const hours = computeHours(startZeit, endZeit, pauseMin);
+  const saveEdit = async () => {
+    if (!editBlock) return;
+    const pauseMin = pauseMinutesFromTimes(editPauseFrom, editPauseTo);
+    const hours = computeHours(editStart, editEnd, pauseMin);
     if (hours <= 0) {
       toast({ variant: "destructive", title: "Ungültig", description: "Stunden ≤ 0" });
       return;
     }
-    const projId = projektId === "none" ? null : projektId;
-    const projName = projId ? projects.find((p) => p.id === projId)?.name : "Büro";
-    const taetigkeit = projId ? `PL: ${projName}` : "PL: Büro";
-
-    if (blockDialog.block) {
-      const { error } = await supabase
-        .from("time_entries")
-        .update({
-          start_time: startZeit,
-          end_time: endZeit,
-          pause_minutes: pauseMin,
-          stunden: hours,
-          project_id: projId,
-          taetigkeit,
-        })
-        .eq("id", blockDialog.block.id);
-      if (error) {
-        toast({ variant: "destructive", title: "Fehler", description: error.message });
-        return;
-      }
-    } else {
-      const { error } = await supabase.from("time_entries").insert({
-        user_id: blockDialog.userId,
-        datum: blockDialog.date,
-        start_time: startZeit,
-        end_time: endZeit,
+    const pid = editProjectId === "none" ? null : editProjectId;
+    const projName = pid ? projects.find((p) => p.id === pid)?.name : "Büro";
+    const { error } = await supabase
+      .from("time_entries")
+      .update({
+        start_time: editStart,
+        end_time: editEnd,
+        pause_start: editPauseFrom || null,
+        pause_end: editPauseTo || null,
         pause_minutes: pauseMin,
         stunden: hours,
-        project_id: projId,
-        taetigkeit,
-        entry_typ: "projektleiter",
-      });
-      if (error) {
-        toast({ variant: "destructive", title: "Fehler", description: error.message });
-        return;
-      }
+        project_id: pid,
+        taetigkeit: pid ? `PL: ${projName}` : "PL: Büro",
+      })
+      .eq("id", editBlock.id);
+    if (error) {
+      toast({ variant: "destructive", title: "Fehler", description: error.message });
+      return;
     }
-
-    toast({ title: "Gespeichert" });
-    setBlockDialog(null);
-    await loadData();
+    toast({ title: "Aktualisiert" });
+    setEditBlock(null);
+    await loadBlocks();
   };
 
-  const deleteBlock = async (blockId: string) => {
-    const { error } = await supabase.from("time_entries").delete().eq("id", blockId);
+  const deleteBlock = async (b: Block) => {
+    if (!confirm(`Block vom ${format(parseISO(b.datum), "dd.MM.yyyy")} (${b.user_name}) löschen?`)) return;
+    const { error } = await supabase.from("time_entries").delete().eq("id", b.id);
     if (error) {
       toast({ variant: "destructive", title: "Fehler", description: error.message });
       return;
     }
     toast({ title: "Gelöscht" });
-    await loadData();
+    await loadBlocks();
   };
 
   // -----------------------------------------------------------------
   // Render
   // -----------------------------------------------------------------
 
-  const shiftMonth = (delta: number) => {
-    let newMonth = month + delta;
-    let newYear = year;
-    if (newMonth > 12) {
-      newMonth = 1;
-      newYear += 1;
-    }
-    if (newMonth < 1) {
-      newMonth = 12;
-      newYear -= 1;
-    }
-    setMonth(newMonth);
-    setYear(newYear);
-  };
-
-  const detailBlocks: Block[] = detailDialog
-    ? blocks.filter((b) => b.user_id === detailDialog.userId && b.datum === detailDialog.date)
-    : [];
-
   return (
-    <Card>
-      <CardHeader>
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-          <CardTitle>Projektleiter-Monatsübersicht</CardTitle>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="icon" onClick={() => shiftMonth(-1)}>
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
-            <div className="text-sm font-medium min-w-[120px] text-center">
-              {MONTHS[month - 1]} {year}
+    <div className="space-y-4">
+      {/* Filter */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Projektleiter-Stunden</CardTitle>
+          <CardDescription>
+            Alle gebuchten Zeitblöcke der Projektleiter und Administratoren
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="space-y-1">
+              <Label>Von</Label>
+              <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
             </div>
-            <Button variant="outline" size="icon" onClick={() => shiftMonth(1)}>
-              <ChevronRight className="h-4 w-4" />
-            </Button>
-          </div>
-        </div>
-      </CardHeader>
-      <CardContent>
-        {projektleiter.length === 0 ? (
-          <div className="text-center text-muted-foreground py-8">
-            Keine Projektleiter aktiv
-          </div>
-        ) : (
-          <div className="overflow-x-auto border rounded-lg">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/40">
-                <tr>
-                  <th className="sticky left-0 bg-muted/40 text-left px-3 py-2 min-w-[180px] border-r z-10">
-                    Mitarbeiter
-                  </th>
-                  {days.map((d) => {
-                    const dow = new Date(year, month - 1, d).getDay();
-                    const isWeekend = dow === 0 || dow === 6;
-                    return (
-                      <th
-                        key={d}
-                        className={`text-center px-1 py-2 min-w-[40px] border-r ${
-                          isWeekend ? "bg-muted/60" : ""
-                        }`}
-                      >
-                        <div className="text-xs">{WEEKDAYS_SHORT[dow]}</div>
-                        <div className="font-semibold">{d}</div>
-                      </th>
-                    );
-                  })}
-                  <th className="text-center px-2 py-2 min-w-[60px] border-r">Soll</th>
-                  <th className="text-center px-2 py-2 min-w-[60px] border-r">Ist</th>
-                  <th className="text-center px-2 py-2 min-w-[60px]">±</th>
-                </tr>
-              </thead>
-              <tbody>
-                {projektleiter.map((pl) => {
-                  const totals = totalsByUser[pl.id] || { ist: 0, soll: 0, diff: 0 };
-                  return (
-                    <tr key={pl.id} className="border-t">
-                      <td className="sticky left-0 bg-background text-left px-3 py-2 font-medium border-r z-10">
-                        {pl.nachname} {pl.vorname}
-                        {pl.monats_soll_stunden !== 40 && (
-                          <Badge variant="outline" className="ml-1 text-xs">
-                            {pl.monats_soll_stunden}h
-                          </Badge>
-                        )}
-                      </td>
-                      {days.map((d) => {
-                        const dow = new Date(year, month - 1, d).getDay();
-                        const isWeekend = dow === 0 || dow === 6;
-                        const dayBlocks = blocksByUserDay[pl.id]?.[d] || [];
-                        const sum = dayBlocks.reduce((s, b) => s + b.stunden, 0);
-                        return (
-                          <td
-                            key={d}
-                            className={`text-center px-1 py-2 border-r cursor-pointer hover:bg-primary/10 ${
-                              isWeekend ? "bg-muted/30" : ""
-                            }`}
-                            onClick={() => openDayDetail(pl.id, `${pl.nachname} ${pl.vorname}`, d)}
-                          >
-                            {sum > 0 ? (
-                              <span className="font-semibold">{formatHours(sum)}</span>
-                            ) : (
-                              <span className="text-muted-foreground">·</span>
-                            )}
-                          </td>
-                        );
-                      })}
-                      <td className="text-center px-2 py-2 border-r">{formatHours(totals.soll)}</td>
-                      <td className="text-center px-2 py-2 border-r font-semibold">{formatHours(totals.ist)}</td>
-                      <td
-                        className={`text-center px-2 py-2 font-semibold ${
-                          totals.diff > 0 ? "text-green-600" : totals.diff < 0 ? "text-orange-500" : ""
-                        }`}
-                      >
-                        {totals.diff > 0 ? "+" : ""}
-                        {formatHours(totals.diff)}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </CardContent>
-
-      {/* Day Detail Dialog */}
-      <Dialog open={!!detailDialog?.open} onOpenChange={(o) => !o && setDetailDialog(null)}>
-        <DialogContent className="sm:max-w-[520px]">
-          <DialogHeader>
-            <DialogTitle>
-              {detailDialog?.userName} · {detailDialog?.date}
-            </DialogTitle>
-            <DialogDescription>Buchungen dieses Tages</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-2">
-            {detailBlocks.length === 0 ? (
-              <div className="text-center text-muted-foreground py-4">Keine Buchungen</div>
-            ) : (
-              detailBlocks.map((b) => {
-                const proj = projects.find((p) => p.id === b.project_id);
-                return (
-                  <div key={b.id} className="border rounded p-3 flex items-center gap-2">
-                    <div className="flex-1">
-                      <div className="font-semibold">
-                        {b.start_time?.substring(0, 5)} – {b.end_time?.substring(0, 5)}{" "}
-                        <Badge variant="secondary" className="ml-1">
-                          {formatHours(b.stunden)}h
-                        </Badge>
-                      </div>
-                      <div className="text-xs text-muted-foreground">
-                        {proj?.name || "Büro"}
-                        {b.pause_minutes > 0 && ` · Pause ${b.pause_minutes}min`}
-                      </div>
-                    </div>
-                    <Button variant="ghost" size="icon" onClick={() => { setDetailDialog(null); openEditBlock(b); }}>
-                      <Pencil className="h-4 w-4" />
-                    </Button>
-                    <Button variant="ghost" size="icon" className="text-destructive" onClick={() => deleteBlock(b.id)}>
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                );
-              })
-            )}
-          </div>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => {
-                if (detailDialog) {
-                  setDetailDialog(null);
-                  openNewBlock(detailDialog.userId, detailDialog.date);
-                }
-              }}
-            >
-              <Plus className="h-4 w-4 mr-2" />
-              Block hinzufügen
-            </Button>
-            <Button onClick={() => setDetailDialog(null)}>Schließen</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Block edit dialog */}
-      <Dialog open={!!blockDialog?.open} onOpenChange={(o) => !o && setBlockDialog(null)}>
-        <DialogContent className="sm:max-w-[480px]">
-          <DialogHeader>
-            <DialogTitle>{blockDialog?.block ? "Block bearbeiten" : "Neuer Block"}</DialogTitle>
-            <DialogDescription>{blockDialog?.date}</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3">
-            <div className="space-y-2">
-              <Label>Start</Label>
-              <Input type="time" value={startZeit} onChange={(e) => setStartZeit(e.target.value)} />
+            <div className="space-y-1">
+              <Label>Bis</Label>
+              <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
             </div>
-            <div className="space-y-2">
-              <Label>Ende</Label>
-              <Input type="time" value={endZeit} onChange={(e) => setEndZeit(e.target.value)} />
-            </div>
-            <div className="space-y-2">
-              <Label>Pause (min)</Label>
-              <Input type="number" min={0} value={pauseMin} onChange={(e) => setPauseMin(parseInt(e.target.value) || 0)} />
-            </div>
-            <div className="space-y-2">
-              <Label>Projekt</Label>
-              <Select value={projektId} onValueChange={setProjektId}>
+            <div className="space-y-1">
+              <Label>Mitarbeiter</Label>
+              <Select value={selectedUserId} onValueChange={setSelectedUserId}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="none">Büro / kein Projekt</SelectItem>
+                  <SelectItem value="all">Alle ({users.length})</SelectItem>
+                  {users.map((u) => (
+                    <SelectItem key={u.id} value={u.id}>
+                      {u.nachname} {u.vorname}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" size="sm" onClick={setThisMonth}>Dieser Monat</Button>
+            <Button variant="outline" size="sm" onClick={setLastMonth}>Letzter Monat</Button>
+            <Button variant="outline" size="sm" onClick={setThisYear}>Dieses Jahr</Button>
+            <div className="flex-1" />
+            <Button onClick={exportToExcel} disabled={blocks.length === 0}>
+              <Download className="h-4 w-4 mr-2" />
+              Excel exportieren
+            </Button>
+          </div>
+
+          {/* Summary */}
+          {blocks.length > 0 && (
+            <div className="flex flex-wrap gap-3 pt-2 border-t">
+              <div className="text-sm">
+                <span className="text-muted-foreground">Blöcke:</span>{" "}
+                <strong>{blocks.length}</strong>
+              </div>
+              <div className="text-sm">
+                <span className="text-muted-foreground">Gesamt:</span>{" "}
+                <strong>{grandTotal.toFixed(2).replace(".", ",")}h</strong>
+              </div>
+              {totalsByUser.length > 1 && (
+                <div className="text-sm">
+                  <span className="text-muted-foreground">Mitarbeiter:</span>{" "}
+                  <strong>{totalsByUser.length}</strong>
+                </div>
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Blocks Table */}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base">Alle Zeitblöcke</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {loading ? (
+            <div className="text-center text-muted-foreground py-8">Lade...</div>
+          ) : blocks.length === 0 ? (
+            <div className="text-center text-muted-foreground py-8">
+              Keine Zeitblöcke im gewählten Zeitraum.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Datum</TableHead>
+                    <TableHead>Mitarbeiter</TableHead>
+                    <TableHead>Start</TableHead>
+                    <TableHead>Ende</TableHead>
+                    <TableHead>Pause</TableHead>
+                    <TableHead className="text-right">Stunden</TableHead>
+                    <TableHead>Projekt</TableHead>
+                    <TableHead className="text-right">Aktionen</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {blocks.map((b) => {
+                    const d = parseISO(b.datum);
+                    const pauseText = b.pause_start && b.pause_end
+                      ? `${formatTime(b.pause_start)}–${formatTime(b.pause_end)}`
+                      : b.pause_minutes > 0
+                        ? `${b.pause_minutes} min`
+                        : "–";
+                    return (
+                      <TableRow key={b.id}>
+                        <TableCell className="whitespace-nowrap">
+                          {format(d, "dd.MM.yyyy")}
+                          <div className="text-xs text-muted-foreground">
+                            {format(d, "EEEE", { locale: de })}
+                          </div>
+                        </TableCell>
+                        <TableCell>{b.user_name}</TableCell>
+                        <TableCell>{formatTime(b.start_time)}</TableCell>
+                        <TableCell>{formatTime(b.end_time)}</TableCell>
+                        <TableCell className="whitespace-nowrap">{pauseText}</TableCell>
+                        <TableCell className="text-right font-medium">
+                          {b.stunden.toFixed(2).replace(".", ",")}
+                        </TableCell>
+                        <TableCell className="max-w-[200px] truncate">
+                          {b.project_id ? (
+                            b.project_name
+                          ) : (
+                            <Badge variant="outline">Büro</Badge>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex justify-end gap-1">
+                            <Button variant="ghost" size="icon" onClick={() => openEdit(b)} className="h-7 w-7">
+                              <Pencil className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button variant="ghost" size="icon" onClick={() => deleteBlock(b)} className="h-7 w-7 text-destructive">
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+                <TableFooter>
+                  <TableRow>
+                    <TableCell colSpan={5} className="font-bold">Gesamt</TableCell>
+                    <TableCell className="text-right font-bold">
+                      {grandTotal.toFixed(2).replace(".", ",")}
+                    </TableCell>
+                    <TableCell colSpan={2}></TableCell>
+                  </TableRow>
+                </TableFooter>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Edit Dialog */}
+      <Dialog open={!!editBlock} onOpenChange={(o) => !o && setEditBlock(null)}>
+        <DialogContent className="sm:max-w-[480px]">
+          <DialogHeader>
+            <DialogTitle>Zeitblock bearbeiten</DialogTitle>
+            <DialogDescription>
+              {editBlock && `${editBlock.user_name} – ${format(parseISO(editBlock.datum), "EEEE, dd.MM.yyyy", { locale: de })}`}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label>Start</Label>
+                <Input type="time" value={editStart} onChange={(e) => setEditStart(e.target.value)} />
+              </div>
+              <div className="space-y-1">
+                <Label>Ende</Label>
+                <Input type="time" value={editEnd} onChange={(e) => setEditEnd(e.target.value)} />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label>Pause von</Label>
+                <Input type="time" value={editPauseFrom} onChange={(e) => setEditPauseFrom(e.target.value)} />
+              </div>
+              <div className="space-y-1">
+                <Label>Pause bis</Label>
+                <Input type="time" value={editPauseTo} onChange={(e) => setEditPauseTo(e.target.value)} />
+              </div>
+            </div>
+            <div className="space-y-1">
+              <Label>Projekt</Label>
+              <Select value={editProjectId} onValueChange={setEditProjectId}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">🏢 Büro / kein Projekt</SelectItem>
                   {projects.map((p) => (
                     <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
                   ))}
@@ -512,16 +596,19 @@ export default function ProjektleiterAuswertung() {
               </Select>
             </div>
             <div className="bg-muted/50 rounded p-2 text-center">
-              <div className="text-xs text-muted-foreground">Berechnet</div>
-              <div className="font-bold">{computeHours(startZeit, endZeit, pauseMin)}h</div>
+              <div className="text-xs text-muted-foreground">Neue Stunden</div>
+              <div className="font-bold">
+                {computeHours(editStart, editEnd, pauseMinutesFromTimes(editPauseFrom, editPauseTo)).toFixed(2).replace(".", ",")}h
+              </div>
             </div>
           </div>
+
           <DialogFooter>
-            <Button variant="outline" onClick={() => setBlockDialog(null)}>Abbrechen</Button>
-            <Button onClick={saveBlock}>Speichern</Button>
+            <Button variant="outline" onClick={() => setEditBlock(null)}>Abbrechen</Button>
+            <Button onClick={saveEdit}>Speichern</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </Card>
+    </div>
   );
 }
