@@ -455,7 +455,7 @@ export default function Index() {
                 </div>
                 <CardTitle className="text-lg sm:text-xl">Meine Zeiterfassung</CardTitle>
                 <CardDescription className="text-sm">
-                  Arbeitszeiten in Blöcken erfassen
+                  Arbeitszeitblöcke erfassen: Start, Ende, Pause & Projekt (40h/Woche)
                 </CardDescription>
               </CardHeader>
               <CardContent>

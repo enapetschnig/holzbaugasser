@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { ChevronLeft, ChevronRight, Plus, Trash2, Pencil, Clock, Building2, AlertTriangle } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus, Trash2, Pencil, Clock, Building2, AlertTriangle, Info } from "lucide-react";
 import { format } from "date-fns";
 import { de } from "date-fns/locale";
 import { PageHeader } from "@/components/PageHeader";
@@ -23,6 +23,7 @@ import {
   DialogFooter,
   DialogDescription,
 } from "@/components/ui/dialog";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
@@ -447,6 +448,30 @@ export default function ProjektleiterTimeTracking() {
       <PageHeader title="Meine Zeiterfassung" />
 
       <main className="container mx-auto px-3 sm:px-4 py-4 sm:py-6 max-w-3xl space-y-4">
+        {/* Info-Box: Kurze Erklärung */}
+        <Accordion type="single" collapsible>
+          <AccordionItem value="info" className="border rounded-lg bg-muted/30 px-3">
+            <AccordionTrigger className="text-sm hover:no-underline">
+              <div className="flex items-center gap-2">
+                <Info className="h-4 w-4 text-primary" />
+                <span>Wie funktioniert die Zeiterfassung?</span>
+              </div>
+            </AccordionTrigger>
+            <AccordionContent className="text-sm text-muted-foreground space-y-2 pb-3">
+              <p>
+                Erfasse deine Arbeitszeit in <strong>Blöcken</strong>: je Block Start- und Endzeit, Pause und optional ein Projekt.
+                Du kannst pro Tag beliebig viele Blöcke anlegen (z.B. Baustelle vormittags + Büro nachmittags).
+              </p>
+              <ul className="list-disc ml-5 space-y-1">
+                <li><strong>40 Stunden/Woche</strong>: Mo–Fr je 8h. Alles darüber geht auf dein Zeitkonto.</li>
+                <li><strong>Pause</strong>: 30 min Standard, zählt nicht als Arbeitszeit.</li>
+                <li><strong>Projekt auswählen</strong>: damit die Stunden in der Projektauswertung erscheinen. "Büro" wenn kein Projekt.</li>
+                <li><strong>Urlaub / Krankenstand / ZA</strong>: über Menü "Abwesenheit" eintragen, nicht hier.</li>
+              </ul>
+            </AccordionContent>
+          </AccordionItem>
+        </Accordion>
+
         {/* Datum-Navigation */}
         <Card>
           <CardContent className="pt-4 pb-4">
