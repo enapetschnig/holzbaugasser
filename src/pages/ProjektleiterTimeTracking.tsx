@@ -10,6 +10,9 @@ import {
   Info,
   Save,
   Wand2,
+  Pencil,
+  Coffee,
+  Building2,
 } from "lucide-react";
 import { format } from "date-fns";
 import { de } from "date-fns/locale";
@@ -165,6 +168,7 @@ export default function ProjektleiterTimeTracking() {
   const [deletedIds, setDeletedIds] = useState<string[]>([]);
   const [absences, setAbsences] = useState<AbsenceEntry[]>([]);
   const [saving, setSaving] = useState(false);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const [confirmState, setConfirmState] = useState<{
     title: string;
@@ -344,15 +348,17 @@ export default function ProjektleiterTimeTracking() {
           projectId: last.projectId,
         }
       : { ...defaultBlock(), startTime: "", endTime: "" };
+    const newId = randomId();
     setBlocks((prev) => [
       ...prev,
       {
-        localId: randomId(),
+        localId: newId,
         dbId: null,
         ...suggested,
         dirty: true,
       },
     ]);
+    setExpandedId(newId);
   };
 
   const removeBlock = (localId: string) => {
@@ -508,6 +514,7 @@ export default function ProjektleiterTimeTracking() {
       }
 
       toast({ title: "Gespeichert", description: `${formatH(istStunden)} für ${dateLabel}` });
+      setExpandedId(null);
       await loadBlocks();
     } catch (err: any) {
       console.error("Save failed:", err);
@@ -659,11 +666,67 @@ export default function ProjektleiterTimeTracking() {
             {blocks.map((b, idx) => {
               const hours = blockHours(b);
               const err = validateBlock(b);
+              const isExpanded = expandedId === b.localId || b.dirty || !b.dbId;
+              const projName = b.projectId
+                ? projects.find((p) => p.id === b.projectId)?.name
+                : null;
+
+              if (!isExpanded) {
+                // Gespeicherte Blöcke: kompakte View-Ansicht
+                return (
+                  <div
+                    key={b.localId}
+                    className="border rounded-lg p-3 flex items-center gap-3 bg-muted/20 hover:bg-muted/40 transition-colors"
+                  >
+                    <Badge variant="outline" className="font-mono shrink-0">#{idx + 1}</Badge>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-baseline gap-2 flex-wrap">
+                        <span className="font-semibold text-base">
+                          {b.startTime} – {b.endTime}
+                        </span>
+                        <Badge variant="secondary">{formatH(hours)}</Badge>
+                      </div>
+                      <div className="flex items-center gap-3 text-xs text-muted-foreground mt-0.5 flex-wrap">
+                        <span className="flex items-center gap-1">
+                          <Building2 className="h-3 w-3" />
+                          {projName || "Büro"}
+                        </span>
+                        {b.pauseStart && b.pauseEnd && (
+                          <span className="flex items-center gap-1">
+                            <Coffee className="h-3 w-3" />
+                            Pause {b.pauseStart}–{b.pauseEnd}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => setExpandedId(b.localId)}
+                      className="h-8 w-8"
+                      aria-label="Bearbeiten"
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => removeBlock(b.localId)}
+                      className="text-destructive hover:text-destructive h-8 w-8"
+                      aria-label="Löschen"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                );
+              }
+
+              // Expandierte Edit-Ansicht
               return (
                 <div
                   key={b.localId}
                   className={`border rounded-lg p-3 space-y-3 ${
-                    err && b.dirty ? "border-destructive/50" : ""
+                    err && b.dirty ? "border-destructive/50" : "border-primary/30"
                   }`}
                 >
                   <div className="flex items-center justify-between">
@@ -672,15 +735,37 @@ export default function ProjektleiterTimeTracking() {
                       <span className="font-semibold">
                         {hours > 0 ? formatH(hours) : "—"}
                       </span>
+                      {b.dirty && b.dbId && (
+                        <Badge variant="outline" className="text-orange-600 border-orange-300 text-xs">
+                          geändert
+                        </Badge>
+                      )}
+                      {!b.dbId && (
+                        <Badge variant="outline" className="text-blue-600 border-blue-300 text-xs">
+                          neu
+                        </Badge>
+                      )}
                     </div>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => removeBlock(b.localId)}
-                      className="text-destructive hover:text-destructive h-8 w-8"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                    <div className="flex items-center gap-1">
+                      {b.dbId && !b.dirty && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setExpandedId(null)}
+                          className="h-8 text-xs"
+                        >
+                          Fertig
+                        </Button>
+                      )}
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => removeBlock(b.localId)}
+                        className="text-destructive hover:text-destructive h-8 w-8"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">
