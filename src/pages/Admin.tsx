@@ -274,15 +274,11 @@ export default function Admin() {
 
     // 3) Für Projektleiter: Default 40h Wochenstunden in employees setzen
     if (selectedRole === "projektleiter") {
-      const { data: existingEmp } = await supabase
-        .from("employees")
-        .select("id, monats_soll_stunden")
-        .eq("user_id", userId)
-        .maybeSingle();
-      if (!existingEmp) {
-        await supabase.from("employees").insert({ user_id: userId, monats_soll_stunden: 40 });
-      } else if (!existingEmp.monats_soll_stunden) {
-        await supabase.from("employees").update({ monats_soll_stunden: 40 }).eq("id", existingEmp.id);
+      const emp = await ensureEmployeeForUser(userId);
+      if (emp && !emp.monats_soll_stunden) {
+        await supabase.from("employees")
+          .update({ monats_soll_stunden: 40 })
+          .eq("id", emp.id);
       }
     }
 

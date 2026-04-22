@@ -34,6 +34,7 @@ import { useToast } from "@/hooks/use-toast";
 import * as XLSX from "xlsx-js-style";
 import { format, parseISO } from "date-fns";
 import { de } from "date-fns/locale";
+import { localDateString } from "@/lib/workingHours";
 
 type Profile = {
   id: string;
@@ -92,10 +93,10 @@ export default function ProjektleiterAuswertung() {
 
   // Filters
   const [startDate, setStartDate] = useState(() =>
-    new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split("T")[0]
+    localDateString(new Date(today.getFullYear(), today.getMonth(), 1))
   );
   const [endDate, setEndDate] = useState(() =>
-    new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().split("T")[0]
+    localDateString(new Date(today.getFullYear(), today.getMonth() + 1, 0))
   );
   const [selectedUserId, setSelectedUserId] = useState<string>("all");
 
@@ -209,13 +210,13 @@ export default function ProjektleiterAuswertung() {
 
   const setThisMonth = () => {
     const now = new Date();
-    setStartDate(new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split("T")[0]);
-    setEndDate(new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split("T")[0]);
+    setStartDate(localDateString(new Date(now.getFullYear(), now.getMonth(), 1)));
+    setEndDate(localDateString(new Date(now.getFullYear(), now.getMonth() + 1, 0)));
   };
   const setLastMonth = () => {
     const now = new Date();
-    setStartDate(new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().split("T")[0]);
-    setEndDate(new Date(now.getFullYear(), now.getMonth(), 0).toISOString().split("T")[0]);
+    setStartDate(localDateString(new Date(now.getFullYear(), now.getMonth() - 1, 1)));
+    setEndDate(localDateString(new Date(now.getFullYear(), now.getMonth(), 0)));
   };
   const setThisYear = () => {
     const now = new Date();

@@ -75,6 +75,17 @@ export function isNonWorkingDay(date: Date): boolean {
 export type Role = "administrator" | "projektleiter" | "vorarbeiter" | "mitarbeiter";
 
 /**
+ * Returns the local date as "YYYY-MM-DD" string (no timezone conversion).
+ * Avoid using toISOString() for dates — it converts to UTC and shifts midnight.
+ */
+export function localDateString(d: Date = new Date()): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+/**
  * Tages-Soll abhängig von Rolle.
  * - Projektleiter: 40h/Woche (Mo-Fr je 8h)
  * - Mitarbeiter/Vorarbeiter: 39h/Woche (Mo-Do 8h, Fr 7h)

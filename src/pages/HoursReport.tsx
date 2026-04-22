@@ -17,7 +17,7 @@ import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import ProjectHoursReport from "@/components/ProjectHoursReport";
 import ProjektleiterAuswertung from "@/components/ProjektleiterAuswertung";
-import { FileSpreadsheet, Building2, ClipboardList, Loader2, Download, X, Clock, Pencil, Trash2 } from "lucide-react";
+import { FileSpreadsheet, Building2, ClipboardList, Loader2, Download, X, Clock } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";

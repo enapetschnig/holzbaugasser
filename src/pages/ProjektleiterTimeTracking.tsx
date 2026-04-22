@@ -45,7 +45,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
-import { getTagesSoll } from "@/lib/workingHours";
+import { getTagesSoll, localDateString } from "@/lib/workingHours";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -161,7 +161,7 @@ export default function ProjektleiterTimeTracking() {
   const [userId, setUserId] = useState<string | null>(null);
   const [userRole, setUserRole] = useState<string | null>(null);
   const [weeklyHours, setWeeklyHours] = useState<number>(40);
-  const [date, setDate] = useState(() => new Date().toISOString().split("T")[0]);
+  const [date, setDate] = useState(() => localDateString());
 
   const [projects, setProjects] = useState<Project[]>([]);
   const [blocks, setBlocks] = useState<EditableBlock[]>([]);
@@ -321,10 +321,10 @@ export default function ProjektleiterTimeTracking() {
   const shiftDate = (days: number) => {
     const d = new Date(date + "T00:00:00");
     d.setDate(d.getDate() + days);
-    tryChangeDate(d.toISOString().split("T")[0]);
+    tryChangeDate(localDateString(d));
   };
 
-  const goToday = () => tryChangeDate(new Date().toISOString().split("T")[0]);
+  const goToday = () => tryChangeDate(localDateString());
 
   // -----------------------------------------------------------------
   // Block mutations (local state only — commit via "Speichern")
@@ -466,16 +466,7 @@ export default function ProjektleiterTimeTracking() {
 
     setSaving(true);
     try {
-      // DELETE removed
-      if (deletedIds.length > 0) {
-        const { error } = await supabase
-          .from("time_entries")
-          .delete()
-          .in("id", deletedIds);
-        if (error) throw error;
-      }
-
-      // UPSERT blocks
+      // UPSERT first (INSERTs and UPDATEs). If anything fails, nothing is deleted.
       for (const b of blocks) {
         const hours = blockHours(b);
         const pauseMin = pauseMinutes(b.pauseStart, b.pauseEnd);
@@ -511,6 +502,15 @@ export default function ProjektleiterTimeTracking() {
           });
           if (error) throw error;
         }
+      }
+
+      // DELETE last, only if everything else succeeded
+      if (deletedIds.length > 0) {
+        const { error } = await supabase
+          .from("time_entries")
+          .delete()
+          .in("id", deletedIds);
+        if (error) throw error;
       }
 
       toast({ title: "Gespeichert", description: `${formatH(istStunden)} für ${dateLabel}` });
@@ -582,7 +582,7 @@ export default function ProjektleiterTimeTracking() {
                 <ChevronRight className="h-4 w-4" />
               </Button>
             </div>
-            {date !== new Date().toISOString().split("T")[0] && (
+            {date !== localDateString() && (
               <Button variant="ghost" size="sm" onClick={goToday} className="w-full mt-2">
                 Zurück zu heute
               </Button>

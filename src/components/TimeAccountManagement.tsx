@@ -93,6 +93,11 @@ export default function TimeAccountManagement({ profiles }: TimeAccountManagemen
     const weeklyMap: Record<string, number | null> = {};
     if (employees) employees.forEach((e: any) => { if (e.user_id) weeklyMap[e.user_id] = e.monats_soll_stunden; });
 
+    // Load user roles for correct daily-soll pattern
+    const { data: roles } = await supabase.from("user_roles").select("user_id, role");
+    const roleMap: Record<string, string> = {};
+    if (roles) roles.forEach((r: any) => { roleMap[r.user_id] = r.role; });
+
     // Calculate overtime per user per month (only POSITIVE = Überstunden)
     const monthNames = ["Jänner","Feber","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember"];
     const overtimePerUser: Record<string, number> = {};
@@ -106,11 +111,15 @@ export default function TimeAccountManagement({ profiles }: TimeAccountManagemen
       const monthLabel = `${monthNames[m - 1]} ${currentYear}`;
       const txKey = `Überstunden ${monthLabel}`;
 
-      let monthSoll = 0;
+      // Monthly Soll: MA/VA pattern (Fr=7, sonst=8, Gesamt/Woche=39)
+      //            : PL pattern    (Fr=8, sonst=8, Gesamt/Woche=40)
+      let monthSollMA = 0;  // 39h/week pattern
+      let monthSollPL = 0;  // 40h/week pattern
       for (let d = 1; d <= daysInMonth; d++) {
         const dow = new Date(currentYear, m - 1, d).getDay();
         if (dow === 0 || dow === 6) continue;
-        monthSoll += dow === 5 ? 7 : 8;
+        monthSollMA += dow === 5 ? 7 : 8;
+        monthSollPL += 8;
       }
 
       const monthEntries = entries.filter(e => e.datum >= monthStart && e.datum <= monthEnd);
@@ -121,7 +130,11 @@ export default function TimeAccountManagement({ profiles }: TimeAccountManagemen
 
       for (const [userId, ist] of Object.entries(hoursPerUser)) {
         const weekly = weeklyMap[userId];
-        const soll = weekly != null ? Math.round((weekly / 39) * monthSoll * 10) / 10 : monthSoll;
+        const role = roleMap[userId];
+        const isPL = role === "projektleiter" || role === "administrator";
+        const baseSoll = isPL ? monthSollPL : monthSollMA;
+        const baseWeekly = isPL ? 40 : 39;
+        const soll = weekly != null ? Math.round((weekly / baseWeekly) * baseSoll * 10) / 10 : baseSoll;
         const diff = Math.round((ist - soll) * 100) / 100;
 
         // Only count positive overtime (no minus)
