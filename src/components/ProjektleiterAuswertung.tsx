@@ -29,7 +29,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Download, Pencil, Trash2 } from "lucide-react";
+import { Download, Pencil, Trash2, ChevronLeft, ChevronRight } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import * as XLSX from "xlsx-js-style";
 import { format, parseISO } from "date-fns";
@@ -91,14 +91,20 @@ export default function ProjektleiterAuswertung() {
   const { toast } = useToast();
   const today = new Date();
 
-  // Filters
-  const [startDate, setStartDate] = useState(() =>
-    localDateString(new Date(today.getFullYear(), today.getMonth(), 1))
-  );
-  const [endDate, setEndDate] = useState(() =>
-    localDateString(new Date(today.getFullYear(), today.getMonth() + 1, 0))
-  );
+  // Filters: Monat + Jahr
+  const [year, setYear] = useState<number>(today.getFullYear());
+  const [month, setMonth] = useState<number>(today.getMonth() + 1); // 1-12
   const [selectedUserId, setSelectedUserId] = useState<string>("all");
+
+  // Derived date range for DB query
+  const startDate = useMemo(
+    () => localDateString(new Date(year, month - 1, 1)),
+    [year, month]
+  );
+  const endDate = useMemo(
+    () => localDateString(new Date(year, month, 0)),
+    [year, month]
+  );
 
   // Data
   const [users, setUsers] = useState<Profile[]>([]);
@@ -208,20 +214,19 @@ export default function ProjektleiterAuswertung() {
   // Quick-filter buttons
   // -----------------------------------------------------------------
 
-  const setThisMonth = () => {
-    const now = new Date();
-    setStartDate(localDateString(new Date(now.getFullYear(), now.getMonth(), 1)));
-    setEndDate(localDateString(new Date(now.getFullYear(), now.getMonth() + 1, 0)));
+  const shiftMonth = (delta: number) => {
+    let newMonth = month + delta;
+    let newYear = year;
+    if (newMonth > 12) { newMonth = 1; newYear += 1; }
+    if (newMonth < 1) { newMonth = 12; newYear -= 1; }
+    setMonth(newMonth);
+    setYear(newYear);
   };
-  const setLastMonth = () => {
+
+  const goCurrentMonth = () => {
     const now = new Date();
-    setStartDate(localDateString(new Date(now.getFullYear(), now.getMonth() - 1, 1)));
-    setEndDate(localDateString(new Date(now.getFullYear(), now.getMonth(), 0)));
-  };
-  const setThisYear = () => {
-    const now = new Date();
-    setStartDate(`${now.getFullYear()}-01-01`);
-    setEndDate(`${now.getFullYear()}-12-31`);
+    setMonth(now.getMonth() + 1);
+    setYear(now.getFullYear());
   };
 
   // -----------------------------------------------------------------
@@ -405,15 +410,41 @@ export default function ProjektleiterAuswertung() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {/* Monat + Jahr */}
             <div className="space-y-1">
-              <Label>Von</Label>
-              <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+              <Label>Monat</Label>
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="icon" onClick={() => shiftMonth(-1)} aria-label="Vorheriger Monat">
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <Select value={String(month)} onValueChange={(v) => setMonth(parseInt(v))}>
+                  <SelectTrigger className="flex-1">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {MONTHS.map((m, i) => (
+                      <SelectItem key={i} value={String(i + 1)}>{m}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select value={String(year)} onValueChange={(v) => setYear(parseInt(v))}>
+                  <SelectTrigger className="w-[90px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {Array.from({ length: 5 }, (_, i) => today.getFullYear() - 2 + i).map((y) => (
+                      <SelectItem key={y} value={String(y)}>{y}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button variant="outline" size="icon" onClick={() => shiftMonth(1)} aria-label="Nächster Monat">
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
             </div>
-            <div className="space-y-1">
-              <Label>Bis</Label>
-              <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
-            </div>
+
+            {/* Mitarbeiter */}
             <div className="space-y-1">
               <Label>Mitarbeiter</Label>
               <Select value={selectedUserId} onValueChange={setSelectedUserId}>
@@ -432,10 +463,10 @@ export default function ProjektleiterAuswertung() {
             </div>
           </div>
 
-          <div className="flex flex-wrap gap-2">
-            <Button variant="outline" size="sm" onClick={setThisMonth}>Dieser Monat</Button>
-            <Button variant="outline" size="sm" onClick={setLastMonth}>Letzter Monat</Button>
-            <Button variant="outline" size="sm" onClick={setThisYear}>Dieses Jahr</Button>
+          <div className="flex flex-wrap gap-2 items-center">
+            <Button variant="outline" size="sm" onClick={goCurrentMonth}>
+              Aktueller Monat
+            </Button>
             <div className="flex-1" />
             <Button onClick={exportToExcel} disabled={blocks.length === 0}>
               <Download className="h-4 w-4 mr-2" />
