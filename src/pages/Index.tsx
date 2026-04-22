@@ -443,6 +443,27 @@ export default function Index() {
             </Card>
           )}
 
+          {/* Projektleiter-Zeiterfassung - Nur für Projektleiter + Admin */}
+          {(isProjektleiter || isAdmin) && (
+            <Card
+              className="cursor-pointer hover:shadow-lg transition-all hover:border-primary/50"
+              onClick={() => navigate("/projektleiter-zeiterfassung")}
+            >
+              <CardHeader className="space-y-2 pb-3">
+                <div className="h-12 w-12 rounded-lg bg-accent/10 flex items-center justify-center">
+                  <Clock className="h-6 w-6 text-accent" />
+                </div>
+                <CardTitle className="text-lg sm:text-xl">Meine Zeiterfassung</CardTitle>
+                <CardDescription className="text-sm">
+                  Arbeitszeiten in Blöcken erfassen
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Button className="w-full" size="sm" variant="secondary">Zeit erfassen</Button>
+              </CardContent>
+            </Card>
+          )}
+
           {/* Projekte - Für alle */}
           <Card 
             className="cursor-pointer hover:shadow-lg transition-all hover:border-primary/50" 

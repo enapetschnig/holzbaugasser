@@ -16,7 +16,8 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import ProjectHoursReport from "@/components/ProjectHoursReport";
-import { FileSpreadsheet, Building2, ClipboardList, Loader2, Download, X } from "lucide-react";
+import ProjektleiterAuswertung from "@/components/ProjektleiterAuswertung";
+import { FileSpreadsheet, Building2, ClipboardList, Loader2, Download, X, Clock, Pencil, Trash2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -1134,7 +1135,7 @@ export default function HoursReport() {
 
       <div className="container mx-auto p-4 space-y-6">
         <Tabs defaultValue={isAdmin ? "arbeitszeiterfassung" : "leistungsberichte"} className="w-full">
-          <TabsList className={`grid w-full ${isAdmin ? "grid-cols-3" : "grid-cols-2"}`}>
+          <TabsList className={`grid w-full ${isAdmin ? "grid-cols-4" : "grid-cols-2"}`}>
             {isAdmin && (
             <TabsTrigger value="arbeitszeiterfassung" className="text-xs sm:text-sm">
               <FileSpreadsheet className="w-4 h-4 mr-1 sm:mr-2 shrink-0" />
@@ -1145,6 +1146,12 @@ export default function HoursReport() {
               <ClipboardList className="w-4 h-4 mr-1 sm:mr-2 shrink-0" />
               <span className="truncate">Leistungsberichte</span>
             </TabsTrigger>
+            {isAdmin && (
+            <TabsTrigger value="projektleiter" className="text-xs sm:text-sm">
+              <Clock className="w-4 h-4 mr-1 sm:mr-2 shrink-0" />
+              <span className="truncate">Projektleiter</span>
+            </TabsTrigger>
+            )}
             <TabsTrigger value="projektzeiterfassung" className="text-xs sm:text-sm">
               <Building2 className="w-4 h-4 mr-1 sm:mr-2 shrink-0" />
               <span className="truncate">Projektzeiterfassung</span>
@@ -1792,7 +1799,16 @@ export default function HoursReport() {
           </TabsContent>
 
           {/* ============================================================= */}
-          {/* TAB 3: Projektzeiterfassung (existing component)               */}
+          {/* TAB: Projektleiter-Auswertung                                  */}
+          {/* ============================================================= */}
+          {isAdmin && (
+            <TabsContent value="projektleiter">
+              <ProjektleiterAuswertung />
+            </TabsContent>
+          )}
+
+          {/* ============================================================= */}
+          {/* TAB: Projektzeiterfassung (existing component)                 */}
           {/* ============================================================= */}
           <TabsContent value="projektzeiterfassung">
             <ProjectHoursReport />

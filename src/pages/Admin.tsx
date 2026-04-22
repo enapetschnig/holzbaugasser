@@ -271,7 +271,22 @@ export default function Admin() {
     if (!existingAccount) {
       await supabase.from("time_accounts").insert({ user_id: userId, balance_hours: 0 });
     }
-    // 2) Activate
+
+    // 3) Für Projektleiter: Default 40h Wochenstunden in employees setzen
+    if (selectedRole === "projektleiter") {
+      const { data: existingEmp } = await supabase
+        .from("employees")
+        .select("id, monats_soll_stunden")
+        .eq("user_id", userId)
+        .maybeSingle();
+      if (!existingEmp) {
+        await supabase.from("employees").insert({ user_id: userId, monats_soll_stunden: 40 });
+      } else if (!existingEmp.monats_soll_stunden) {
+        await supabase.from("employees").update({ monats_soll_stunden: 40 }).eq("id", existingEmp.id);
+      }
+    }
+
+    // 4) Activate
     await handleActivateUser(userId, true);
   };
 

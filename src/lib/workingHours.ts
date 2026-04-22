@@ -72,26 +72,44 @@ export function isNonWorkingDay(date: Date): boolean {
   return dayOfWeek === 0 || dayOfWeek === 6;
 }
 
+export type Role = "administrator" | "projektleiter" | "vorarbeiter" | "mitarbeiter";
+
 /**
- * Get target hours for a specific date (Mo-Do: 8h, Fr: 7h, Sa-So: 0h)
+ * Tages-Soll abhängig von Rolle.
+ * - Projektleiter: 40h/Woche (Mo-Fr je 8h)
+ * - Mitarbeiter/Vorarbeiter: 39h/Woche (Mo-Do 8h, Fr 7h)
  */
-export function getTargetHoursForDate(date: Date): number {
-  const day = date.getDay(); // 0=Sun, 1=Mon...6=Sat
-  if (day === 0 || day === 6) return 0; // Weekend
-  if (day === 5) return 7; // Friday
-  return 8; // Mon-Thu
+export function getTagesSoll(role: Role, dow: number): number {
+  if (dow === 0 || dow === 6) return 0; // Wochenende
+  if (role === "projektleiter" || role === "administrator") return 8;
+  return dow === 5 ? 7 : 8;
 }
 
 /**
- * Calculate total target hours for a month
+ * Get target hours for a specific date (Mo-Do: 8h, Fr: 7h, Sa-So: 0h) — for Mitarbeiter/Vorarbeiter
+ * @deprecated Use getTagesSoll(role, dow) instead
  */
-export function getMonthlyTargetHours(year: number, month: number): number {
+export function getTargetHoursForDate(date: Date): number {
+  return getTagesSoll("mitarbeiter", date.getDay());
+}
+
+/**
+ * Calculate total target hours for a month (Mitarbeiter default)
+ */
+export function getMonthlyTargetHours(year: number, month: number, role: Role = "mitarbeiter"): number {
   const daysInMonth = new Date(year, month, 0).getDate();
   let total = 0;
   for (let d = 1; d <= daysInMonth; d++) {
-    total += getTargetHoursForDate(new Date(year, month - 1, d));
+    total += getTagesSoll(role, new Date(year, month - 1, d).getDay());
   }
   return total;
+}
+
+/**
+ * Wochen-Soll je nach Rolle
+ */
+export function getWeeklyTargetHoursByRole(role: Role): number {
+  return role === "projektleiter" || role === "administrator" ? 40 : 39;
 }
 
 /**

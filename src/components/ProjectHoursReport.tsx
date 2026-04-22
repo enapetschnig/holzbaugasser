@@ -36,7 +36,18 @@ export default function ProjectHoursReport() {
   const [selectedProjectId, setSelectedProjectId] = useState<string>("");
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectData, setProjectData] = useState<DetailedProjectEntry[]>([]);
+  const [projektleiterData, setProjektleiterData] = useState<{
+    id: string;
+    userId: string;
+    employeeName: string;
+    datum: string;
+    startZeit: string | null;
+    endZeit: string | null;
+    pauseMin: number;
+    stunden: number;
+  }[]>([]);
   const [totalHours, setTotalHours] = useState(0);
+  const [projektleiterTotal, setProjektleiterTotal] = useState(0);
   const [berichtExtras, setBerichtExtras] = useState<{
     geraete: { datum: string; geraet: string; stunden: number }[];
     materialien: { datum: string; bezeichnung: string; menge: string }[];
@@ -173,6 +184,40 @@ export default function ProjectHoursReport() {
 
       setProjectData(detailedEntries);
       setTotalHours(total);
+    }
+
+    // Load Projektleiter-Blöcke für dieses Projekt
+    const { data: plData } = await supabase
+      .from("time_entries")
+      .select("id, user_id, datum, start_zeit, end_zeit, pause_minuten, stunden, entry_typ, projekt_id")
+      .eq("projekt_id", selectedProjectId)
+      .eq("entry_typ", "projektleiter")
+      .gte("datum", startDate)
+      .lte("datum", endDate)
+      .order("datum", { ascending: true });
+
+    if (plData) {
+      let plTotal = 0;
+      const plEntries = plData.map((e: any) => {
+        plTotal += parseFloat(e.stunden) || 0;
+        const profile = profiles[e.user_id];
+        return {
+          id: e.id,
+          userId: e.user_id,
+          employeeName: profile ? `${profile.vorname} ${profile.nachname}` : "?",
+          datum: e.datum,
+          startZeit: e.start_zeit,
+          endZeit: e.end_zeit,
+          pauseMin: e.pause_minuten || 0,
+          stunden: parseFloat(e.stunden) || 0,
+        };
+      });
+      plEntries.sort((a, b) => a.datum.localeCompare(b.datum) || a.employeeName.localeCompare(b.employeeName));
+      setProjektleiterData(plEntries);
+      setProjektleiterTotal(Math.round(plTotal * 100) / 100);
+    } else {
+      setProjektleiterData([]);
+      setProjektleiterTotal(0);
     }
 
     // Load extras from Leistungsberichte for this project
@@ -509,6 +554,62 @@ export default function ProjectHoursReport() {
               </Table>
             </CardContent>
           </Card>
+
+          {/* Projektleiter-Stunden separat */}
+          {projektleiterData.length > 0 && (
+            <Card className="mt-4 border-accent/40">
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Briefcase className="w-4 h-4" />
+                    Projektleitung
+                    <Badge variant="outline" className="ml-1">PL</Badge>
+                  </CardTitle>
+                  <div className="text-right">
+                    <div className="text-xs text-muted-foreground">Gesamt</div>
+                    <div className="font-bold">{projektleiterTotal.toFixed(2)}h</div>
+                  </div>
+                </div>
+                <CardDescription className="text-xs">
+                  Zusätzliche Stunden aus der Projektleiter-Zeiterfassung (nicht in der Tabelle oben enthalten)
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Datum</TableHead>
+                      <TableHead>Start</TableHead>
+                      <TableHead>Ende</TableHead>
+                      <TableHead>Pause</TableHead>
+                      <TableHead className="text-right">Stunden</TableHead>
+                      <TableHead>Mitarbeiter</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {projektleiterData.map((e) => (
+                      <TableRow key={e.id}>
+                        <TableCell>{format(parseISO(e.datum), "dd.MM.yyyy", { locale: de })}</TableCell>
+                        <TableCell>{e.startZeit?.substring(0, 5)}</TableCell>
+                        <TableCell>{e.endZeit?.substring(0, 5)}</TableCell>
+                        <TableCell>{e.pauseMin > 0 ? `${e.pauseMin} Min.` : "-"}</TableCell>
+                        <TableCell className="text-right font-medium">{e.stunden.toFixed(2)}</TableCell>
+                        <TableCell>{e.employeeName}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                  <TableFooter>
+                    <TableRow>
+                      <TableCell colSpan={4} className="font-bold">Gesamt PL</TableCell>
+                      <TableCell className="text-right font-bold">{projektleiterTotal.toFixed(2)}</TableCell>
+                      <TableCell></TableCell>
+                    </TableRow>
+                  </TableFooter>
+                </Table>
+              </CardContent>
+            </Card>
+          )}
+
           {(berichtExtras.geraete.length > 0 || berichtExtras.materialien.length > 0 || berichtExtras.anmerkungen.length > 0) && (
             <Card className="mt-4">
               <CardContent className="pt-4 space-y-4">
