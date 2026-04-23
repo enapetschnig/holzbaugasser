@@ -250,16 +250,6 @@ const TimeTracking = () => {
         .single();
 
       const role = data?.role;
-      if (role === "mitarbeiter") {
-        toast({
-          variant: "destructive",
-          title: "Kein Zugriff",
-          description:
-            "Diese Seite ist nur für Administratoren und Vorarbeiter zugänglich.",
-        });
-        navigate("/");
-        return;
-      }
       setIsAdmin(role === "administrator");
       setLoading(false);
     };

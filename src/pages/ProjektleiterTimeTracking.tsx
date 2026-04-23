@@ -139,13 +139,13 @@ function randomId(): string {
   return `tmp_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
-/** Default Regelarbeitszeit block: 07:00–15:30, Pause 12:00–12:30 (= 8h net) */
+/** Default Regelarbeitszeit block: 07:00–16:00, Pause 12:00–13:00 (= 8h net, 40h/Woche) */
 function defaultBlock(projectId: string = ""): Omit<EditableBlock, "localId" | "dbId" | "dirty"> {
   return {
     startTime: "07:00",
-    endTime: "15:30",
+    endTime: "16:00",
     pauseStart: "12:00",
-    pauseEnd: "12:30",
+    pauseEnd: "13:00",
     projectId,
   };
 }
@@ -644,7 +644,7 @@ export default function ProjektleiterTimeTracking() {
             className="w-full"
           >
             <Wand2 className="h-4 w-4 mr-2" />
-            Regelarbeitszeit ausfüllen (07:00–15:30, Pause 12:00–12:30)
+            Regelarbeitszeit ausfüllen (07:00–16:00, Pause 12:00–13:00)
           </Button>
         )}
 

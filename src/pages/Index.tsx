@@ -422,26 +422,24 @@ export default function Index() {
 
         {/* Main Actions Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 lg:gap-6">
-          {/* Zeiterfassung - Nur für Admin + Vorarbeiter */}
-          {canManageTime && (
-            <Card
-              className="cursor-pointer hover:shadow-lg transition-all hover:border-primary/50"
-              onClick={() => navigate("/time-tracking")}
-            >
-              <CardHeader className="space-y-2 pb-3">
-                <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center">
-                  <Clock className="h-6 w-6 text-primary" />
-                </div>
-                <CardTitle className="text-lg sm:text-xl">Leistungsbericht</CardTitle>
-                <CardDescription className="text-sm">
-                  Täglichen Leistungsbericht erstellen
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <Button className="w-full" size="sm">Bericht erstellen</Button>
-              </CardContent>
-            </Card>
-          )}
+          {/* Leistungsbericht - Für alle Rollen */}
+          <Card
+            className="cursor-pointer hover:shadow-lg transition-all hover:border-primary/50"
+            onClick={() => navigate("/time-tracking")}
+          >
+            <CardHeader className="space-y-2 pb-3">
+              <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center">
+                <Clock className="h-6 w-6 text-primary" />
+              </div>
+              <CardTitle className="text-lg sm:text-xl">Leistungsbericht</CardTitle>
+              <CardDescription className="text-sm">
+                Täglichen Leistungsbericht erstellen
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button className="w-full" size="sm">Bericht erstellen</Button>
+            </CardContent>
+          </Card>
 
           {/* Projektleiter-Zeiterfassung - Nur für Projektleiter + Admin */}
           {(isProjektleiter || isAdmin) && (
