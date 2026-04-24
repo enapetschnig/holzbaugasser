@@ -10,15 +10,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableFooter,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import {
   Dialog,
   DialogContent,
   DialogHeader,
@@ -29,7 +20,13 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Download, Pencil, Trash2, ChevronLeft, ChevronRight } from "lucide-react";
+import { Download, Pencil, Trash2, ChevronLeft, ChevronRight, Building2, User as UserIcon } from "lucide-react";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
 import { useToast } from "@/hooks/use-toast";
 import * as XLSX from "xlsx-js-style";
 import { format, parseISO } from "date-fns";
@@ -223,10 +220,38 @@ export default function ProjektleiterAuswertung() {
       map[b.user_id].stunden += b.stunden;
       map[b.user_id].count += 1;
     }
-    return Object.entries(map).map(([uid, d]) => ({ uid, ...d }));
+    return Object.entries(map).map(([uid, d]) => ({ uid, ...d }))
+      .sort((a, b) => b.stunden - a.stunden);
   }, [blocks]);
 
   const grandTotal = useMemo(() => blocks.reduce((s, b) => s + b.stunden, 0), [blocks]);
+
+  // Summary: Stunden pro Projekt (über alle User)
+  const totalsByProject = useMemo(() => {
+    const map: Record<string, { name: string; stunden: number }> = {};
+    for (const b of blocks) {
+      const key = b.project_id || "__BUERO__";
+      const name = b.project_id ? b.project_name : "Büro";
+      if (!map[key]) map[key] = { name, stunden: 0 };
+      map[key].stunden += b.stunden;
+    }
+    return Object.entries(map).map(([id, d]) => ({ id, ...d }))
+      .sort((a, b) => b.stunden - a.stunden);
+  }, [blocks]);
+
+  // Pro User: alle Projekte mit Stunden
+  const projectsByUser = useMemo(() => {
+    const map: Record<string, Record<string, { name: string; stunden: number; blocks: Block[] }>> = {};
+    for (const b of blocks) {
+      const pkey = b.project_id || "__BUERO__";
+      const pname = b.project_id ? b.project_name : "Büro";
+      if (!map[b.user_id]) map[b.user_id] = {};
+      if (!map[b.user_id][pkey]) map[b.user_id][pkey] = { name: pname, stunden: 0, blocks: [] };
+      map[b.user_id][pkey].stunden += b.stunden;
+      map[b.user_id][pkey].blocks.push(b);
+    }
+    return map;
+  }, [blocks]);
 
   // -----------------------------------------------------------------
   // Excel Export
@@ -532,91 +557,146 @@ export default function ProjektleiterAuswertung() {
         </CardContent>
       </Card>
 
-      {/* Blocks Table */}
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-base">Alle Zeitblöcke</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {loading ? (
-            <div className="text-center text-muted-foreground py-8">Lade...</div>
-          ) : blocks.length === 0 ? (
-            <div className="text-center text-muted-foreground py-8">
-              Keine Zeitblöcke im gewählten Zeitraum.
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Datum</TableHead>
-                    <TableHead>Mitarbeiter</TableHead>
-                    <TableHead>Start</TableHead>
-                    <TableHead>Ende</TableHead>
-                    <TableHead>Pause</TableHead>
-                    <TableHead className="text-right">Stunden</TableHead>
-                    <TableHead>Projekt</TableHead>
-                    <TableHead className="text-right">Aktionen</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {blocks.map((b) => {
-                    const d = parseISO(b.datum);
-                    const pauseText = b.pause_start && b.pause_end
-                      ? `${formatTime(b.pause_start)}–${formatTime(b.pause_end)}`
-                      : b.pause_minutes > 0
-                        ? `${b.pause_minutes} min`
-                        : "–";
-                    return (
-                      <TableRow key={b.id}>
-                        <TableCell className="whitespace-nowrap">
-                          {format(d, "dd.MM.yyyy")}
-                          <div className="text-xs text-muted-foreground">
-                            {format(d, "EEEE", { locale: de })}
-                          </div>
-                        </TableCell>
-                        <TableCell>{b.user_name}</TableCell>
-                        <TableCell>{formatTime(b.start_time)}</TableCell>
-                        <TableCell>{formatTime(b.end_time)}</TableCell>
-                        <TableCell className="whitespace-nowrap">{pauseText}</TableCell>
-                        <TableCell className="text-right font-medium">
-                          {b.stunden.toFixed(2).replace(".", ",")}
-                        </TableCell>
-                        <TableCell className="max-w-[200px] truncate">
-                          {b.project_id ? (
-                            b.project_name
-                          ) : (
-                            <Badge variant="outline">Büro</Badge>
-                          )}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex justify-end gap-1">
-                            <Button variant="ghost" size="icon" onClick={() => openEdit(b)} className="h-7 w-7">
-                              <Pencil className="h-3.5 w-3.5" />
-                            </Button>
-                            <Button variant="ghost" size="icon" onClick={() => deleteBlock(b)} className="h-7 w-7 text-destructive">
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-                <TableFooter>
-                  <TableRow>
-                    <TableCell colSpan={5} className="font-bold">Gesamt</TableCell>
-                    <TableCell className="text-right font-bold">
-                      {grandTotal.toFixed(2).replace(".", ",")}
-                    </TableCell>
-                    <TableCell colSpan={2}></TableCell>
-                  </TableRow>
-                </TableFooter>
-              </Table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+      {loading ? (
+        <Card><CardContent className="py-8 text-center text-muted-foreground">Lade...</CardContent></Card>
+      ) : blocks.length === 0 ? (
+        <Card><CardContent className="py-8 text-center text-muted-foreground">Keine Einträge im gewählten Zeitraum.</CardContent></Card>
+      ) : (
+        <>
+          {/* Summary pro Projekt */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Building2 className="h-4 w-4" />
+                Stunden pro Projekt
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                {totalsByProject.map((p) => (
+                  <div
+                    key={p.id}
+                    className="border rounded-lg px-3 py-2 flex items-center justify-between bg-muted/30"
+                  >
+                    <span className="truncate flex-1 min-w-0 text-sm font-medium">{p.name}</span>
+                    <Badge variant="secondary" className="ml-2 shrink-0">
+                      {p.stunden.toFixed(2).replace(".", ",")}h
+                    </Badge>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Pro Mitarbeiter: aufklappbare Projekt-Details */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base flex items-center gap-2">
+                <UserIcon className="h-4 w-4" />
+                Pro Mitarbeiter
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="px-2 sm:px-4">
+              <Accordion type="multiple" className="space-y-2">
+                {totalsByUser.map((u) => {
+                  const userProjects = projectsByUser[u.uid] || {};
+                  const projectEntries = Object.entries(userProjects)
+                    .map(([pid, d]) => ({ pid, ...d }))
+                    .sort((a, b) => b.stunden - a.stunden);
+                  return (
+                    <AccordionItem
+                      key={u.uid}
+                      value={u.uid}
+                      className="border rounded-lg px-3"
+                    >
+                      <AccordionTrigger className="hover:no-underline py-2">
+                        <div className="flex items-center justify-between w-full pr-2">
+                          <span className="font-medium">{u.name}</span>
+                          <Badge variant="secondary">
+                            {u.stunden.toFixed(2).replace(".", ",")}h
+                          </Badge>
+                        </div>
+                      </AccordionTrigger>
+                      <AccordionContent className="pb-2">
+                        <div className="space-y-1">
+                          {projectEntries.map((pe) => (
+                            <Accordion key={pe.pid} type="single" collapsible>
+                              <AccordionItem value={pe.pid} className="border-b last:border-0">
+                                <AccordionTrigger className="hover:no-underline py-1.5 text-sm">
+                                  <div className="flex items-center justify-between w-full pr-2">
+                                    <span className="flex items-center gap-2 truncate">
+                                      <Building2 className="h-3 w-3 shrink-0 text-muted-foreground" />
+                                      {pe.name}
+                                      <span className="text-xs text-muted-foreground">
+                                        ({pe.blocks.length} {pe.blocks.length === 1 ? "Tag" : "Tage"})
+                                      </span>
+                                    </span>
+                                    <Badge variant="outline" className="ml-2 shrink-0">
+                                      {pe.stunden.toFixed(2).replace(".", ",")}h
+                                    </Badge>
+                                  </div>
+                                </AccordionTrigger>
+                                <AccordionContent className="pb-2">
+                                  <div className="space-y-1">
+                                    {pe.blocks
+                                      .sort((a, b) => a.datum.localeCompare(b.datum))
+                                      .map((b) => {
+                                        const d = parseISO(b.datum);
+                                        return (
+                                          <div
+                                            key={b.id}
+                                            className="flex items-center gap-2 text-sm py-1 px-2 hover:bg-muted/40 rounded"
+                                          >
+                                            <span className="w-20 shrink-0">{format(d, "dd.MM.")}</span>
+                                            <span className="w-8 shrink-0 text-xs text-muted-foreground">
+                                              {format(d, "EE", { locale: de })}
+                                            </span>
+                                            <span className="w-20 shrink-0 font-mono text-xs text-muted-foreground">
+                                              {formatTime(b.start_time)}–{formatTime(b.end_time)}
+                                            </span>
+                                            <span className="flex-1 text-right font-medium">
+                                              {b.stunden.toFixed(2).replace(".", ",")}h
+                                            </span>
+                                            <Button
+                                              variant="ghost"
+                                              size="icon"
+                                              onClick={() => openEdit(b)}
+                                              className="h-7 w-7"
+                                            >
+                                              <Pencil className="h-3.5 w-3.5" />
+                                            </Button>
+                                            <Button
+                                              variant="ghost"
+                                              size="icon"
+                                              onClick={() => deleteBlock(b)}
+                                              className="h-7 w-7 text-destructive"
+                                            >
+                                              <Trash2 className="h-3.5 w-3.5" />
+                                            </Button>
+                                          </div>
+                                        );
+                                      })}
+                                  </div>
+                                </AccordionContent>
+                              </AccordionItem>
+                            </Accordion>
+                          ))}
+                        </div>
+                      </AccordionContent>
+                    </AccordionItem>
+                  );
+                })}
+              </Accordion>
+              <div className="mt-3 pt-3 border-t flex items-center justify-between text-sm">
+                <span className="font-medium">Gesamt</span>
+                <Badge variant="default">
+                  {grandTotal.toFixed(2).replace(".", ",")}h
+                </Badge>
+              </div>
+            </CardContent>
+          </Card>
+        </>
+      )}
 
       {/* Edit Dialog */}
       <Dialog open={!!editBlock} onOpenChange={(o) => !o && setEditBlock(null)}>
