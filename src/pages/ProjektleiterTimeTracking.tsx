@@ -10,8 +10,6 @@ import {
   Info,
   Save,
   Wand2,
-  Pencil,
-  Coffee,
   Building2,
 } from "lucide-react";
 import { format } from "date-fns";
@@ -20,7 +18,6 @@ import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -46,6 +43,11 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { getTagesSoll, localDateString } from "@/lib/workingHours";
+import {
+  assembleDayTimes,
+  aggregateByProject,
+  type ProjectLine,
+} from "@/lib/projektleiterDayTimes";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -53,16 +55,10 @@ import { getTagesSoll, localDateString } from "@/lib/workingHours";
 
 type Project = { id: string; name: string };
 
-/** Local block: server id if saved, temp id if new */
-type EditableBlock = {
-  localId: string;           // stable local key
-  dbId: string | null;       // null = new block
-  startTime: string;         // "HH:mm"
-  endTime: string;           // "HH:mm"
-  pauseStart: string;        // "" or "HH:mm"
-  pauseEnd: string;          // "" or "HH:mm"
-  projectId: string;         // "" (Büro) or UUID
-  dirty: boolean;            // has local changes vs. DB
+type EditableLine = {
+  localId: string;
+  projectId: string;  // "" = Büro / kein Projekt
+  hours: string;      // string during typing, "0.25"-step on save
 };
 
 type AbsenceEntry = {
@@ -75,79 +71,19 @@ type AbsenceEntry = {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function timeToMin(t: string): number | null {
-  if (!t) return null;
-  const [h, m] = t.split(":").map(Number);
-  if (isNaN(h) || isNaN(m)) return null;
-  return h * 60 + m;
-}
-
-/** Pause in minutes from pauseStart/pauseEnd (both "HH:mm" or empty). */
-function pauseMinutes(pauseStart: string, pauseEnd: string): number {
-  const s = timeToMin(pauseStart);
-  const e = timeToMin(pauseEnd);
-  if (s == null || e == null) return 0;
-  return Math.max(0, e - s);
-}
-
-/** Computes net work hours for a block. */
-function blockHours(b: EditableBlock): number {
-  const s = timeToMin(b.startTime);
-  const e = timeToMin(b.endTime);
-  if (s == null || e == null) return 0;
-  const gross = e - s;
-  const pause = pauseMinutes(b.pauseStart, b.pauseEnd);
-  const net = gross - pause;
-  if (net <= 0) return 0;
-  return Math.round((net / 60) * 100) / 100;
-}
-
 function formatH(h: number): string {
   if (h === Math.floor(h)) return `${h}h`;
   return `${h.toFixed(2).replace(/\.00$/, "").replace(".", ",")}h`;
 }
 
-/** Validate a block. Returns error message or null. */
-function validateBlock(b: EditableBlock): string | null {
-  const s = timeToMin(b.startTime);
-  const e = timeToMin(b.endTime);
-  if (s == null || e == null) return "Start- und Endzeit sind erforderlich";
-  if (e <= s) return "Ende muss nach Start liegen";
-  // Pause in range
-  const ps = timeToMin(b.pauseStart);
-  const pe = timeToMin(b.pauseEnd);
-  if ((ps != null) !== (pe != null)) return "Pause: beide Zeiten oder keine";
-  if (ps != null && pe != null) {
-    if (pe <= ps) return "Pause-Ende muss nach Pause-Start liegen";
-    if (ps < s || pe > e) return "Pause muss innerhalb des Blocks liegen";
-  }
-  const h = blockHours(b);
-  if (h <= 0) return "Block hat 0h (Pause zu lang?)";
-  return null;
-}
-
-function overlaps(a: EditableBlock, b: EditableBlock): boolean {
-  const aS = timeToMin(a.startTime);
-  const aE = timeToMin(a.endTime);
-  const bS = timeToMin(b.startTime);
-  const bE = timeToMin(b.endTime);
-  if (aS == null || aE == null || bS == null || bE == null) return false;
-  return aS < bE && bS < aE;
+function parseHours(s: string): number {
+  if (!s) return 0;
+  const n = parseFloat(s.replace(",", "."));
+  return isNaN(n) ? 0 : n;
 }
 
 function randomId(): string {
   return `tmp_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-}
-
-/** Default Regelarbeitszeit block: 07:00–16:00, Pause 12:00–13:00 (= 8h net, 40h/Woche) */
-function defaultBlock(projectId: string = ""): Omit<EditableBlock, "localId" | "dbId" | "dirty"> {
-  return {
-    startTime: "07:00",
-    endTime: "16:00",
-    pauseStart: "12:00",
-    pauseEnd: "13:00",
-    projectId,
-  };
 }
 
 // ---------------------------------------------------------------------------
@@ -164,11 +100,10 @@ export default function ProjektleiterTimeTracking() {
   const [date, setDate] = useState(() => localDateString());
 
   const [projects, setProjects] = useState<Project[]>([]);
-  const [blocks, setBlocks] = useState<EditableBlock[]>([]);
-  const [deletedIds, setDeletedIds] = useState<string[]>([]);
+  const [lines, setLines] = useState<EditableLine[]>([]);
+  const [originalLines, setOriginalLines] = useState<EditableLine[]>([]);
   const [absences, setAbsences] = useState<AbsenceEntry[]>([]);
   const [saving, setSaving] = useState(false);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const [confirmState, setConfirmState] = useState<{
     title: string;
@@ -224,42 +159,37 @@ export default function ProjektleiterTimeTracking() {
   }, [navigate, toast]);
 
   // -----------------------------------------------------------------
-  // Load blocks + absences for current date
+  // Load lines + absences for current date
   // -----------------------------------------------------------------
 
-  const loadBlocks = useCallback(async () => {
+  const loadLines = useCallback(async () => {
     if (!userId) return;
 
     const { data } = await supabase
       .from("time_entries")
-      .select("id, start_time, end_time, pause_start, pause_end, pause_minutes, project_id, entry_typ, taetigkeit, stunden, datum")
+      .select("id, stunden, project_id, entry_typ, taetigkeit, datum")
       .eq("user_id", userId)
-      .eq("datum", date)
-      .order("start_time", { ascending: true });
+      .eq("datum", date);
 
     if (!data) {
-      setBlocks([]);
+      setLines([]);
+      setOriginalLines([]);
       setAbsences([]);
-      setDeletedIds([]);
       return;
     }
 
-    const plBlocks: EditableBlock[] = [];
+    // Aggregate PL rows by project (one row per unique project per day)
+    const agg: Record<string, number> = {};
     const abs: AbsenceEntry[] = [];
 
     for (const e of data as any[]) {
       if (e.entry_typ === "projektleiter") {
-        plBlocks.push({
-          localId: e.id,
-          dbId: e.id,
-          startTime: e.start_time?.substring(0, 5) || "",
-          endTime: e.end_time?.substring(0, 5) || "",
-          pauseStart: e.pause_start?.substring(0, 5) || "",
-          pauseEnd: e.pause_end?.substring(0, 5) || "",
-          projectId: e.project_id || "",
-          dirty: false,
-        });
-      } else if (e.entry_typ === "absenz" || (e.taetigkeit && ["Urlaub", "Krankenstand", "ZA", "Zeitausgleich", "Fortbildung", "Schule"].includes(e.taetigkeit))) {
+        const key = e.project_id || "";
+        agg[key] = (agg[key] || 0) + (parseFloat(e.stunden) || 0);
+      } else if (
+        e.entry_typ === "absenz" ||
+        (e.taetigkeit && ["Urlaub", "Krankenstand", "ZA", "Zeitausgleich", "Fortbildung", "Schule"].includes(e.taetigkeit))
+      ) {
         abs.push({
           datum: e.datum,
           stunden: parseFloat(e.stunden) || 0,
@@ -268,14 +198,20 @@ export default function ProjektleiterTimeTracking() {
       }
     }
 
-    setBlocks(plBlocks);
+    const loaded: EditableLine[] = Object.entries(agg).map(([projectId, hours]) => ({
+      localId: randomId(),
+      projectId,
+      hours: String(Math.round(hours * 100) / 100).replace(".", ","),
+    }));
+
+    setLines(loaded);
+    setOriginalLines(loaded.map((l) => ({ ...l })));
     setAbsences(abs);
-    setDeletedIds([]);
   }, [userId, date]);
 
   useEffect(() => {
-    loadBlocks();
-  }, [loadBlocks]);
+    loadLines();
+  }, [loadLines]);
 
   // -----------------------------------------------------------------
   // Computed values (LIVE from editing state)
@@ -285,16 +221,18 @@ export default function ProjektleiterTimeTracking() {
   const fullTimeSoll = userRole ? getTagesSoll(userRole as any, dow) : 0;
   const tagesSoll = Math.round((weeklyHours / 40) * fullTimeSoll * 100) / 100;
   const istStunden = useMemo(
-    () => Math.round(blocks.reduce((s, b) => s + blockHours(b), 0) * 100) / 100,
-    [blocks]
+    () => Math.round(lines.reduce((s, l) => s + parseHours(l.hours), 0) * 100) / 100,
+    [lines]
   );
   const diff = Math.round((istStunden - tagesSoll) * 100) / 100;
   const isWeekend = dow === 0 || dow === 6;
 
-  const hasUnsavedChanges = useMemo(
-    () => blocks.some((b) => b.dirty || !b.dbId) || deletedIds.length > 0,
-    [blocks, deletedIds]
-  );
+  const hasUnsavedChanges = useMemo(() => {
+    if (lines.length !== originalLines.length) return true;
+    const a = lines.map((l) => `${l.projectId}|${l.hours}`).sort();
+    const b = originalLines.map((l) => `${l.projectId}|${l.hours}`).sort();
+    return a.some((v, i) => v !== b[i]);
+  }, [lines, originalLines]);
 
   const parsedDate = new Date(date + "T00:00:00");
   const dateLabel = format(parsedDate, "EEEE, d. MMMM yyyy", { locale: de });
@@ -327,121 +265,85 @@ export default function ProjektleiterTimeTracking() {
   const goToday = () => tryChangeDate(localDateString());
 
   // -----------------------------------------------------------------
-  // Block mutations (local state only — commit via "Speichern")
+  // Line mutations
   // -----------------------------------------------------------------
 
-  const updateBlock = (localId: string, patch: Partial<EditableBlock>) => {
-    setBlocks((prev) =>
-      prev.map((b) => (b.localId === localId ? { ...b, ...patch, dirty: true } : b))
+  const updateLine = (localId: string, patch: Partial<EditableLine>) => {
+    setLines((prev) =>
+      prev.map((l) => (l.localId === localId ? { ...l, ...patch } : l))
     );
   };
 
-  const addBlock = () => {
-    const last = blocks[blocks.length - 1];
-    const suggested = last
-      ? {
-          // New block starts after last block end
-          startTime: last.endTime || "13:00",
-          endTime: "",
-          pauseStart: "",
-          pauseEnd: "",
-          projectId: last.projectId,
-        }
-      : { ...defaultBlock(), startTime: "", endTime: "" };
-    const newId = randomId();
-    setBlocks((prev) => [
+  const addLine = () => {
+    setLines((prev) => [
       ...prev,
-      {
-        localId: newId,
-        dbId: null,
-        ...suggested,
-        dirty: true,
-      },
+      { localId: randomId(), projectId: "", hours: "" },
     ]);
-    setExpandedId(newId);
   };
 
-  const removeBlock = (localId: string) => {
-    const b = blocks.find((x) => x.localId === localId);
-    if (b?.dbId) {
-      setDeletedIds((prev) => [...prev, b.dbId!]);
-    }
-    setBlocks((prev) => prev.filter((x) => x.localId !== localId));
+  const removeLine = (localId: string) => {
+    setLines((prev) => prev.filter((l) => l.localId !== localId));
   };
 
   const applyRegelarbeitszeit = () => {
-    if (blocks.length > 0) {
+    const preservedProject = lines[0]?.projectId || "";
+    if (lines.length > 0 && istStunden > 0) {
       setConfirmState({
-        title: "Regelarbeitszeit übernehmen?",
-        message: "Alle bestehenden Blöcke für diesen Tag werden ersetzt.",
+        title: "Standardtag eintragen?",
+        message: "Alle aktuellen Einträge für diesen Tag werden ersetzt durch einen 8h-Standardtag.",
         onConfirm: () => {
           setConfirmState(null);
-          const preservedProject = blocks[0]?.projectId || "";
-          const toDelete = blocks.filter((b) => b.dbId).map((b) => b.dbId!);
-          setDeletedIds((prev) => [...prev, ...toDelete]);
-          setBlocks([
-            {
-              localId: randomId(),
-              dbId: null,
-              ...defaultBlock(preservedProject),
-              dirty: true,
-            },
-          ]);
+          setLines([{ localId: randomId(), projectId: preservedProject, hours: "8" }]);
         },
       });
       return;
     }
-    setBlocks([
-      {
-        localId: randomId(),
-        dbId: null,
-        ...defaultBlock(),
-        dirty: true,
-      },
-    ]);
+    setLines([{ localId: randomId(), projectId: "", hours: "8" }]);
   };
 
   // -----------------------------------------------------------------
-  // Save all changes to DB
+  // Save
   // -----------------------------------------------------------------
 
   const doSave = async (force = false) => {
     if (!userId) return;
 
-    // 1. Validate all blocks
-    for (const b of blocks) {
-      const err = validateBlock(b);
-      if (err) {
-        toast({ variant: "destructive", title: "Block ungültig", description: err });
+    // 1. Parse and validate lines
+    const parsed: ProjectLine[] = [];
+    for (const l of lines) {
+      const h = parseHours(l.hours);
+      if (h < 0) {
+        toast({ variant: "destructive", title: "Ungültig", description: "Stunden dürfen nicht negativ sein." });
         return;
+      }
+      if (h > 16) {
+        toast({ variant: "destructive", title: "Ungültig", description: "Pro Zeile maximal 16h." });
+        return;
+      }
+      if (h > 0) {
+        parsed.push({ projectId: l.projectId || null, hours: h });
       }
     }
 
-    if (!force) {
-      // 2. Overlap warning
-      const overlapping: [EditableBlock, EditableBlock][] = [];
-      for (let i = 0; i < blocks.length; i++) {
-        for (let j = i + 1; j < blocks.length; j++) {
-          if (overlaps(blocks[i], blocks[j])) overlapping.push([blocks[i], blocks[j]]);
-        }
-      }
-      if (overlapping.length > 0) {
-        setConfirmState({
-          title: "Überlappende Blöcke",
-          message: `${overlapping.length} Block-Paar(e) überlappen zeitlich. Trotzdem speichern?`,
-          onConfirm: () => {
-            setConfirmState(null);
-            doSave(true);
-          },
-        });
-        return;
-      }
+    // 2. Aggregate same project
+    const aggregated = aggregateByProject(parsed);
+    const totalHours = aggregated.reduce((s, l) => s + l.hours, 0);
 
+    if (totalHours > 16) {
+      toast({
+        variant: "destructive",
+        title: "Zu viele Stunden",
+        description: `Tagessumme ${totalHours.toFixed(2)}h überschreitet 16h-Tagesmaximum.`,
+      });
+      return;
+    }
+
+    if (!force) {
       // 3. >10h warning
-      if (istStunden > 10) {
+      if (totalHours > 10) {
         setConfirmState({
           title: "Lange Arbeitszeit",
-          message: `Gesamt: ${formatH(istStunden)}. Das überschreitet 10h (AZG). Trotzdem speichern?`,
+          message: `Tagessumme ${formatH(totalHours)} überschreitet 10h (AZG). Trotzdem speichern?`,
           onConfirm: () => {
             setConfirmState(null);
             doSave(true);
@@ -454,7 +356,7 @@ export default function ProjektleiterTimeTracking() {
       const blockingAbs = absences.find((a) =>
         ["Urlaub", "Krankenstand", "ZA", "Zeitausgleich"].includes(a.taetigkeit)
       );
-      if (blockingAbs && blocks.length > 0) {
+      if (blockingAbs && totalHours > 0) {
         toast({
           variant: "destructive",
           title: "Konflikt",
@@ -466,56 +368,46 @@ export default function ProjektleiterTimeTracking() {
 
     setSaving(true);
     try {
-      // UPSERT first (INSERTs and UPDATEs). If anything fails, nothing is deleted.
-      for (const b of blocks) {
-        const hours = blockHours(b);
-        const pauseMin = pauseMinutes(b.pauseStart, b.pauseEnd);
-        const pid = b.projectId || null;
-        const projName = pid ? projects.find((p) => p.id === pid)?.name : null;
-        const taetigkeit = pid ? `PL: ${projName}` : "PL: Büro";
+      // 5. DELETE all existing PL entries for (user, date)
+      const { error: delErr } = await supabase
+        .from("time_entries")
+        .delete()
+        .eq("user_id", userId)
+        .eq("datum", date)
+        .eq("entry_typ", "projektleiter");
+      if (delErr) throw delErr;
 
-        const row: any = {
-          start_time: b.startTime,
-          end_time: b.endTime,
-          pause_start: b.pauseStart || null,
-          pause_end: b.pauseEnd || null,
-          pause_minutes: pauseMin,
-          stunden: hours,
-          project_id: pid,
-          taetigkeit,
+      // 6. If nothing to save, we're done
+      if (aggregated.length === 0) {
+        toast({ title: "Gespeichert", description: "Alle Einträge für diesen Tag entfernt." });
+        await loadLines();
+        return;
+      }
+
+      // 7. Assemble synthetic times and INSERT
+      const assembled = assembleDayTimes(aggregated);
+      const rows = assembled.map((r) => {
+        const projName = r.projectId ? projects.find((p) => p.id === r.projectId)?.name : null;
+        return {
+          user_id: userId,
+          datum: date,
+          start_time: r.startTime,
+          end_time: r.endTime,
+          pause_start: r.pauseStart,
+          pause_end: r.pauseEnd,
+          pause_minutes: r.pauseMinutes,
+          stunden: r.hours,
+          project_id: r.projectId,
+          taetigkeit: r.projectId ? `PL: ${projName}` : "PL: Büro",
           entry_typ: "projektleiter",
         };
+      });
 
-        if (b.dbId) {
-          if (b.dirty) {
-            const { error } = await supabase
-              .from("time_entries")
-              .update(row)
-              .eq("id", b.dbId);
-            if (error) throw error;
-          }
-        } else {
-          const { error } = await supabase.from("time_entries").insert({
-            ...row,
-            user_id: userId,
-            datum: date,
-          });
-          if (error) throw error;
-        }
-      }
+      const { error: insErr } = await supabase.from("time_entries").insert(rows);
+      if (insErr) throw insErr;
 
-      // DELETE last, only if everything else succeeded
-      if (deletedIds.length > 0) {
-        const { error } = await supabase
-          .from("time_entries")
-          .delete()
-          .in("id", deletedIds);
-        if (error) throw error;
-      }
-
-      toast({ title: "Gespeichert", description: `${formatH(istStunden)} für ${dateLabel}` });
-      setExpandedId(null);
-      await loadBlocks();
+      toast({ title: "Gespeichert", description: `${formatH(totalHours)} für ${dateLabel}` });
+      await loadLines();
     } catch (err: any) {
       console.error("Save failed:", err);
       toast({
@@ -531,6 +423,15 @@ export default function ProjektleiterTimeTracking() {
   // -----------------------------------------------------------------
   // Render
   // -----------------------------------------------------------------
+
+  // Preview: assembled rows for current input (to show expected times)
+  const preview = useMemo(() => {
+    const parsed: ProjectLine[] = lines
+      .map((l) => ({ projectId: l.projectId || null, hours: parseHours(l.hours) }))
+      .filter((l) => l.hours > 0);
+    const agg = aggregateByProject(parsed);
+    return assembleDayTimes(agg);
+  }, [lines]);
 
   return (
     <div className="min-h-screen bg-background pb-24">
@@ -548,14 +449,15 @@ export default function ProjektleiterTimeTracking() {
             </AccordionTrigger>
             <AccordionContent className="text-sm text-muted-foreground space-y-2 pb-3">
               <p>
-                Erfasse deine Arbeitszeit pro Tag in <strong>Zeitblöcken</strong>. Mit "Regelarbeitszeit ausfüllen"
-                kannst du einen Standardtag in einem Klick einfügen.
+                Trage nur die <strong>Stunden pro Projekt</strong> ein. Die Uhrzeiten
+                (Start 07:00, Pause 12:00–13:00, Ende automatisch) werden beim Speichern
+                berechnet.
               </p>
               <ul className="list-disc ml-5 space-y-1">
                 <li><strong>40 Stunden/Woche</strong> (Mo–Fr je 8h). Mehr = Zeitkonto.</li>
-                <li><strong>Pause von/bis</strong>: innerhalb eines Blocks, wird abgezogen.</li>
-                <li><strong>Projekt</strong> für die Projektauswertung, "Büro" wenn keins.</li>
-                <li><strong>Urlaub / Krankenstand / ZA</strong>: im Menü "Abwesenheit" eintragen.</li>
+                <li><strong>Pause 12:00–13:00</strong> automatisch ab 6h Arbeitszeit.</li>
+                <li>Mehrere Projekte am Tag: werden in Eingabereihenfolge zeitlich aufgeteilt.</li>
+                <li><strong>Urlaub / Krankenstand / ZA</strong>: über Menü "Abwesenheit" eintragen.</li>
                 <li>Änderungen werden erst mit <strong>Speichern</strong> übernommen.</li>
               </ul>
             </AccordionContent>
@@ -638,210 +540,116 @@ export default function ProjektleiterTimeTracking() {
 
         {/* Regelarbeitszeit */}
         {!isWeekend && (
-          <Button
-            variant="outline"
-            onClick={applyRegelarbeitszeit}
-            className="w-full"
-          >
+          <Button variant="outline" onClick={applyRegelarbeitszeit} className="w-full">
             <Wand2 className="h-4 w-4 mr-2" />
-            Regelarbeitszeit ausfüllen (07:00–16:00, Pause 12:00–13:00)
+            Standardtag eintragen (8h)
           </Button>
         )}
 
-        {/* Zeitblöcke */}
+        {/* Projekt-Zeilen */}
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-base flex items-center justify-between">
-              <span>Zeitblöcke</span>
-              <Badge variant="secondary">{blocks.length}</Badge>
+              <span>Stunden pro Projekt</span>
+              <Badge variant="secondary">{lines.length}</Badge>
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            {blocks.length === 0 && (
+            {lines.length === 0 && (
               <div className="text-center text-sm text-muted-foreground py-4">
-                Noch keine Zeitblöcke für diesen Tag.
+                Keine Einträge für diesen Tag.
               </div>
             )}
 
-            {blocks.map((b, idx) => {
-              const hours = blockHours(b);
-              const err = validateBlock(b);
-              const isExpanded = expandedId === b.localId || b.dirty || !b.dbId;
-              const projName = b.projectId
-                ? projects.find((p) => p.id === b.projectId)?.name
-                : null;
-
-              if (!isExpanded) {
-                // Gespeicherte Blöcke: kompakte View-Ansicht
-                return (
-                  <div
-                    key={b.localId}
-                    className="border rounded-lg p-3 flex items-center gap-3 bg-muted/20 hover:bg-muted/40 transition-colors"
+            {lines.map((l, idx) => (
+              <div key={l.localId} className="flex gap-2 items-start">
+                <div className="flex-1 space-y-2">
+                  <Select
+                    value={l.projectId || "none"}
+                    onValueChange={(v) => updateLine(l.localId, { projectId: v === "none" ? "" : v })}
                   >
-                    <Badge variant="outline" className="font-mono shrink-0">#{idx + 1}</Badge>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-baseline gap-2 flex-wrap">
-                        <span className="font-semibold text-base">
-                          {b.startTime} – {b.endTime}
-                        </span>
-                        <Badge variant="secondary">{formatH(hours)}</Badge>
-                      </div>
-                      <div className="flex items-center gap-3 text-xs text-muted-foreground mt-0.5 flex-wrap">
-                        <span className="flex items-center gap-1">
-                          <Building2 className="h-3 w-3" />
-                          {projName || "Büro"}
-                        </span>
-                        {b.pauseStart && b.pauseEnd && (
-                          <span className="flex items-center gap-1">
-                            <Coffee className="h-3 w-3" />
-                            Pause {b.pauseStart}–{b.pauseEnd}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => setExpandedId(b.localId)}
-                      className="h-8 w-8"
-                      aria-label="Bearbeiten"
-                    >
-                      <Pencil className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => removeBlock(b.localId)}
-                      className="text-destructive hover:text-destructive h-8 w-8"
-                      aria-label="Löschen"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                );
-              }
-
-              // Expandierte Edit-Ansicht
-              return (
-                <div
-                  key={b.localId}
-                  className={`border rounded-lg p-3 space-y-3 ${
-                    err && b.dirty ? "border-destructive/50" : "border-primary/30"
-                  }`}
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Badge variant="outline" className="font-mono">#{idx + 1}</Badge>
-                      <span className="font-semibold">
-                        {hours > 0 ? formatH(hours) : "—"}
-                      </span>
-                      {b.dirty && b.dbId && (
-                        <Badge variant="outline" className="text-orange-600 border-orange-300 text-xs">
-                          geändert
-                        </Badge>
-                      )}
-                      {!b.dbId && (
-                        <Badge variant="outline" className="text-blue-600 border-blue-300 text-xs">
-                          neu
-                        </Badge>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-1">
-                      {b.dbId && !b.dirty && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setExpandedId(null)}
-                          className="h-8 text-xs"
-                        >
-                          Fertig
-                        </Button>
-                      )}
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => removeBlock(b.localId)}
-                        className="text-destructive hover:text-destructive h-8 w-8"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-1">
-                      <Label className="text-xs">Start</Label>
-                      <Input
-                        type="time"
-                        value={b.startTime}
-                        onChange={(e) => updateBlock(b.localId, { startTime: e.target.value })}
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs">Ende</Label>
-                      <Input
-                        type="time"
-                        value={b.endTime}
-                        onChange={(e) => updateBlock(b.localId, { endTime: e.target.value })}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-1">
-                      <Label className="text-xs">Pause von</Label>
-                      <Input
-                        type="time"
-                        value={b.pauseStart}
-                        onChange={(e) => updateBlock(b.localId, { pauseStart: e.target.value })}
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs">Pause bis</Label>
-                      <Input
-                        type="time"
-                        value={b.pauseEnd}
-                        onChange={(e) => updateBlock(b.localId, { pauseEnd: e.target.value })}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="space-y-1">
-                    <Label className="text-xs">Projekt</Label>
-                    <Select
-                      value={b.projectId || "none"}
-                      onValueChange={(v) => updateBlock(b.localId, { projectId: v === "none" ? "" : v })}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">🏢 Büro / kein Projekt</SelectItem>
-                        {projects.map((p) => (
-                          <SelectItem key={p.id} value={p.id}>
-                            {p.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  {err && b.dirty && (
-                    <div className="text-xs text-destructive flex items-center gap-1">
-                      <AlertTriangle className="h-3 w-3" />
-                      {err}
-                    </div>
-                  )}
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">🏢 Büro / kein Projekt</SelectItem>
+                      {projects.map((p) => (
+                        <SelectItem key={p.id} value={p.id}>
+                          {p.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
-              );
-            })}
+                <div className="w-24">
+                  <Input
+                    type="number"
+                    inputMode="decimal"
+                    step="0.25"
+                    min="0"
+                    max="16"
+                    placeholder="0"
+                    value={l.hours}
+                    onChange={(e) => updateLine(l.localId, { hours: e.target.value })}
+                    className="text-right"
+                  />
+                </div>
+                <div className="w-12 text-sm text-muted-foreground pt-2 text-center">
+                  h
+                </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => removeLine(l.localId)}
+                  className="text-destructive hover:text-destructive shrink-0"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
+            ))}
 
-            <Button variant="outline" onClick={addBlock} className="w-full">
+            <Button variant="outline" onClick={addLine} className="w-full">
               <Plus className="h-4 w-4 mr-2" />
-              Neuer Zeitblock
+              Projekt hinzufügen
             </Button>
           </CardContent>
         </Card>
+
+        {/* Vorschau der berechneten Zeiten */}
+        {preview.length > 0 && (
+          <Card className="border-primary/20 bg-primary/5">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm flex items-center gap-2">
+                <Clock className="h-4 w-4" />
+                Vorschau berechneter Zeiten
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-1.5 text-sm">
+              {preview.map((r, i) => {
+                const projName = r.projectId
+                  ? projects.find((p) => p.id === r.projectId)?.name
+                  : "Büro";
+                return (
+                  <div key={i} className="flex items-center gap-2 flex-wrap">
+                    <Badge variant="outline" className="font-mono">
+                      {r.startTime}–{r.endTime}
+                    </Badge>
+                    {r.pauseStart && (
+                      <Badge variant="outline" className="text-xs">
+                        Pause {r.pauseStart}–{r.pauseEnd}
+                      </Badge>
+                    )}
+                    <Badge variant="secondary">{formatH(r.hours)}</Badge>
+                    <span className="text-muted-foreground flex items-center gap-1 min-w-0 truncate">
+                      <Building2 className="h-3 w-3 shrink-0" />
+                      {projName}
+                    </span>
+                  </div>
+                );
+              })}
+            </CardContent>
+          </Card>
+        )}
       </main>
 
       {/* Sticky Save-Bar */}

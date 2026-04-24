@@ -35,6 +35,7 @@ import * as XLSX from "xlsx-js-style";
 import { format, parseISO } from "date-fns";
 import { de } from "date-fns/locale";
 import { localDateString } from "@/lib/workingHours";
+import { assembleDayTimes, aggregateByProject, type ProjectLine } from "@/lib/projektleiterDayTimes";
 
 type Profile = {
   id: string;
@@ -72,21 +73,6 @@ function formatTime(t: string | null): string {
   return t.substring(0, 5);
 }
 
-function computeHours(start: string, end: string, pauseMin: number): number {
-  if (!start || !end) return 0;
-  const [sh, sm] = start.split(":").map(Number);
-  const [eh, em] = end.split(":").map(Number);
-  const min = eh * 60 + em - (sh * 60 + sm) - pauseMin;
-  return min > 0 ? Math.round((min / 60) * 100) / 100 : 0;
-}
-
-function pauseMinutesFromTimes(ps: string, pe: string): number {
-  if (!ps || !pe) return 0;
-  const [sh, sm] = ps.split(":").map(Number);
-  const [eh, em] = pe.split(":").map(Number);
-  return Math.max(0, eh * 60 + em - (sh * 60 + sm));
-}
-
 export default function ProjektleiterAuswertung() {
   const { toast } = useToast();
   const today = new Date();
@@ -112,12 +98,9 @@ export default function ProjektleiterAuswertung() {
   const [blocks, setBlocks] = useState<Block[]>([]);
   const [loading, setLoading] = useState(false);
 
-  // Edit dialog
+  // Edit dialog (nur Projekt + Stunden; Zeiten werden automatisch berechnet)
   const [editBlock, setEditBlock] = useState<Block | null>(null);
-  const [editStart, setEditStart] = useState("");
-  const [editEnd, setEditEnd] = useState("");
-  const [editPauseFrom, setEditPauseFrom] = useState("");
-  const [editPauseTo, setEditPauseTo] = useState("");
+  const [editHours, setEditHours] = useState("");
   const [editProjectId, setEditProjectId] = useState<string>("none");
 
   // -----------------------------------------------------------------
@@ -345,43 +328,96 @@ export default function ProjektleiterAuswertung() {
 
   const openEdit = (b: Block) => {
     setEditBlock(b);
-    setEditStart(formatTime(b.start_time));
-    setEditEnd(formatTime(b.end_time));
-    setEditPauseFrom(formatTime(b.pause_start));
-    setEditPauseTo(formatTime(b.pause_end));
+    setEditHours(String(b.stunden).replace(".", ","));
     setEditProjectId(b.project_id || "none");
   };
 
   const saveEdit = async () => {
     if (!editBlock) return;
-    const pauseMin = pauseMinutesFromTimes(editPauseFrom, editPauseTo);
-    const hours = computeHours(editStart, editEnd, pauseMin);
-    if (hours <= 0) {
-      toast({ variant: "destructive", title: "Ungültig", description: "Stunden ≤ 0" });
+    const newHours = parseFloat(editHours.replace(",", "."));
+    if (isNaN(newHours) || newHours <= 0) {
+      toast({ variant: "destructive", title: "Ungültig", description: "Stunden müssen > 0 sein" });
       return;
     }
-    const pid = editProjectId === "none" ? null : editProjectId;
-    const projName = pid ? projects.find((p) => p.id === pid)?.name : "Büro";
-    const { error } = await supabase
+    if (newHours > 16) {
+      toast({ variant: "destructive", title: "Ungültig", description: "Maximal 16h pro Zeile" });
+      return;
+    }
+    const newProjectId = editProjectId === "none" ? null : editProjectId;
+
+    // Load all PL rows for this user/date, update the edited one, re-assemble
+    const { data: dayRows } = await supabase
       .from("time_entries")
-      .update({
-        start_time: editStart,
-        end_time: editEnd,
-        pause_start: editPauseFrom || null,
-        pause_end: editPauseTo || null,
-        pause_minutes: pauseMin,
-        stunden: hours,
-        project_id: pid,
-        taetigkeit: pid ? `PL: ${projName}` : "PL: Büro",
-      })
-      .eq("id", editBlock.id);
-    if (error) {
-      toast({ variant: "destructive", title: "Fehler", description: error.message });
+      .select("id, project_id, stunden")
+      .eq("user_id", editBlock.user_id)
+      .eq("datum", editBlock.datum)
+      .eq("entry_typ", "projektleiter");
+
+    if (!dayRows) {
+      toast({ variant: "destructive", title: "Fehler", description: "Tagesdaten konnten nicht geladen werden." });
       return;
     }
-    toast({ title: "Aktualisiert" });
-    setEditBlock(null);
-    await loadBlocks();
+
+    // Build new line list: replace the edited row's data
+    const lines: ProjectLine[] = (dayRows as any[]).map((r) => {
+      if (r.id === editBlock.id) {
+        return { projectId: newProjectId, hours: newHours };
+      }
+      return { projectId: r.project_id || null, hours: parseFloat(r.stunden) || 0 };
+    });
+
+    const aggregated = aggregateByProject(lines);
+    const total = aggregated.reduce((s, l) => s + l.hours, 0);
+    if (total > 16) {
+      toast({ variant: "destructive", title: "Ungültig", description: `Tagessumme ${total}h überschreitet 16h.` });
+      return;
+    }
+
+    try {
+      // DELETE all PL rows for this user/date
+      const { error: delErr } = await supabase
+        .from("time_entries")
+        .delete()
+        .eq("user_id", editBlock.user_id)
+        .eq("datum", editBlock.datum)
+        .eq("entry_typ", "projektleiter");
+      if (delErr) throw delErr;
+
+      if (aggregated.length === 0) {
+        toast({ title: "Gelöscht", description: "Keine Einträge für diesen Tag." });
+        setEditBlock(null);
+        await loadBlocks();
+        return;
+      }
+
+      // Re-assemble with synthetic times
+      const assembled = assembleDayTimes(aggregated);
+      const rows = assembled.map((r) => {
+        const projName = r.projectId ? projects.find((p) => p.id === r.projectId)?.name : "Büro";
+        return {
+          user_id: editBlock.user_id,
+          datum: editBlock.datum,
+          start_time: r.startTime,
+          end_time: r.endTime,
+          pause_start: r.pauseStart,
+          pause_end: r.pauseEnd,
+          pause_minutes: r.pauseMinutes,
+          stunden: r.hours,
+          project_id: r.projectId,
+          taetigkeit: r.projectId ? `PL: ${projName}` : "PL: Büro",
+          entry_typ: "projektleiter",
+        };
+      });
+
+      const { error: insErr } = await supabase.from("time_entries").insert(rows);
+      if (insErr) throw insErr;
+
+      toast({ title: "Aktualisiert", description: `Tag neu berechnet (${total}h)` });
+      setEditBlock(null);
+      await loadBlocks();
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Fehler", description: err.message });
+    }
   };
 
   const deleteBlock = async (b: Block) => {
@@ -593,26 +629,6 @@ export default function ProjektleiterAuswertung() {
           </DialogHeader>
 
           <div className="space-y-3">
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <Label>Start</Label>
-                <Input type="time" value={editStart} onChange={(e) => setEditStart(e.target.value)} />
-              </div>
-              <div className="space-y-1">
-                <Label>Ende</Label>
-                <Input type="time" value={editEnd} onChange={(e) => setEditEnd(e.target.value)} />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <Label>Pause von</Label>
-                <Input type="time" value={editPauseFrom} onChange={(e) => setEditPauseFrom(e.target.value)} />
-              </div>
-              <div className="space-y-1">
-                <Label>Pause bis</Label>
-                <Input type="time" value={editPauseTo} onChange={(e) => setEditPauseTo(e.target.value)} />
-              </div>
-            </div>
             <div className="space-y-1">
               <Label>Projekt</Label>
               <Select value={editProjectId} onValueChange={setEditProjectId}>
@@ -627,11 +643,20 @@ export default function ProjektleiterAuswertung() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="bg-muted/50 rounded p-2 text-center">
-              <div className="text-xs text-muted-foreground">Neue Stunden</div>
-              <div className="font-bold">
-                {computeHours(editStart, editEnd, pauseMinutesFromTimes(editPauseFrom, editPauseTo)).toFixed(2).replace(".", ",")}h
-              </div>
+            <div className="space-y-1">
+              <Label>Stunden</Label>
+              <Input
+                type="number"
+                inputMode="decimal"
+                step="0.25"
+                min="0"
+                max="16"
+                value={editHours}
+                onChange={(e) => setEditHours(e.target.value)}
+              />
+            </div>
+            <div className="text-xs text-muted-foreground">
+              Start-/Endzeit und Pause werden beim Speichern automatisch berechnet (07:00 Start, Pause 12:00–13:00 ab 6h).
             </div>
           </div>
 
