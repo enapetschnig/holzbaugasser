@@ -7,10 +7,10 @@ import {
   Trash2,
   Clock,
   AlertTriangle,
-  Info,
   Save,
   Wand2,
   Building2,
+  CalendarOff,
 } from "lucide-react";
 import { format } from "date-fns";
 import { de } from "date-fns/locale";
@@ -33,12 +33,6 @@ import {
   DialogFooter,
   DialogDescription,
 } from "@/components/ui/dialog";
-import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger,
-} from "@/components/ui/accordion";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
@@ -438,32 +432,6 @@ export default function ProjektleiterTimeTracking() {
       <PageHeader title="Meine Zeiterfassung" />
 
       <main className="container mx-auto px-3 sm:px-4 py-4 sm:py-6 max-w-2xl space-y-4">
-        {/* Info-Box */}
-        <Accordion type="single" collapsible>
-          <AccordionItem value="info" className="border rounded-lg bg-muted/30 px-3">
-            <AccordionTrigger className="text-sm hover:no-underline">
-              <div className="flex items-center gap-2">
-                <Info className="h-4 w-4 text-primary" />
-                <span>Wie funktioniert die Zeiterfassung?</span>
-              </div>
-            </AccordionTrigger>
-            <AccordionContent className="text-sm text-muted-foreground space-y-2 pb-3">
-              <p>
-                Trage nur die <strong>Stunden pro Projekt</strong> ein. Die Uhrzeiten
-                (Start 07:00, Pause 12:00–13:00, Ende automatisch) werden beim Speichern
-                berechnet.
-              </p>
-              <ul className="list-disc ml-5 space-y-1">
-                <li><strong>40 Stunden/Woche</strong> (Mo–Fr je 8h). Mehr = Zeitkonto.</li>
-                <li><strong>Pause 12:00–13:00</strong> automatisch ab 6h Arbeitszeit.</li>
-                <li>Mehrere Projekte am Tag: werden in Eingabereihenfolge zeitlich aufgeteilt.</li>
-                <li><strong>Urlaub / Krankenstand / ZA</strong>: über Menü "Abwesenheit" eintragen.</li>
-                <li>Änderungen werden erst mit <strong>Speichern</strong> übernommen.</li>
-              </ul>
-            </AccordionContent>
-          </AccordionItem>
-        </Accordion>
-
         {/* Datum-Navigation */}
         <Card>
           <CardContent className="pt-4 pb-4">
@@ -538,13 +506,23 @@ export default function ProjektleiterTimeTracking() {
           </Card>
         )}
 
-        {/* Regelarbeitszeit */}
-        {!isWeekend && (
-          <Button variant="outline" onClick={applyRegelarbeitszeit} className="w-full">
-            <Wand2 className="h-4 w-4 mr-2" />
-            Standardtag eintragen (8h)
+        {/* Aktionen: Regelarbeitszeit + Abwesenheit */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          {!isWeekend && (
+            <Button variant="outline" onClick={applyRegelarbeitszeit}>
+              <Wand2 className="h-4 w-4 mr-2" />
+              Standardtag eintragen (8h)
+            </Button>
+          )}
+          <Button
+            variant="outline"
+            onClick={() => navigate("/absence")}
+            className={isWeekend ? "sm:col-span-2" : ""}
+          >
+            <CalendarOff className="h-4 w-4 mr-2" />
+            Urlaub / Krankenstand / ZA eintragen
           </Button>
-        )}
+        </div>
 
         {/* Projekt-Zeilen */}
         <Card>
@@ -615,35 +593,42 @@ export default function ProjektleiterTimeTracking() {
           </CardContent>
         </Card>
 
-        {/* Vorschau der berechneten Zeiten */}
+        {/* Berechnete / gebuchte Zeiten des Tages */}
         {preview.length > 0 && (
           <Card className="border-primary/20 bg-primary/5">
             <CardHeader className="pb-2">
               <CardTitle className="text-sm flex items-center gap-2">
                 <Clock className="h-4 w-4" />
-                Vorschau berechneter Zeiten
+                {originalLines.length > 0 ? "Gebuchte Zeiten des Tages" : "Vorschau gebuchter Zeiten"}
               </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-1.5 text-sm">
+            <CardContent className="space-y-2">
               {preview.map((r, i) => {
                 const projName = r.projectId
                   ? projects.find((p) => p.id === r.projectId)?.name
                   : "Büro";
                 return (
-                  <div key={i} className="flex items-center gap-2 flex-wrap">
-                    <Badge variant="outline" className="font-mono">
-                      {r.startTime}–{r.endTime}
-                    </Badge>
-                    {r.pauseStart && (
-                      <Badge variant="outline" className="text-xs">
-                        Pause {r.pauseStart}–{r.pauseEnd}
+                  <div
+                    key={i}
+                    className="border rounded-lg p-3 bg-background space-y-1"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="font-mono text-base font-semibold">
+                        {r.startTime} – {r.endTime}
+                      </div>
+                      <Badge variant="secondary" className="text-sm">
+                        {formatH(r.hours)}
                       </Badge>
+                    </div>
+                    {r.pauseStart && (
+                      <div className="text-xs text-muted-foreground">
+                        Pause {r.pauseStart}–{r.pauseEnd}
+                      </div>
                     )}
-                    <Badge variant="secondary">{formatH(r.hours)}</Badge>
-                    <span className="text-muted-foreground flex items-center gap-1 min-w-0 truncate">
-                      <Building2 className="h-3 w-3 shrink-0" />
-                      {projName}
-                    </span>
+                    <div className="text-sm flex items-center gap-1.5 text-muted-foreground">
+                      <Building2 className="h-3.5 w-3.5 shrink-0" />
+                      <span className="truncate">{projName}</span>
+                    </div>
                   </div>
                 );
               })}

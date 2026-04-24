@@ -179,13 +179,23 @@ export default function Absence() {
     // Check for existing entries in the date range
     const { data: existingEntries } = await supabase
       .from("time_entries")
-      .select("datum, taetigkeit")
+      .select("id, datum, taetigkeit, entry_typ")
       .eq("user_id", currentUserId)
       .gte("datum", startDate)
       .lte("datum", endDate);
 
-    if (existingEntries && existingEntries.length > 0) {
-      const conflictDates = existingEntries.map(e => {
+    // Separate PL-Arbeitszeit (entry_typ='projektleiter') von anderen Einträgen:
+    // PL-Einträge werden automatisch überschrieben (Absenz hat Vorrang vor PL-Arbeitszeit).
+    // Andere Einträge (Mitarbeiter-Leistungsbericht, bestehende Absenzen) blockieren.
+    const blockingEntries = (existingEntries || []).filter(
+      (e: any) => e.entry_typ !== "projektleiter"
+    );
+    const plEntriesToReplace = (existingEntries || []).filter(
+      (e: any) => e.entry_typ === "projektleiter"
+    );
+
+    if (blockingEntries.length > 0) {
+      const conflictDates = blockingEntries.map((e: any) => {
         const d = new Date(e.datum + "T00:00:00");
         return `${d.toLocaleDateString("de-AT")} (${e.taetigkeit})`;
       });
@@ -195,6 +205,23 @@ export default function Absence() {
         variant: "destructive",
       });
       return;
+    }
+
+    // Auto-delete PL work entries that will be replaced by absence
+    if (plEntriesToReplace.length > 0) {
+      const ids = plEntriesToReplace.map((e: any) => e.id);
+      const { error: delErr } = await supabase
+        .from("time_entries")
+        .delete()
+        .in("id", ids);
+      if (delErr) {
+        toast({ variant: "destructive", title: "Fehler", description: delErr.message });
+        return;
+      }
+      toast({
+        title: "PL-Arbeitszeit überschrieben",
+        description: `${plEntriesToReplace.length} Projektleiter-Eintrag/Einträge wurden durch Absenz ersetzt.`,
+      });
     }
 
     setSaving(true);
