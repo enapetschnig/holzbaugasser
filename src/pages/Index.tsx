@@ -423,29 +423,27 @@ export default function Index() {
 
         {/* Main Actions Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 lg:gap-6">
-          {/* Leistungsbericht - Für alle Rollen außer Extern */}
-          {!isExtern && (
-            <Card
-              className="cursor-pointer hover:shadow-lg transition-all hover:border-primary/50"
-              onClick={() => navigate("/time-tracking")}
-            >
-              <CardHeader className="space-y-2 pb-3">
-                <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center">
-                  <Clock className="h-6 w-6 text-primary" />
-                </div>
-                <CardTitle className="text-lg sm:text-xl">Leistungsbericht</CardTitle>
-                <CardDescription className="text-sm">
-                  Täglichen Leistungsbericht erstellen
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <Button className="w-full" size="sm">Bericht erstellen</Button>
-              </CardContent>
-            </Card>
-          )}
+          {/* Leistungsbericht - Für alle Rollen */}
+          <Card
+            className="cursor-pointer hover:shadow-lg transition-all hover:border-primary/50"
+            onClick={() => navigate("/time-tracking")}
+          >
+            <CardHeader className="space-y-2 pb-3">
+              <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center">
+                <Clock className="h-6 w-6 text-primary" />
+              </div>
+              <CardTitle className="text-lg sm:text-xl">Leistungsbericht</CardTitle>
+              <CardDescription className="text-sm">
+                {isExtern ? "Eigene Arbeitszeit täglich erfassen" : "Täglichen Leistungsbericht erstellen"}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button className="w-full" size="sm">Bericht erstellen</Button>
+            </CardContent>
+          </Card>
 
-          {/* Projektleiter-Zeiterfassung - Für Projektleiter, Admin und Extern */}
-          {(isProjektleiter || isAdmin || isExtern) && (
+          {/* Projektleiter-Zeiterfassung - Nur für Projektleiter und Admin */}
+          {(isProjektleiter || isAdmin) && (
             <Card
               className="cursor-pointer hover:shadow-lg transition-all hover:border-primary/50"
               onClick={() => navigate("/projektleiter-zeiterfassung")}
@@ -456,9 +454,7 @@ export default function Index() {
                 </div>
                 <CardTitle className="text-lg sm:text-xl">Meine Zeiterfassung</CardTitle>
                 <CardDescription className="text-sm">
-                  {isExtern
-                    ? "Arbeitsstunden pro Projekt erfassen"
-                    : "Arbeitszeitblöcke erfassen: Start, Ende, Pause & Projekt (40h/Woche)"}
+                  Arbeitszeitblöcke erfassen: Start, Ende, Pause & Projekt (40h/Woche)
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -512,29 +508,31 @@ export default function Index() {
           {/* Regiearbeiten ausgeblendet - nicht mehr benötigt */}
 
 
-          {/* Urlaub / Abwesenheit - Für alle Benutzer */}
-          <Card
-            className="cursor-pointer hover:shadow-lg transition-all hover:border-primary/50"
-            onClick={() => navigate("/absence")}
-          >
-            <CardHeader className="space-y-2 pb-3">
-              <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center">
-                <Clock className="h-6 w-6 text-primary" />
-              </div>
-              <CardTitle className="text-lg sm:text-xl">Urlaub / Abwesenheit</CardTitle>
-              <CardDescription className="text-sm">
-                Urlaub, Krankenstand, Schule, usw. eintragen
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Button className="w-full" size="sm">Abwesenheit melden</Button>
-            </CardContent>
-          </Card>
+          {/* Urlaub / Abwesenheit - Für alle außer Extern */}
+          {!isExtern && (
+            <Card
+              className="cursor-pointer hover:shadow-lg transition-all hover:border-primary/50"
+              onClick={() => navigate("/absence")}
+            >
+              <CardHeader className="space-y-2 pb-3">
+                <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center">
+                  <Clock className="h-6 w-6 text-primary" />
+                </div>
+                <CardTitle className="text-lg sm:text-xl">Urlaub / Abwesenheit</CardTitle>
+                <CardDescription className="text-sm">
+                  Urlaub, Krankenstand, Schule, usw. eintragen
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Button className="w-full" size="sm">Abwesenheit melden</Button>
+              </CardContent>
+            </Card>
+          )}
 
-          {/* Meine Dokumente - Für Mitarbeiter + Vorarbeiter */}
-          {!isAdmin && (
-            <Card 
-              className="cursor-pointer hover:shadow-lg transition-all hover:border-primary/50" 
+          {/* Meine Dokumente - Für Mitarbeiter + Vorarbeiter (nicht Admin, nicht Extern) */}
+          {!isAdmin && !isExtern && (
+            <Card
+              className="cursor-pointer hover:shadow-lg transition-all hover:border-primary/50"
               onClick={() => navigate("/my-documents")}
             >
               <CardHeader className="space-y-2 pb-3">

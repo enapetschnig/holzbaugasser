@@ -128,6 +128,7 @@ const TimeTracking = () => {
   // Auth & role
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [isExtern, setIsExtern] = useState(false);
   const [loading, setLoading] = useState(true);
 
   // Data
@@ -249,8 +250,9 @@ const TimeTracking = () => {
         .eq("user_id", user.id)
         .single();
 
-      const role = data?.role;
+      const role = data?.role as string | undefined;
       setIsAdmin(role === "administrator");
+      setIsExtern(role === "extern");
       setLoading(false);
     };
     checkRole();
@@ -285,13 +287,21 @@ const TimeTracking = () => {
 
     if (projectsRes.data) setProjects(projectsRes.data);
     if (profilesRes.data) {
-      // Filter out: hidden profiles AND external users (cannot be added to Leistungsbericht)
-      const filtered = (profilesRes.data as any[]).filter(
-        (p: any) => !p.is_hidden && !externIds.has(p.id)
-      );
+      let filtered: any[];
+      if (isExtern && currentUserId) {
+        // Extern darf nur sich selbst eintragen
+        filtered = (profilesRes.data as any[]).filter(
+          (p: any) => !p.is_hidden && p.id === currentUserId
+        );
+      } else {
+        // Andere Rollen: hidden profiles + externe ausblenden
+        filtered = (profilesRes.data as any[]).filter(
+          (p: any) => !p.is_hidden && !externIds.has(p.id)
+        );
+      }
       setProfiles(filtered as Profile[]);
     }
-  }, []);
+  }, [isExtern, currentUserId]);
 
   useEffect(() => {
     if (!loading) loadData();
@@ -1508,24 +1518,28 @@ const TimeTracking = () => {
                   })()}
                 </p>
               </div>
-              <Button variant="outline" size="sm" onClick={openMitarbeiterDialog}>
-                <Plus className="h-4 w-4 mr-1" />
-                Mitarbeiter
-              </Button>
+              {!isExtern && (
+                <Button variant="outline" size="sm" onClick={openMitarbeiterDialog}>
+                  <Plus className="h-4 w-4 mr-1" />
+                  Mitarbeiter
+                </Button>
+              )}
             </div>
           </CardHeader>
           <CardContent>
-            {/* Gleiche Stunden toggle */}
-            <div className="flex items-center gap-3 mb-4">
-              <Switch
-                id="gleiche-stunden"
-                checked={gleicheStundenFuerAlle}
-                onCheckedChange={setGleicheStundenFuerAlle}
-              />
-              <Label htmlFor="gleiche-stunden" className="text-sm cursor-pointer">
-                Stunden für alle Mitarbeiter gleich übernehmen
-              </Label>
-            </div>
+            {/* Gleiche Stunden toggle - nicht für Extern (eintraegt sich nur selbst) */}
+            {!isExtern && (
+              <div className="flex items-center gap-3 mb-4">
+                <Switch
+                  id="gleiche-stunden"
+                  checked={gleicheStundenFuerAlle}
+                  onCheckedChange={setGleicheStundenFuerAlle}
+                />
+                <Label htmlFor="gleiche-stunden" className="text-sm cursor-pointer">
+                  Stunden für alle Mitarbeiter gleich übernehmen
+                </Label>
+              </div>
+            )}
 
             {/* ===== MOBILE: Card-Layout (< sm) ===== */}
             <div className="sm:hidden space-y-3">

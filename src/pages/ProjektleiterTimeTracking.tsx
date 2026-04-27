@@ -123,14 +123,14 @@ export default function ProjektleiterTimeTracking() {
         .select("role")
         .eq("user_id", user.id)
         .maybeSingle();
-      const role = roleData?.role || null;
+      const role = (roleData?.role as string | null) || null;
       setUserRole(role);
 
-      if (role !== "projektleiter" && role !== "administrator" && role !== "extern") {
+      if (role !== "projektleiter" && role !== "administrator") {
         toast({
           variant: "destructive",
           title: "Kein Zugriff",
-          description: "Diese Seite ist nur für Projektleiter und Externe.",
+          description: "Diese Seite ist nur für Projektleiter.",
         });
         navigate("/");
         return;
@@ -141,7 +141,8 @@ export default function ProjektleiterTimeTracking() {
         .select("monats_soll_stunden")
         .eq("user_id", user.id)
         .maybeSingle();
-      if (emp?.monats_soll_stunden) setWeeklyHours(emp.monats_soll_stunden);
+      const empAny = emp as any;
+      if (empAny?.monats_soll_stunden) setWeeklyHours(empAny.monats_soll_stunden);
 
       const { data: projData } = await supabase
         .from("projects")
@@ -363,11 +364,11 @@ export default function ProjektleiterTimeTracking() {
     setSaving(true);
     try {
       // 5. DELETE all existing PL entries for (user, date)
-      const { error: delErr } = await supabase
+      const { error: delErr } = await (supabase
         .from("time_entries")
         .delete()
         .eq("user_id", userId)
-        .eq("datum", date)
+        .eq("datum", date) as any)
         .eq("entry_typ", "projektleiter");
       if (delErr) throw delErr;
 
