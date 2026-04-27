@@ -290,6 +290,7 @@ export default function HoursReport() {
   // Shared data
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [profileMap, setProfileMap] = useState<Record<string, Profile>>({});
+  const [externIds, setExternIds] = useState<Set<string>>(new Set());
 
   // Tab 1: Arbeitszeiterfassung state
   const [gridMonth, setGridMonth] = useState(() => {
@@ -379,12 +380,21 @@ export default function HoursReport() {
   };
 
   const fetchProfiles = async () => {
-    // Load roles to filter out administrators and projektleiter
+    // Load all roles to determine: who to exclude (admin, projektleiter) and who is extern (for badge)
     const { data: rolesData } = await supabase
       .from("user_roles")
-      .select("user_id, role")
-      .in("role", ["administrator", "projektleiter"]);
-    const excludeIds = new Set((rolesData || []).map((r: any) => r.user_id));
+      .select("user_id, role");
+    const excludeIds = new Set(
+      (rolesData || [])
+        .filter((r: any) => r.role === "administrator" || r.role === "projektleiter")
+        .map((r: any) => r.user_id)
+    );
+    const externs = new Set(
+      (rolesData || [])
+        .filter((r: any) => r.role === "extern")
+        .map((r: any) => r.user_id as string)
+    );
+    setExternIds(externs);
 
     const { data } = await supabase
       .from("profiles")
@@ -392,7 +402,8 @@ export default function HoursReport() {
       .eq("is_active", true)
       .order("nachname");
     if (data) {
-      // Filter out administrators, projektleiter, and hidden profiles
+      // Filter out administrators, projektleiter, and hidden profiles.
+      // Extern users remain visible (with badge).
       const filtered = data.filter((p) => !excludeIds.has(p.id) && !(p as any).is_hidden);
       setProfiles(filtered);
       const map: Record<string, Profile> = {};
@@ -1416,10 +1427,25 @@ export default function HoursReport() {
                             const displayIst = showWithZA ? totalHours : Math.min(totalHours, monthlyTarget);
                             const diff = displayIst - monthlyTarget;
 
+                            const isExternUser = externIds.has(employee.id);
                             return (
-                              <tr key={employee.id} className="hover:bg-muted/20">
-                                <td className="sticky left-0 z-10 bg-card border border-border px-2 py-1 font-medium whitespace-nowrap">
-                                  {employee.nachname} {employee.vorname}
+                              <tr
+                                key={employee.id}
+                                className={`hover:bg-muted/20 ${isExternUser ? "bg-orange-50/40 dark:bg-orange-950/10" : ""}`}
+                              >
+                                <td
+                                  className={`sticky left-0 z-10 border border-border px-2 py-1 font-medium whitespace-nowrap ${
+                                    isExternUser ? "bg-orange-50 dark:bg-orange-950/20" : "bg-card"
+                                  }`}
+                                >
+                                  <span className="flex items-center gap-1.5">
+                                    {employee.nachname} {employee.vorname}
+                                    {isExternUser && (
+                                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-orange-500 text-white">
+                                        EXT
+                                      </span>
+                                    )}
+                                  </span>
                                 </td>
                                 {Array.from({ length: daysInMonth }, (_, i) => {
                                   const day = i + 1;
@@ -1530,6 +1556,12 @@ export default function HoursReport() {
                     <strong>Schule</strong> = Berufsschule
                   </span>
                   <span className="bg-orange-100 px-1 rounded">Sa/So</span>
+                  <span className="flex items-center gap-1">
+                    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-orange-500 text-white">
+                      EXT
+                    </span>
+                    = Externer Mitarbeiter
+                  </span>
                 </div>
               </CardContent>
             </Card>

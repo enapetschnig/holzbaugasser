@@ -319,6 +319,7 @@ export default function Index() {
   const isAdmin = userRole === "administrator";
   const isVorarbeiter = userRole === "vorarbeiter";
   const isProjektleiter = userRole === "projektleiter";
+  const isExtern = userRole === "extern";
   const canManageTime = isAdmin || isVorarbeiter || isProjektleiter;
   const canCreateProjects = isAdmin || isVorarbeiter || isProjektleiter;
   const canViewHoursReport = isAdmin || isProjektleiter;
@@ -422,27 +423,29 @@ export default function Index() {
 
         {/* Main Actions Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 lg:gap-6">
-          {/* Leistungsbericht - Für alle Rollen */}
-          <Card
-            className="cursor-pointer hover:shadow-lg transition-all hover:border-primary/50"
-            onClick={() => navigate("/time-tracking")}
-          >
-            <CardHeader className="space-y-2 pb-3">
-              <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center">
-                <Clock className="h-6 w-6 text-primary" />
-              </div>
-              <CardTitle className="text-lg sm:text-xl">Leistungsbericht</CardTitle>
-              <CardDescription className="text-sm">
-                Täglichen Leistungsbericht erstellen
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Button className="w-full" size="sm">Bericht erstellen</Button>
-            </CardContent>
-          </Card>
+          {/* Leistungsbericht - Für alle Rollen außer Extern */}
+          {!isExtern && (
+            <Card
+              className="cursor-pointer hover:shadow-lg transition-all hover:border-primary/50"
+              onClick={() => navigate("/time-tracking")}
+            >
+              <CardHeader className="space-y-2 pb-3">
+                <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center">
+                  <Clock className="h-6 w-6 text-primary" />
+                </div>
+                <CardTitle className="text-lg sm:text-xl">Leistungsbericht</CardTitle>
+                <CardDescription className="text-sm">
+                  Täglichen Leistungsbericht erstellen
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Button className="w-full" size="sm">Bericht erstellen</Button>
+              </CardContent>
+            </Card>
+          )}
 
-          {/* Projektleiter-Zeiterfassung - Nur für Projektleiter + Admin */}
-          {(isProjektleiter || isAdmin) && (
+          {/* Projektleiter-Zeiterfassung - Für Projektleiter, Admin und Extern */}
+          {(isProjektleiter || isAdmin || isExtern) && (
             <Card
               className="cursor-pointer hover:shadow-lg transition-all hover:border-primary/50"
               onClick={() => navigate("/projektleiter-zeiterfassung")}
@@ -453,7 +456,9 @@ export default function Index() {
                 </div>
                 <CardTitle className="text-lg sm:text-xl">Meine Zeiterfassung</CardTitle>
                 <CardDescription className="text-sm">
-                  Arbeitszeitblöcke erfassen: Start, Ende, Pause & Projekt (40h/Woche)
+                  {isExtern
+                    ? "Arbeitsstunden pro Projekt erfassen"
+                    : "Arbeitszeitblöcke erfassen: Start, Ende, Pause & Projekt (40h/Woche)"}
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -462,24 +467,26 @@ export default function Index() {
             </Card>
           )}
 
-          {/* Projekte - Für alle */}
-          <Card 
-            className="cursor-pointer hover:shadow-lg transition-all hover:border-primary/50" 
-            onClick={() => navigate("/projects")}
-          >
-            <CardHeader className="space-y-2 pb-3">
-              <div className="h-12 w-12 rounded-lg bg-accent/10 flex items-center justify-center">
-                <FolderKanban className="h-6 w-6 text-accent" />
-              </div>
-              <CardTitle className="text-lg sm:text-xl">Projekte</CardTitle>
-              <CardDescription className="text-sm">
-                {isAdmin ? "Bauvorhaben & Dokumentation" : canCreateProjects ? "Projekte & Dokumentation" : "Fotos & Dokumente hochladen"}
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Button className="w-full" size="sm" variant="secondary">Projekte öffnen</Button>
-            </CardContent>
-          </Card>
+          {/* Projekte - Für alle außer Extern */}
+          {!isExtern && (
+            <Card
+              className="cursor-pointer hover:shadow-lg transition-all hover:border-primary/50"
+              onClick={() => navigate("/projects")}
+            >
+              <CardHeader className="space-y-2 pb-3">
+                <div className="h-12 w-12 rounded-lg bg-accent/10 flex items-center justify-center">
+                  <FolderKanban className="h-6 w-6 text-accent" />
+                </div>
+                <CardTitle className="text-lg sm:text-xl">Projekte</CardTitle>
+                <CardDescription className="text-sm">
+                  {isAdmin ? "Bauvorhaben & Dokumentation" : canCreateProjects ? "Projekte & Dokumentation" : "Fotos & Dokumente hochladen"}
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Button className="w-full" size="sm" variant="secondary">Projekte öffnen</Button>
+              </CardContent>
+            </Card>
+          )}
 
           {/* Meine Stunden - Für Admin + Vorarbeiter */}
           {canManageTime && (

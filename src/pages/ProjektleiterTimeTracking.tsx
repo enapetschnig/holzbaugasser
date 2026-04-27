@@ -126,11 +126,11 @@ export default function ProjektleiterTimeTracking() {
       const role = roleData?.role || null;
       setUserRole(role);
 
-      if (role !== "projektleiter" && role !== "administrator") {
+      if (role !== "projektleiter" && role !== "administrator" && role !== "extern") {
         toast({
           variant: "destructive",
           title: "Kein Zugriff",
-          description: "Diese Seite ist nur für Projektleiter.",
+          description: "Diese Seite ist nur für Projektleiter und Externe.",
         });
         navigate("/");
         return;

@@ -72,7 +72,7 @@ export function isNonWorkingDay(date: Date): boolean {
   return dayOfWeek === 0 || dayOfWeek === 6;
 }
 
-export type Role = "administrator" | "projektleiter" | "vorarbeiter" | "mitarbeiter";
+export type Role = "administrator" | "projektleiter" | "vorarbeiter" | "mitarbeiter" | "extern";
 
 /**
  * Returns the local date as "YYYY-MM-DD" string (no timezone conversion).

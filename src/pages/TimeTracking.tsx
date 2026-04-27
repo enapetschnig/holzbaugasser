@@ -260,7 +260,7 @@ const TimeTracking = () => {
   // Load projects & profiles
   // -------------------------------------------------------------------------
   const loadData = useCallback(async () => {
-    const [projectsRes, profilesRes] = await Promise.all([
+    const [projectsRes, profilesRes, rolesRes] = await Promise.all([
       supabase
         .from("projects")
         .select("id, name, plz, adresse, status")
@@ -271,10 +271,26 @@ const TimeTracking = () => {
         .select("id, vorname, nachname, is_hidden")
         .eq("is_active", true)
         .order("nachname"),
+      supabase
+        .from("user_roles")
+        .select("user_id, role"),
     ]);
 
+    // Build set of extern user IDs to exclude from Mitarbeiter selection
+    const externIds = new Set(
+      (rolesRes.data || [])
+        .filter((r: any) => r.role === "extern")
+        .map((r: any) => r.user_id)
+    );
+
     if (projectsRes.data) setProjects(projectsRes.data);
-    if (profilesRes.data) setProfiles(profilesRes.data.filter((p: any) => !p.is_hidden));
+    if (profilesRes.data) {
+      // Filter out: hidden profiles AND external users (cannot be added to Leistungsbericht)
+      const filtered = (profilesRes.data as any[]).filter(
+        (p: any) => !p.is_hidden && !externIds.has(p.id)
+      );
+      setProfiles(filtered as Profile[]);
+    }
   }, []);
 
   useEffect(() => {

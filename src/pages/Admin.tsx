@@ -797,6 +797,7 @@ export default function Admin() {
                             <SelectItem value="vorarbeiter">Vorarbeiter</SelectItem>
                             <SelectItem value="projektleiter">Projektleiter</SelectItem>
                             <SelectItem value="mitarbeiter">Mitarbeiter</SelectItem>
+                            <SelectItem value="extern">Extern</SelectItem>
                           </SelectContent>
                         </Select>
                         <div className="flex gap-2">
@@ -924,7 +925,7 @@ export default function Admin() {
                           )}
                         </p>
                         <p className="text-sm text-muted-foreground">
-                          {userRoles[profile.id] === "administrator" ? "Administrator" : userRoles[profile.id] === "vorarbeiter" ? "Vorarbeiter" : userRoles[profile.id] === "projektleiter" ? "Projektleiter" : "Mitarbeiter"}
+                          {userRoles[profile.id] === "administrator" ? "Administrator" : userRoles[profile.id] === "vorarbeiter" ? "Vorarbeiter" : userRoles[profile.id] === "projektleiter" ? "Projektleiter" : userRoles[profile.id] === "extern" ? "Extern" : "Mitarbeiter"}
                         </p>
                       </div>
                     </div>
@@ -941,6 +942,7 @@ export default function Admin() {
                           <SelectItem value="vorarbeiter">Vorarbeiter</SelectItem>
                           <SelectItem value="projektleiter">Projektleiter</SelectItem>
                           <SelectItem value="mitarbeiter">Mitarbeiter</SelectItem>
+                          <SelectItem value="extern">Extern</SelectItem>
                         </SelectContent>
                       </Select>
 
