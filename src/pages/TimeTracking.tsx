@@ -251,6 +251,15 @@ const TimeTracking = () => {
     [ankunftZeit]
   );
 
+  // Abfahrt Baustelle automatisch setzen je nach Wochentag (Fr 15:00, sonst 16:00).
+  // Wird nur fürs PDF und time_entries.end_time verwendet, nicht für Berechnungen.
+  useEffect(() => {
+    if (!datum) return;
+    const dow = new Date(datum + "T00:00:00").getDay();
+    const auto = dow === 5 ? "15:00" : "16:00";
+    setAbfahrtZeit(auto);
+  }, [datum]);
+
   // Rüstzeit/Anfahrt = (Ankunft − Arbeitsbeginn) in Stunden, gerundet auf 0.25
   const ruestzeitStunden = useMemo(() => {
     const parseT = (t: string) => {
@@ -671,7 +680,7 @@ const TimeTracking = () => {
   const validate = (): string | null => {
     if (!projektId) return "Bitte ein Projekt auswählen.";
     if (!datum) return "Bitte ein Datum eingeben.";
-    if (!ankunftZeit || !abfahrtZeit) return "Ankunft- und Abfahrtszeit sind erforderlich.";
+    if (!ankunftZeit) return "Ankunftszeit ist erforderlich.";
 
     const activeTaetigkeiten = taetigkeiten.filter((t) => t.bezeichnung.trim());
     if (activeTaetigkeiten.length === 0 && !pos1Text) {
@@ -1541,7 +1550,7 @@ const TimeTracking = () => {
             <CardTitle className="text-lg">Zeitangaben</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
               <div className="space-y-2">
                 <Label>Arbeitsbeginn</Label>
                 <Input
@@ -1556,14 +1565,6 @@ const TimeTracking = () => {
                   type="time"
                   value={ankunftZeit}
                   onChange={(e) => setAnkunftZeit(e.target.value)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Abfahrt Baustelle</Label>
-                <Input
-                  type="time"
-                  value={abfahrtZeit}
-                  onChange={(e) => setAbfahrtZeit(e.target.value)}
                 />
               </div>
               <div className="space-y-2">

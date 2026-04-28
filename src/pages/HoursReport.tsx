@@ -330,13 +330,10 @@ export default function HoursReport() {
   // Tab 2: Leistungsberichte state
   const [berichte, setBerichte] = useState<ExistingBericht[]>([]);
   const [berichteLoading, setBerichteLoading] = useState(false);
-  const [berichteStartDate, setBerichteStartDate] = useState(() => {
-    const now = new Date();
-    return new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split("T")[0];
-  });
-  const [berichteEndDate, setBerichteEndDate] = useState(
-    () => new Date().toISOString().split("T")[0]
-  );
+  // Filter sind optional — leer = neueste Berichte (limitiert auf 100)
+  const [berichteStartDate, setBerichteStartDate] = useState("");
+  const [berichteEndDate, setBerichteEndDate] = useState("");
+  const [berichteFilterOpen, setBerichteFilterOpen] = useState(false);
   const [berichteVorarbeiter, setBerichteVorarbeiter] = useState("all");
   const [berichteMitarbeiter, setBerichteMitarbeiter] = useState("all");
   const [berichteProjekt, setBerichteProjekt] = useState("all");
@@ -616,12 +613,17 @@ export default function HoursReport() {
     setBerichteProjects(projectsData || []);
 
     // Load berichte (without FK join - projekt_id can be null)
-    const { data, error } = await supabase
+    // Filter sind optional: ohne Datums-Filter werden die neuesten 100 Berichte geladen.
+    let q = supabase
       .from("leistungsberichte" as any)
       .select("id, datum, objekt, projekt_id, erstellt_von, archived")
-      .gte("datum", berichteStartDate)
-      .lte("datum", berichteEndDate)
       .order("datum", { ascending: false });
+
+    if (berichteStartDate) q = q.gte("datum", berichteStartDate);
+    if (berichteEndDate) q = q.lte("datum", berichteEndDate);
+    if (!berichteStartDate && !berichteEndDate) q = q.limit(100);
+
+    const { data, error } = await q;
 
     if (error || !data) {
       console.error("Error loading berichte:", error);
@@ -1576,7 +1578,38 @@ export default function HoursReport() {
                 <CardTitle className="text-lg">Leistungsberichte</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                {/* Filters */}
+                {/* Filter-Toggle + aktive Filter-Anzeige */}
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setBerichteFilterOpen((v) => !v)}
+                  >
+                    Filter {berichteFilterOpen ? "ausblenden" : "anzeigen"}
+                    {(berichteStartDate || berichteEndDate || berichteProjekt !== "all") && (
+                      <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-primary text-primary-foreground">
+                        aktiv
+                      </span>
+                    )}
+                  </Button>
+                  {(berichteStartDate || berichteEndDate || berichteProjekt !== "all") && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setBerichteStartDate("");
+                        setBerichteEndDate("");
+                        setBerichteProjekt("all");
+                      }}
+                    >
+                      Filter zurücksetzen
+                    </Button>
+                  )}
+                </div>
+
+                {/* Filters (collapsible) */}
+                {berichteFilterOpen && (
+                <>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                   <div>
                     <label className="text-sm font-medium mb-1 block">Von</label>
@@ -1675,6 +1708,8 @@ export default function HoursReport() {
                     Dieses Jahr
                   </Button>
                 </div>
+                </>
+                )}
 
                 {/* Active/Archived toggle + actions */}
                 <div className="flex items-center justify-between flex-wrap gap-2">
