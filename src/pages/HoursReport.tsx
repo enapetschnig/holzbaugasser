@@ -17,7 +17,7 @@ import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import ProjectHoursReport from "@/components/ProjectHoursReport";
 import ProjektleiterAuswertung from "@/components/ProjektleiterAuswertung";
-import { FileSpreadsheet, Building2, ClipboardList, Loader2, Download, X, Clock } from "lucide-react";
+import { FileSpreadsheet, Building2, ClipboardList, Loader2, Download, X, Clock, Pencil } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -1779,7 +1779,7 @@ export default function HoursReport() {
                               {b.total_stunden.toFixed(1)} h
                             </td>
                             <td className="border-b px-3 py-2 text-center">
-                              <div className="flex gap-1 justify-center">
+                              <div className="flex gap-1 justify-center flex-wrap">
                                 <Button
                                   variant="outline"
                                   size="sm"
@@ -1796,6 +1796,17 @@ export default function HoursReport() {
                                   <Download className="w-3.5 h-3.5 mr-1" />
                                   ohne ZA
                                 </Button>
+                                {isAdmin && (
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => navigate(`/time-tracking?edit=${b.id}`)}
+                                    title="Leistungsbericht bearbeiten"
+                                  >
+                                    <Pencil className="w-3.5 h-3.5 mr-1" />
+                                    Bearbeiten
+                                  </Button>
+                                )}
                               </div>
                             </td>
                           </tr>

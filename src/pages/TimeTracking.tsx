@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Plus, Trash2, Save, FileText, Users, CalendarDays, Info } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PageHeader } from "@/components/PageHeader";
@@ -123,6 +123,7 @@ function createEmptyMitarbeiterRow(): MitarbeiterRow {
 
 const TimeTracking = () => {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { toast } = useToast();
 
   // Auth & role
@@ -618,6 +619,15 @@ const TimeTracking = () => {
       });
     }
   }, [currentUserId, profiles, editingBerichtId]);
+
+  // Load Bericht for editing when ?edit=<id> URL param present
+  useEffect(() => {
+    const editId = searchParams.get("edit");
+    if (editId && currentUserId && profiles.length > 0 && editingBerichtId !== editId) {
+      loadBericht(editId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, currentUserId, profiles]);
 
   // -------------------------------------------------------------------------
   // Build Taetigkeiten display list (with auto-filled positions)
@@ -1258,6 +1268,29 @@ const TimeTracking = () => {
       <PageHeader title="Leistungsbericht" />
 
       <div className="container mx-auto px-3 sm:px-4 lg:px-6 py-4 sm:py-6 space-y-6 max-w-5xl">
+        {/* Edit-Mode Banner */}
+        {editingBerichtId && (
+          <div className="rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-700 px-4 py-3 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 text-sm">
+              <Save className="h-4 w-4 text-amber-600" />
+              <span className="font-medium">Bestehenden Leistungsbericht bearbeiten</span>
+              <span className="text-muted-foreground hidden sm:inline">
+                — Änderungen werden mit "Bericht aktualisieren" gespeichert
+              </span>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                resetForm();
+                setSearchParams({});
+              }}
+            >
+              Abbrechen
+            </Button>
+          </div>
+        )}
+
         {/* ---------- HEADER ---------- */}
         <Card>
           <CardHeader className="pb-3">
@@ -1949,7 +1982,15 @@ const TimeTracking = () => {
                 : "Leistungsbericht speichern"}
             </Button>
             {editingBerichtId && (
-              <Button variant="outline" size="lg" className="w-full sm:w-auto h-12 sm:h-10" onClick={resetForm}>
+              <Button
+                variant="outline"
+                size="lg"
+                className="w-full sm:w-auto h-12 sm:h-10"
+                onClick={() => {
+                  resetForm();
+                  setSearchParams({});
+                }}
+              >
                 Abbrechen
               </Button>
             )}
