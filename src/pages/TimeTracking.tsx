@@ -129,6 +129,7 @@ const TimeTracking = () => {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [isExtern, setIsExtern] = useState(false);
+  const [isSelfOnly, setIsSelfOnly] = useState(false); // Mitarbeiter + Extern: kann nur sich selbst eintragen
   const [loading, setLoading] = useState(true);
 
   // Data
@@ -139,6 +140,7 @@ const TimeTracking = () => {
   const [datum, setDatum] = useState(format(new Date(), "yyyy-MM-dd"));
   const [projektId, setProjektId] = useState("");
   const [objekt, setObjekt] = useState("");
+  const [arbeitsbeginn, setArbeitsbeginn] = useState("06:30");
   const [ankunftZeit, setAnkunftZeit] = useState("07:00");
   const [abfahrtZeit, setAbfahrtZeit] = useState("16:00");
   const [pauseVon, setPauseVon] = useState("12:00");
@@ -224,6 +226,33 @@ const TimeTracking = () => {
     [ankunftZeit]
   );
 
+  // Rüstzeit/Anfahrt = (Ankunft − Arbeitsbeginn) in Stunden, gerundet auf 0.25
+  const ruestzeitStunden = useMemo(() => {
+    const parseT = (t: string) => {
+      const [h, m] = t.split(":").map(Number);
+      if (isNaN(h) || isNaN(m)) return null;
+      return h * 60 + m;
+    };
+    const ab = parseT(arbeitsbeginn);
+    const ak = parseT(ankunftZeit);
+    if (ab == null || ak == null) return 0.5;
+    const diffMin = ak - ab;
+    if (diffMin <= 0) return 0;
+    // auf Viertelstunden runden
+    return Math.round((diffMin / 60) * 4) / 4;
+  }, [arbeitsbeginn, ankunftZeit]);
+
+  // Wenn Arbeitsbeginn/Ankunft sich ändern: Position 1 Stunden für alle MA auf neuen Wert setzen
+  useEffect(() => {
+    setMitarbeiterRows((prev) =>
+      prev.map((row) => ({
+        ...row,
+        stunden: { ...row.stunden, 1: ruestzeitStunden },
+      }))
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ruestzeitStunden]);
+
   // Auto-fill pause text for last position
   const pauseText = useMemo(() => {
     if (!pauseVon || !pauseBis) return "Pause";
@@ -253,6 +282,8 @@ const TimeTracking = () => {
       const role = data?.role as string | undefined;
       setIsAdmin(role === "administrator");
       setIsExtern(role === "extern");
+      // Mitarbeiter + Extern: dürfen nur sich selbst eintragen
+      setIsSelfOnly(role === "mitarbeiter" || role === "extern");
       setLoading(false);
     };
     checkRole();
@@ -288,20 +319,20 @@ const TimeTracking = () => {
     if (projectsRes.data) setProjects(projectsRes.data);
     if (profilesRes.data) {
       let filtered: any[];
-      if (isExtern && currentUserId) {
-        // Extern darf nur sich selbst eintragen
+      if (isSelfOnly && currentUserId) {
+        // Mitarbeiter + Extern: darf nur sich selbst eintragen
         filtered = (profilesRes.data as any[]).filter(
           (p: any) => !p.is_hidden && p.id === currentUserId
         );
       } else {
-        // Andere Rollen: hidden profiles + externe ausblenden
+        // Admin/VA/PL: hidden profiles + externe ausblenden
         filtered = (profilesRes.data as any[]).filter(
           (p: any) => !p.is_hidden && !externIds.has(p.id)
         );
       }
       setProfiles(filtered as Profile[]);
     }
-  }, [isExtern, currentUserId]);
+  }, [isSelfOnly, currentUserId]);
 
   useEffect(() => {
     if (!loading) loadData();
@@ -489,7 +520,7 @@ const TimeTracking = () => {
       // If "gleiche Stunden" is active, copy first row's stunden to new rows
       const firstStunden = gleicheStundenFuerAlle && cleaned.length > 0
         ? { ...cleaned[0].stunden }
-        : { 1: 0.5 };
+        : { 1: ruestzeitStunden };
       const newRows: MitarbeiterRow[] = Array.from(selectedNewMitarbeiter).map(
         (profileId) => ({
           ...createEmptyMitarbeiterRow(),
@@ -712,6 +743,7 @@ const TimeTracking = () => {
           projekt_id: projektId,
           datum,
           objekt: objekt || null,
+          arbeitsbeginn: arbeitsbeginn || null,
           ankunft_zeit: ankunftZeit,
           abfahrt_zeit: abfahrtZeit,
           pause_von: pauseVon || null,
@@ -943,6 +975,7 @@ const TimeTracking = () => {
     setEditingBerichtId(null);
     setProjektId("");
     setObjekt("");
+    setArbeitsbeginn("06:30");
     setAnkunftZeit("07:00");
     setAbfahrtZeit("16:00");
     setPauseVon("12:00");
@@ -983,6 +1016,7 @@ const TimeTracking = () => {
       setDatum(b.datum);
       setProjektId(b.projekt_id);
       setObjekt(b.objekt || "");
+      setArbeitsbeginn(b.arbeitsbeginn || "06:30");
       setAnkunftZeit(b.ankunft_zeit || "07:00");
       setAbfahrtZeit(b.abfahrt_zeit || "16:00");
       setPauseVon(b.pause_von || "12:00");
@@ -1247,10 +1281,10 @@ const TimeTracking = () => {
                   value={datum}
                   onChange={(e) => {
                     setDatum(e.target.value);
-                    // Reset stunden when date changes (new day = fresh start, keep 0.5h for Tätigkeit 1)
+                    // Reset stunden when date changes (new day = fresh start, keep auto-calculated Rüstzeit für Tätigkeit 1)
                     if (!editingBerichtId) {
                       setMitarbeiterRows((prev) =>
-                        prev.map((row) => ({ ...row, stunden: { 1: 0.5 } }))
+                        prev.map((row) => ({ ...row, stunden: { 1: ruestzeitStunden } }))
                       );
                     }
                   }}
@@ -1333,7 +1367,15 @@ const TimeTracking = () => {
             <CardTitle className="text-lg">Zeitangaben</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
+              <div className="space-y-2">
+                <Label>Arbeitsbeginn</Label>
+                <Input
+                  type="time"
+                  value={arbeitsbeginn}
+                  onChange={(e) => setArbeitsbeginn(e.target.value)}
+                />
+              </div>
               <div className="space-y-2">
                 <Label>Ankunft Baustelle</Label>
                 <Input
@@ -1518,7 +1560,7 @@ const TimeTracking = () => {
                   })()}
                 </p>
               </div>
-              {!isExtern && (
+              {!isSelfOnly && (
                 <Button variant="outline" size="sm" onClick={openMitarbeiterDialog}>
                   <Plus className="h-4 w-4 mr-1" />
                   Mitarbeiter
@@ -1527,8 +1569,8 @@ const TimeTracking = () => {
             </div>
           </CardHeader>
           <CardContent>
-            {/* Gleiche Stunden toggle - nicht für Extern (eintraegt sich nur selbst) */}
-            {!isExtern && (
+            {/* Gleiche Stunden toggle - nicht für Mitarbeiter/Extern (eintraegt sich nur selbst) */}
+            {!isSelfOnly && (
               <div className="flex items-center gap-3 mb-4">
                 <Switch
                   id="gleiche-stunden"
