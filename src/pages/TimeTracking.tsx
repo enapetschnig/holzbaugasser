@@ -702,6 +702,31 @@ const TimeTracking = () => {
       }
     }
 
+    // Wenn nicht im Edit-Modus: prüfe ob bereits ein Bericht für (User, Projekt, Datum) existiert.
+    // DB hat Unique-Constraint auf (erstellt_von, projekt_id, datum), daher würde INSERT fehlschlagen.
+    // Stattdessen: bestehenden Bericht in den Edit-Modus laden.
+    if (!editingBerichtId && currentUserId && projektId) {
+      const { data: existingBericht } = await supabase
+        .from("leistungsberichte" as any)
+        .select("id")
+        .eq("erstellt_von", currentUserId)
+        .eq("projekt_id", projektId)
+        .eq("datum", datum)
+        .maybeSingle();
+
+      if ((existingBericht as any)?.id) {
+        toast({
+          title: "Bericht existiert bereits",
+          description:
+            "Du hast für dieses Projekt am " +
+            datum +
+            " bereits einen Leistungsbericht. Der bestehende wird geladen — bitte ändere und drücke 'Bericht aktualisieren'.",
+        });
+        await loadBericht((existingBericht as any).id);
+        return;
+      }
+    }
+
     setSaving(true);
     try {
       // If editing, delete old records first
