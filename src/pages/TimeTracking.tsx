@@ -182,6 +182,9 @@ const TimeTracking = () => {
     { position: 4, bezeichnung: "" },
   ]);
 
+  // Tätigkeits-Vorlagen (zentrale Liste, vom Admin verwaltet)
+  const [taetigkeitTemplates, setTaetigkeitTemplates] = useState<string[]>([]);
+
   // Form: Mitarbeiter
   const [mitarbeiterRows, setMitarbeiterRows] = useState<MitarbeiterRow[]>([
     createEmptyMitarbeiterRow(),
@@ -327,7 +330,7 @@ const TimeTracking = () => {
   // Load projects & profiles
   // -------------------------------------------------------------------------
   const loadData = useCallback(async () => {
-    const [projectsRes, profilesRes, rolesRes] = await Promise.all([
+    const [projectsRes, profilesRes, rolesRes, templatesRes] = await Promise.all([
       supabase
         .from("projects")
         .select("id, name, plz, adresse, status")
@@ -341,7 +344,19 @@ const TimeTracking = () => {
       supabase
         .from("user_roles")
         .select("user_id, role"),
+      supabase
+        .from("taetigkeit_templates" as any)
+        .select("bezeichnung, sort_order")
+        .eq("is_active", true)
+        .order("sort_order"),
     ]);
+
+    // Tätigkeits-Vorlagen
+    if (templatesRes.data) {
+      setTaetigkeitTemplates(
+        (templatesRes.data as any[]).map((t: any) => t.bezeichnung as string)
+      );
+    }
 
     // Build set of extern user IDs to exclude from Mitarbeiter selection
     const externIds = new Set(
@@ -1638,6 +1653,7 @@ const TimeTracking = () => {
                   onChange={(e) => updateTaetigkeit(t.position, e.target.value)}
                   placeholder={t.position === 1 ? pos1Text : `Tätigkeit ${t.position}...`}
                   className="flex-1"
+                  list={t.position === 1 ? undefined : "taetigkeit-templates"}
                 />
                 {taetigkeiten.length > 1 && (
                   <Button
@@ -1717,6 +1733,13 @@ const TimeTracking = () => {
                 {pauseText}
               </div>
             </div>
+
+            {/* Datalist mit Tätigkeits-Vorlagen (Browser-native, Mobile-friendly) */}
+            <datalist id="taetigkeit-templates">
+              {taetigkeitTemplates.map((bez) => (
+                <option key={bez} value={bez} />
+              ))}
+            </datalist>
           </CardContent>
         </Card>
 

@@ -21,6 +21,7 @@ import EmployeeDocumentsManager from "@/components/EmployeeDocumentsManager";
 import LeaveManagement from "@/components/LeaveManagement";
 import TimeAccountManagement from "@/components/TimeAccountManagement";
 import { FileViewer } from "@/components/FileViewer";
+import TaetigkeitTemplatesManager from "@/components/TaetigkeitTemplatesManager";
 
 type Profile = {
   id: string;
@@ -974,6 +975,9 @@ export default function Admin() {
               </div>
             </CardContent>
           </Card>
+
+          {/* Tätigkeits-Vorlagen */}
+          <TaetigkeitTemplatesManager />
 
           {/* Sick Notes Section */}
           <Card>
