@@ -26,6 +26,16 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Switch } from "@/components/ui/switch";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { useToast } from "@/hooks/use-toast";
@@ -132,6 +142,20 @@ const TimeTracking = () => {
   const [isExtern, setIsExtern] = useState(false);
   const [isSelfOnly, setIsSelfOnly] = useState(false); // Mitarbeiter + Extern: kann nur sich selbst eintragen
   const [loading, setLoading] = useState(true);
+
+  // Confirm dialog state (replaces window.confirm)
+  const [confirmState, setConfirmState] = useState<{
+    title: string;
+    description: string;
+    details?: string[];
+    actionLabel: string;
+    cancelLabel?: string;
+    variant?: "default" | "destructive";
+    onConfirm: () => void | Promise<void>;
+  } | null>(null);
+
+  // Original-MA-Liste beim Edit (zum Erkennen neu hinzugefügter MA)
+  const [originalMaIds, setOriginalMaIds] = useState<string[]>([]);
 
   // Data
   const [projects, setProjects] = useState<Project[]>([]);
@@ -671,6 +695,9 @@ const TimeTracking = () => {
   // -------------------------------------------------------------------------
   // Save
   // -------------------------------------------------------------------------
+
+  // Wraps the actual save with pre-checks. Pre-Checks open ConfirmDialog;
+  // bei Bestätigung wird doSave() mit cleanup-Optionen aufgerufen.
   const handleSave = async () => {
     const errorMsg = validate();
     if (errorMsg) {
@@ -678,37 +705,56 @@ const TimeTracking = () => {
       return;
     }
 
-    // Duplikat-Check: Prüfe ob für MA an diesem Datum schon Stunden existieren
-    let cleanupBeforeInsert = false;
-    let activeMaIdsForCleanup: string[] = [];
-    if (!editingBerichtId) {
-      const activeMaIds = mitarbeiterRows.filter(r => r.mitarbeiterId).map(r => r.mitarbeiterId);
-      const { data: existing } = await supabase
-        .from("time_entries")
-        .select("user_id, stunden, taetigkeit")
-        .eq("datum", datum)
-        .in("user_id", activeMaIds)
-        .not("taetigkeit", "in", '("Urlaub","Krankenstand","Fortbildung","Feiertag","Schule","Weiterbildung")');
+    const activeMaIds = mitarbeiterRows.filter(r => r.mitarbeiterId).map(r => r.mitarbeiterId);
 
-      if (existing && existing.length > 0) {
-        const details = existing.map(e => {
-          const p = profiles.find(pr => pr.id === e.user_id);
+    // Pre-Check: Sind aktive MA bereits in einem ANDEREN Leistungsbericht am gleichen Datum?
+    // (Im Edit-Mode: Bericht selbst ausschließen via bericht_id != editingBerichtId)
+    if (activeMaIds.length > 0) {
+      let mlbQuery = supabase
+        .from("leistungsbericht_mitarbeiter" as any)
+        .select("mitarbeiter_id, bericht_id, summe_stunden, leistungsberichte!inner(id, datum, erstellt_von)")
+        .in("mitarbeiter_id", activeMaIds)
+        .eq("leistungsberichte.datum" as any, datum);
+
+      if (editingBerichtId) {
+        mlbQuery = mlbQuery.neq("bericht_id", editingBerichtId);
+      }
+
+      const { data: conflictMA } = await mlbQuery;
+
+      if (conflictMA && (conflictMA as any[]).length > 0) {
+        // Profile + Ersteller-Name für die Konflikt-Liste laden
+        const erstellerIds = [...new Set((conflictMA as any[]).map((m: any) => m.leistungsberichte?.erstellt_von).filter(Boolean))];
+        const { data: erstellerProfiles } = await supabase
+          .from("profiles")
+          .select("id, vorname, nachname")
+          .in("id", erstellerIds);
+        const erstellerMap: Record<string, string> = {};
+        (erstellerProfiles || []).forEach((p: any) => {
+          erstellerMap[p.id] = `${p.vorname} ${p.nachname}`;
+        });
+
+        const details = (conflictMA as any[]).map((m: any) => {
+          const p = profiles.find(pr => pr.id === m.mitarbeiter_id);
           const name = p ? `${p.vorname} ${p.nachname}` : "?";
-          return `• ${name}: ${e.stunden}h (${e.taetigkeit})`;
+          const erstellt = erstellerMap[m.leistungsberichte?.erstellt_von] || "Unbekannt";
+          return `${name}: ${m.summe_stunden ?? "?"}h (Bericht von ${erstellt})`;
         });
         const uniqueDetails = [...new Set(details)];
-        const ok = window.confirm(
-          `Am ${datum} sind bereits Stunden eingetragen:\n\n${uniqueDetails.join("\n")}\n\nDie bestehenden Einträge werden ÜBERSCHRIEBEN. Fortfahren?`
-        );
-        if (!ok) return;
-        cleanupBeforeInsert = true;
-        activeMaIdsForCleanup = activeMaIds;
+        const conflictMaIds = [...new Set((conflictMA as any[]).map((m: any) => m.mitarbeiter_id))];
+        setConfirmState({
+          title: "Mitarbeiter bereits in anderem Bericht",
+          description: `Am ${datum} sind folgende Mitarbeiter bereits in einem anderen Leistungsbericht erfasst. Bei Fortfahren werden die Einträge dort entfernt:`,
+          details: uniqueDetails,
+          actionLabel: "Überschreiben & speichern",
+          variant: "destructive",
+          onConfirm: () => doSave({ cleanupBeforeInsert: true, activeMaIdsForCleanup: conflictMaIds }),
+        });
+        return;
       }
     }
 
-    // Wenn nicht im Edit-Modus: prüfe ob bereits ein Bericht für (User, Projekt, Datum) existiert.
-    // DB hat Unique-Constraint auf (erstellt_von, projekt_id, datum), daher würde INSERT fehlschlagen.
-    // Stattdessen: bestehenden Bericht in den Edit-Modus laden.
+    // Pre-Check 2 (nur NEW-Mode): Existiert bereits ein Bericht (User, Projekt, Datum)?
     if (!editingBerichtId && currentUserId && projektId) {
       const { data: existingBericht } = await supabase
         .from("leistungsberichte" as any)
@@ -719,18 +765,24 @@ const TimeTracking = () => {
         .maybeSingle();
 
       if ((existingBericht as any)?.id) {
-        toast({
+        const existingId = (existingBericht as any).id;
+        setConfirmState({
           title: "Bericht existiert bereits",
-          description:
-            "Du hast für dieses Projekt am " +
-            datum +
-            " bereits einen Leistungsbericht. Der bestehende wird geladen — bitte ändere und drücke 'Bericht aktualisieren'.",
+          description: `Du hast für dieses Projekt am ${datum} bereits einen Leistungsbericht. Möchtest du den bestehenden Bericht bearbeiten?`,
+          actionLabel: "Bestehenden bearbeiten",
+          onConfirm: () => loadBericht(existingId),
         });
-        await loadBericht((existingBericht as any).id);
         return;
       }
     }
 
+    // Keine Konflikte → direkt speichern
+    await doSave({ cleanupBeforeInsert: false, activeMaIdsForCleanup: [] });
+  };
+
+  // Helper: führt den eigentlichen Save (DELETE-bei-Edit + INSERT) aus
+  const doSave = async (opts: { cleanupBeforeInsert: boolean; activeMaIdsForCleanup: string[] }) => {
+    const { cleanupBeforeInsert, activeMaIdsForCleanup } = opts;
     setSaving(true);
     try {
       // If editing, delete old records first
@@ -1070,6 +1122,7 @@ const TimeTracking = () => {
   // -------------------------------------------------------------------------
   const resetForm = () => {
     setEditingBerichtId(null);
+    setOriginalMaIds([]);
     setProjektId("");
     setObjekt("");
     setArbeitsbeginn("06:30");
@@ -1192,6 +1245,7 @@ const TimeTracking = () => {
           };
         });
         setMitarbeiterRows(rows);
+        setOriginalMaIds(rows.map(r => r.mitarbeiterId).filter(Boolean));
       }
 
       // Load geraete
@@ -2209,6 +2263,36 @@ const TimeTracking = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* ---------- CONFIRM DIALOG (Konflikte beim Speichern) ---------- */}
+      <AlertDialog open={!!confirmState} onOpenChange={(o) => !o && setConfirmState(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{confirmState?.title}</AlertDialogTitle>
+            <AlertDialogDescription>{confirmState?.description}</AlertDialogDescription>
+          </AlertDialogHeader>
+          {confirmState?.details && confirmState.details.length > 0 && (
+            <div className="rounded border bg-muted/40 p-3 text-sm space-y-1 max-h-[200px] overflow-y-auto">
+              {confirmState.details.map((d, i) => (
+                <div key={i}>{d}</div>
+              ))}
+            </div>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel>{confirmState?.cancelLabel || "Abbrechen"}</AlertDialogCancel>
+            <AlertDialogAction
+              className={confirmState?.variant === "destructive" ? "bg-destructive text-destructive-foreground hover:bg-destructive/90" : undefined}
+              onClick={async () => {
+                const fn = confirmState?.onConfirm;
+                setConfirmState(null);
+                if (fn) await fn();
+              }}
+            >
+              {confirmState?.actionLabel}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };
