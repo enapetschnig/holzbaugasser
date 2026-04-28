@@ -679,6 +679,8 @@ const TimeTracking = () => {
     }
 
     // Duplikat-Check: Prüfe ob für MA an diesem Datum schon Stunden existieren
+    let cleanupBeforeInsert = false;
+    let activeMaIdsForCleanup: string[] = [];
     if (!editingBerichtId) {
       const activeMaIds = mitarbeiterRows.filter(r => r.mitarbeiterId).map(r => r.mitarbeiterId);
       const { data: existing } = await supabase
@@ -696,9 +698,11 @@ const TimeTracking = () => {
         });
         const uniqueDetails = [...new Set(details)];
         const ok = window.confirm(
-          `Am ${datum} sind bereits Stunden eingetragen:\n\n${uniqueDetails.join("\n")}\n\nBestehende Einträge überschreiben?`
+          `Am ${datum} sind bereits Stunden eingetragen:\n\n${uniqueDetails.join("\n")}\n\nDie bestehenden Einträge werden ÜBERSCHRIEBEN. Fortfahren?`
         );
         if (!ok) return;
+        cleanupBeforeInsert = true;
+        activeMaIdsForCleanup = activeMaIds;
       }
     }
 
@@ -768,6 +772,64 @@ const TimeTracking = () => {
           .from("leistungsberichte" as any)
           .delete()
           .eq("id", editingBerichtId);
+      }
+
+      // Cleanup: Wenn der User "Überschreiben" gewählt hat (NEW-Modus mit existing entries),
+      // alte Daten der betroffenen Mitarbeiter sauber entfernen.
+      if (cleanupBeforeInsert && activeMaIdsForCleanup.length > 0) {
+        // 1. Lösche existierende time_entries (Arbeit, keine Absenzen) für die MA am Datum
+        await (supabase
+          .from("time_entries")
+          .delete()
+          .eq("datum", datum)
+          .in("user_id", activeMaIdsForCleanup) as any)
+          .not("taetigkeit", "in", '("Urlaub","Krankenstand","Fortbildung","Feiertag","Schule","Weiterbildung","ZA","Zeitausgleich")');
+
+        // 2. Finde andere Leistungsberichte am gleichen Datum mit den betroffenen Mitarbeitern
+        const { data: overlappingMA } = await supabase
+          .from("leistungsbericht_mitarbeiter" as any)
+          .select("id, bericht_id, mitarbeiter_id, leistungsberichte!inner(id, datum)")
+          .in("mitarbeiter_id", activeMaIdsForCleanup)
+          .eq("leistungsberichte.datum" as any, datum);
+
+        const otherBerichtIds = new Set<string>();
+        const otherMaRowIds: string[] = [];
+        for (const om of (overlappingMA as any[]) || []) {
+          otherBerichtIds.add(om.bericht_id);
+          otherMaRowIds.push(om.id);
+        }
+
+        // 3. Lösche leistungsbericht_stunden für die betroffenen MA in den anderen Berichten
+        if (otherBerichtIds.size > 0 && activeMaIdsForCleanup.length > 0) {
+          await supabase
+            .from("leistungsbericht_stunden" as any)
+            .delete()
+            .in("bericht_id", Array.from(otherBerichtIds))
+            .in("mitarbeiter_id", activeMaIdsForCleanup);
+        }
+
+        // 4. Lösche die leistungsbericht_mitarbeiter Zeilen selbst
+        if (otherMaRowIds.length > 0) {
+          await supabase
+            .from("leistungsbericht_mitarbeiter" as any)
+            .delete()
+            .in("id", otherMaRowIds);
+        }
+
+        // 5. Lösche jetzt-leere Berichte (keine Mitarbeiter mehr)
+        for (const bid of otherBerichtIds) {
+          const { count } = await supabase
+            .from("leistungsbericht_mitarbeiter" as any)
+            .select("id", { count: "exact", head: true })
+            .eq("bericht_id", bid);
+          if ((count ?? 0) === 0) {
+            // Bericht hat keine Mitarbeiter mehr → komplett aufräumen
+            await supabase.from("leistungsbericht_taetigkeiten" as any).delete().eq("bericht_id", bid);
+            await supabase.from("leistungsbericht_geraete" as any).delete().eq("bericht_id", bid);
+            await supabase.from("leistungsbericht_materialien" as any).delete().eq("bericht_id", bid);
+            await supabase.from("leistungsberichte" as any).delete().eq("id", bid);
+          }
+        }
       }
 
       // 1. Create Leistungsbericht
