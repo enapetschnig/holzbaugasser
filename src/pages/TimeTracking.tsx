@@ -287,43 +287,6 @@ const TimeTracking = () => {
     [ankunftZeit]
   );
 
-  // Pause-Auto-Fill: nur wenn die Arbeitszeit über die Mittagspause (12:00–12:30) läuft.
-  // Verläuft die Buchung komplett vor 12:00 oder komplett nach 12:30 → keine Pause.
-  // Im Edit-Modus wird nicht überschrieben (gespeicherte Pause respektieren).
-  useEffect(() => {
-    if (editingBerichtId) return;
-    if (!arbeitsbeginn) return;
-
-    const maxStunden = Math.max(
-      0,
-      ...mitarbeiterRows.filter((r) => r.mitarbeiterId).map((r) => sumStunden(r))
-    );
-    if (maxStunden <= 0) return; // keine Pause-Änderung wenn noch keine Stunden
-
-    const [bh, bm] = arbeitsbeginn.split(":").map(Number);
-    if (isNaN(bh) || isNaN(bm)) return;
-    const startMin = bh * 60 + bm;
-    const PAUSE_START = 12 * 60; // 12:00
-    const PAUSE_END = 12 * 60 + 30; // 12:30
-
-    // Endzeit ohne Pause
-    const endNoPause = startMin + Math.round(maxStunden * 60);
-
-    // Buchung läuft über die Pause? (Start vor 12:00 UND Ende nach 12:00)
-    const overlapsPause = startMin < PAUSE_START && endNoPause > PAUSE_START;
-
-    if (overlapsPause) {
-      // Pause auf 12:00–12:30 setzen
-      if (pauseVon !== "12:00") setPauseVon("12:00");
-      if (pauseBis !== "12:30") setPauseBis("12:30");
-    } else if (startMin >= PAUSE_END || endNoPause <= PAUSE_START) {
-      // Komplett vor oder nach Pause → leer
-      if (pauseVon) setPauseVon("");
-      if (pauseBis) setPauseBis("");
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [arbeitsbeginn, mitarbeiterRows, editingBerichtId]);
-
   // Abfahrt Baustelle dynamisch berechnen: Arbeitsbeginn + max(Mitarbeiter-Stunden) + Pause-Dauer
   // Wenn keine Stunden eingetragen: Default je Wochentag (Fr 15:00, sonst 16:00)
   useEffect(() => {
