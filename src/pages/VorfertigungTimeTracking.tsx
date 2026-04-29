@@ -9,6 +9,9 @@ import {
   Save,
   AlertTriangle,
   Coffee,
+  ChevronDown,
+  X,
+  Check,
 } from "lucide-react";
 import { format } from "date-fns";
 import { de } from "date-fns/locale";
@@ -35,6 +38,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { localDateString, getTagesSoll } from "@/lib/workingHours";
@@ -106,7 +110,9 @@ export default function VorfertigungTimeTracking() {
   const [absences, setAbsences] = useState<AbsenceEntry[]>([]);
   const [otherEntries, setOtherEntries] = useState<OtherEntry[]>([]);
   const [availableMitarbeiter, setAvailableMitarbeiter] = useState<MitarbeiterOption[]>([]);
-  const [selectedMitarbeiterIds, setSelectedMitarbeiterIds] = useState<string[]>([]);
+  const [extraMitarbeiterIds, setExtraMitarbeiterIds] = useState<string[]>([]);
+  const [mitarbeiterPickerOpen, setMitarbeiterPickerOpen] = useState(false);
+  const [mitarbeiterSearch, setMitarbeiterSearch] = useState("");
   const [saving, setSaving] = useState(false);
 
   const canBookForOthers = userRole === "administrator" || userRole === "vorarbeiter" || userRole === "projektleiter";
@@ -200,8 +206,6 @@ export default function VorfertigungTimeTracking() {
         setAvailableMitarbeiter(list);
       }
 
-      // Default: nur eigener User vorausgewählt
-      setSelectedMitarbeiterIds([user.id]);
     })();
   }, [navigate, toast]);
 
@@ -452,10 +456,10 @@ export default function VorfertigungTimeTracking() {
 
     setSaving(true);
     try {
-      // Welche User bekommen NEUE Blöcke? Standard: nur der eingeloggte.
-      // Vorarbeiter/Admin können in der UI weitere MAs auswählen.
-      const targetUserIds = canBookForOthers && selectedMitarbeiterIds.length > 0
-        ? Array.from(new Set([userId, ...selectedMitarbeiterIds]))
+      // Welche User bekommen NEUE Blöcke? Eigener User immer; Vorarbeiter/Admin/PL
+      // können zusätzlich weitere MAs auswählen.
+      const targetUserIds = canBookForOthers && extraMitarbeiterIds.length > 0
+        ? Array.from(new Set([userId, ...extraMitarbeiterIds]))
         : [userId];
 
       // 1. Rows pro Block berechnen
@@ -573,45 +577,101 @@ export default function VorfertigungTimeTracking() {
           </CardContent>
         </Card>
 
-        {/* Mitarbeiter-Auswahl (nur Vorarbeiter/Admin) */}
+        {/* Mitarbeiter-Auswahl (nur Vorarbeiter/Admin/PL) */}
         {canBookForOthers && (
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-base">Mitarbeiter</CardTitle>
+              <CardTitle className="text-base">
+                Auch für andere Mitarbeiter buchen
+              </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="text-xs text-muted-foreground">
-                Diese Blöcke werden für alle ausgewählten Mitarbeiter gespeichert.
+                Du wirst sowieso gebucht — wähle hier weitere Mitarbeiter, die dieselben Blöcke bekommen sollen.
               </div>
-              <div className="flex flex-wrap gap-2">
-                {availableMitarbeiter.map((m) => {
-                  const isSelected = selectedMitarbeiterIds.includes(m.id);
-                  const isSelf = m.id === userId;
-                  return (
-                    <Badge
-                      key={m.id}
-                      variant={isSelected ? "default" : "outline"}
-                      className={`cursor-pointer text-xs py-1.5 px-3 ${isSelf ? "ring-1 ring-primary/40" : ""}`}
-                      onClick={() => {
-                        if (isSelf) return; // eigener Eintrag bleibt fix
-                        setSelectedMitarbeiterIds((prev) =>
-                          prev.includes(m.id)
-                            ? prev.filter((id) => id !== m.id)
-                            : [...prev, m.id]
+
+              <Popover open={mitarbeiterPickerOpen} onOpenChange={(open) => {
+                setMitarbeiterPickerOpen(open);
+                if (!open) setMitarbeiterSearch("");
+              }}>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" className="w-full justify-between" type="button">
+                    <span className="text-sm">
+                      {extraMitarbeiterIds.length === 0
+                        ? "Mitarbeiter auswählen…"
+                        : `${extraMitarbeiterIds.length} ausgewählt`}
+                    </span>
+                    <ChevronDown className="h-4 w-4 opacity-60" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="p-0 w-[--radix-popover-trigger-width]" align="start">
+                  <div className="p-2 border-b">
+                    <Input
+                      placeholder="Suchen…"
+                      value={mitarbeiterSearch}
+                      onChange={(e) => setMitarbeiterSearch(e.target.value)}
+                      className="h-9"
+                    />
+                  </div>
+                  <div className="max-h-64 overflow-y-auto py-1">
+                    {availableMitarbeiter
+                      .filter((m) => m.id !== userId)
+                      .filter((m) => m.name.toLowerCase().includes(mitarbeiterSearch.toLowerCase()))
+                      .map((m) => {
+                        const isSelected = extraMitarbeiterIds.includes(m.id);
+                        return (
+                          <button
+                            key={m.id}
+                            type="button"
+                            className="w-full flex items-center justify-between px-3 py-2.5 text-sm hover:bg-muted active:bg-muted text-left"
+                            onClick={() => {
+                              setExtraMitarbeiterIds((prev) =>
+                                prev.includes(m.id)
+                                  ? prev.filter((id) => id !== m.id)
+                                  : [...prev, m.id]
+                              );
+                            }}
+                          >
+                            <span className="truncate">{m.name}</span>
+                            {isSelected && <Check className="h-4 w-4 text-primary shrink-0 ml-2" />}
+                          </button>
                         );
-                      }}
-                    >
-                      {isSelected && <span className="mr-1">✓</span>}
-                      {m.name}
-                      {isSelf && <span className="ml-1 opacity-60">(ich)</span>}
-                    </Badge>
-                  );
-                })}
-              </div>
+                      })}
+                    {availableMitarbeiter.filter((m) => m.id !== userId && m.name.toLowerCase().includes(mitarbeiterSearch.toLowerCase())).length === 0 && (
+                      <div className="px-3 py-4 text-sm text-muted-foreground text-center">
+                        Keine Mitarbeiter gefunden
+                      </div>
+                    )}
+                  </div>
+                </PopoverContent>
+              </Popover>
+
+              {extraMitarbeiterIds.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {extraMitarbeiterIds.map((id) => {
+                    const m = availableMitarbeiter.find((x) => x.id === id);
+                    if (!m) return null;
+                    return (
+                      <Badge key={id} variant="secondary" className="text-xs py-1 pl-2 pr-1">
+                        {m.name}
+                        <button
+                          type="button"
+                          className="ml-1 rounded-full hover:bg-background/40 p-0.5"
+                          onClick={() => setExtraMitarbeiterIds((prev) => prev.filter((x) => x !== id))}
+                          aria-label="Entfernen"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </Badge>
+                    );
+                  })}
+                </div>
+              )}
+
               <div className="text-xs text-muted-foreground border-t pt-2">
-                {selectedMitarbeiterIds.length === 1
+                {extraMitarbeiterIds.length === 0
                   ? "Buchung nur für dich."
-                  : `Buchung für ${selectedMitarbeiterIds.length} Mitarbeiter.`}
+                  : `Buchung für dich + ${extraMitarbeiterIds.length} weitere${extraMitarbeiterIds.length === 1 ? "n" : ""} Mitarbeiter.`}
               </div>
             </CardContent>
           </Card>
