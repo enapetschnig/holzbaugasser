@@ -1244,8 +1244,10 @@ const TimeTracking = () => {
           datum,
           stunden: sumStunden(r, zulagePositions),
           taetigkeit: parts.join(", ") || taetigkeitLabels.join(", "),
-          start_time: ankunftZeit,
-          end_time: abfahrtZeit,
+          // Arbeitsbeginn ist der echte Start der Arbeitszeit (z.B. zuhause / Werkstatt).
+          // Nur Fallback auf ankunftZeit wenn arbeitsbeginn leer.
+          start_time: arbeitsbeginn || ankunftZeit,
+          end_time: computedAbfahrt || abfahrtZeit,
           pause_minutes: pauseMinuten,
           location_type: r.istWerkstatt ? "werkstatt" : "baustelle",
         };
