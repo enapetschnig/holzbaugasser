@@ -106,6 +106,24 @@ function sumStunden(row: MitarbeiterRow, excludePositions?: Set<number>): number
   }, 0);
 }
 
+/**
+ * Berechnet die Abfahrtszeit aus Arbeitsbeginn + Netto-Stunden + Pause-Minuten.
+ * Beispiel: arbeitsbeginn="06:30", stunden=3.5, pauseMin=0 → "10:00"
+ * Beispiel: arbeitsbeginn="06:30", stunden=8, pauseMin=30 → "15:00"
+ * Returns leeren String wenn invalide Eingaben.
+ */
+function computeAbfahrt(arbeitsbeginn: string, stunden: number, pauseMinuten: number): string {
+  if (!arbeitsbeginn || stunden <= 0) return "";
+  const [bh, bm] = arbeitsbeginn.split(":").map(Number);
+  if (isNaN(bh) || isNaN(bm)) return "";
+  const startMin = bh * 60 + bm;
+  const totalMin = startMin + Math.round(stunden * 60) + (pauseMinuten || 0);
+  if (totalMin >= 24 * 60) return "23:59";
+  const eh = Math.floor(totalMin / 60);
+  const em = totalMin % 60;
+  return `${String(eh).padStart(2, "0")}:${String(em).padStart(2, "0")}`;
+}
+
 function parseStunden(val: number | string): number {
   if (typeof val === "string") return parseFloat(val) || 0;
   return val || 0;
@@ -394,20 +412,37 @@ const TimeTracking = () => {
   }, [datum, currentUserId, editingBerichtId]);
 
   // Auto-Fill Arbeitsbeginn/Ankunft/Pause: bei zweitem Bericht des Tages
-  // setze Defaults basierend auf Abfahrt des letzten bestehenden Berichts.
+  // setze Defaults basierend auf BERECHNETER Abfahrt des letzten bestehenden Berichts
+  // (nicht b.abfahrt_zeit weil das ein veralteter Default-Wert sein könnte).
   useEffect(() => {
     if (editingBerichtId) return;
     if (existingTodayBerichte.length === 0) return;
 
-    // Letzter Bericht (sortiert nach abfahrt_zeit DESC)
-    const last = [...existingTodayBerichte].sort((a, b) =>
-      (b.abfahrt_zeit || "").localeCompare(a.abfahrt_zeit || "")
-    )[0];
+    // Berechne Endzeit für jeden Bericht aus arbeitsbeginn + stunden + pause
+    const withComputed = existingTodayBerichte.map((b) => {
+      const startRaw = (b.arbeitsbeginn || b.ankunft_zeit || "").substring(0, 5);
+      let pauseMin = 0;
+      if (b.pause_von && b.pause_bis) {
+        const [pvh, pvm] = b.pause_von.split(":").map(Number);
+        const [pbh, pbm] = b.pause_bis.split(":").map(Number);
+        pauseMin = Math.max(0, (pbh * 60 + pbm) - (pvh * 60 + pvm));
+      }
+      const computed = startRaw && b.total_stunden > 0
+        ? computeAbfahrt(startRaw, b.total_stunden, pauseMin)
+        : (b.abfahrt_zeit ? b.abfahrt_zeit.substring(0, 5) : "");
+      return { computed };
+    });
 
-    if (last?.abfahrt_zeit) {
-      setArbeitsbeginn(last.abfahrt_zeit.substring(0, 5));
-      setAnkunftZeit(last.abfahrt_zeit.substring(0, 5));
-      // Pause leer, da Halbtags-Bericht (User kann manuell setzen)
+    // Letzter Bericht (sortiert nach computed DESC)
+    const lastEnd = withComputed
+      .map((x) => x.computed)
+      .filter((x) => x)
+      .sort((a, b) => b.localeCompare(a))[0];
+
+    if (lastEnd) {
+      setArbeitsbeginn(lastEnd);
+      setAnkunftZeit(lastEnd);
+      // Pause leer (Halbtags-Bericht, User kann manuell setzen)
       setPauseVon("");
       setPauseBis("");
     }
@@ -1043,6 +1078,15 @@ const TimeTracking = () => {
       }
 
       // 1. Create Leistungsbericht
+      // Abfahrt direkt berechnen aus echten Werten (nicht aus State, der ggf. veraltet ist)
+      const maxStundenForSave = Math.max(
+        0,
+        ...mitarbeiterRows.filter((r) => r.mitarbeiterId).map((r) => sumStunden(r))
+      );
+      const computedAbfahrt = arbeitsbeginn && maxStundenForSave > 0
+        ? computeAbfahrt(arbeitsbeginn, maxStundenForSave, pauseMinuten)
+        : abfahrtZeit;
+
       const { data: berichtData, error: berichtError } = await supabase
         .from("leistungsberichte" as any)
         .insert({
@@ -1052,7 +1096,7 @@ const TimeTracking = () => {
           objekt: objekt || null,
           arbeitsbeginn: arbeitsbeginn || null,
           ankunft_zeit: ankunftZeit,
-          abfahrt_zeit: abfahrtZeit,
+          abfahrt_zeit: computedAbfahrt || abfahrtZeit,
           pause_von: pauseVon || null,
           pause_bis: pauseBis || null,
           pause_minuten: pauseMinuten,
@@ -1583,8 +1627,21 @@ const TimeTracking = () => {
             <CardContent className="space-y-2">
               {existingTodayBerichte.map((b) => {
                 // Start: arbeitsbeginn (echte Anwesenheit ab Werkstatt/zuhause), Fallback ankunft_zeit
-                const start = (b.arbeitsbeginn || b.ankunft_zeit || "").substring(0, 5) || "?";
-                const abfahrt = b.abfahrt_zeit ? b.abfahrt_zeit.substring(0, 5) : "?";
+                const startRaw = (b.arbeitsbeginn || b.ankunft_zeit || "").substring(0, 5);
+                const start = startRaw || "?";
+
+                // Abfahrt: aus arbeitsbeginn + total_stunden + pause berechnen
+                // (statt der gespeicherten abfahrt_zeit, die ggf. ein veralteter Default-Wert ist)
+                let pauseMin = 0;
+                if (b.pause_von && b.pause_bis) {
+                  const [pvh, pvm] = b.pause_von.split(":").map(Number);
+                  const [pbh, pbm] = b.pause_bis.split(":").map(Number);
+                  pauseMin = Math.max(0, (pbh * 60 + pbm) - (pvh * 60 + pvm));
+                }
+                const computed = startRaw && b.total_stunden > 0
+                  ? computeAbfahrt(startRaw, b.total_stunden, pauseMin)
+                  : "";
+                const abfahrt = computed || (b.abfahrt_zeit ? b.abfahrt_zeit.substring(0, 5) : "?");
                 return (
                   <div
                     key={b.id}
@@ -1622,14 +1679,25 @@ const TimeTracking = () => {
                   </span>
                 </div>
                 {!editingBerichtId && (() => {
-                  const last = [...existingTodayBerichte].sort((a, b) =>
-                    (b.abfahrt_zeit || "").localeCompare(a.abfahrt_zeit || "")
-                  )[0];
-                  if (last?.abfahrt_zeit) {
+                  // Berechne lastEnd aus arbeitsbeginn + total_stunden + pause
+                  const ends = existingTodayBerichte.map((b) => {
+                    const startRaw = (b.arbeitsbeginn || b.ankunft_zeit || "").substring(0, 5);
+                    let pauseMin = 0;
+                    if (b.pause_von && b.pause_bis) {
+                      const [pvh, pvm] = b.pause_von.split(":").map(Number);
+                      const [pbh, pbm] = b.pause_bis.split(":").map(Number);
+                      pauseMin = Math.max(0, (pbh * 60 + pbm) - (pvh * 60 + pvm));
+                    }
+                    return startRaw && b.total_stunden > 0
+                      ? computeAbfahrt(startRaw, b.total_stunden, pauseMin)
+                      : (b.abfahrt_zeit ? b.abfahrt_zeit.substring(0, 5) : "");
+                  }).filter(Boolean).sort((a, b) => b.localeCompare(a));
+                  const lastEnd = ends[0];
+                  if (lastEnd) {
                     return (
                       <div className="text-blue-700 dark:text-blue-400">
-                        ℹ Arbeitsbeginn und Ankunft wurden automatisch auf <strong>{last.abfahrt_zeit.substring(0, 5)}</strong> gesetzt
-                        (Abfahrt der letzten Buchung). Bei Bedarf manuell anpassen.
+                        ℹ Arbeitsbeginn und Ankunft wurden automatisch auf <strong>{lastEnd}</strong> gesetzt
+                        (Endzeit der letzten Buchung). Bei Bedarf manuell anpassen.
                       </div>
                     );
                   }
