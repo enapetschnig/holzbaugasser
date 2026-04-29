@@ -1008,16 +1008,16 @@ const TimeTracking = () => {
         // Delete associated time_entries — nur für das AKTUELLE Projekt + Leistungsbericht-Typ,
         // damit andere Berichte (anderes Projekt am gleichen Tag) bzw. Vorfertigung/PL-Einträge
         // unangetastet bleiben.
-        await (supabase
+        await supabase
           .from("time_entries")
           .delete()
           .eq("datum", datum)
           .eq("project_id", projektId)
+          .eq("entry_typ", "leistungsbericht")
           .in(
             "user_id",
             mitarbeiterRows.filter((r) => r.mitarbeiterId).map((r) => r.mitarbeiterId)
-          ) as any)
-          .or("entry_typ.eq.leistungsbericht,entry_typ.is.null");
+          );
 
         // Delete the bericht itself
         await supabase
@@ -1029,16 +1029,15 @@ const TimeTracking = () => {
       // Cleanup: Wenn der User "Überschreiben" gewählt hat (NEW-Modus mit existing entries),
       // alte Daten der betroffenen Mitarbeiter sauber entfernen.
       if (cleanupBeforeInsert && activeMaIdsForCleanup.length > 0) {
-        // 1. Lösche existierende time_entries für die MA am Datum + Projekt — nur Leistungsbericht-Typ
-        // (entry_typ='leistungsbericht' ODER NULL für Alt-Daten ohne typ).
-        // Vorfertigung/Projektleiter/Absenz bleiben unangetastet.
+        // 1. Lösche existierende time_entries für die MA am Datum + Projekt — nur Leistungsbericht-Typ.
+        // Vorfertigung/Projektleiter/Absenz bleiben unangetastet (entry_typ-Filter).
         await (supabase
           .from("time_entries")
           .delete()
           .eq("datum", datum)
           .eq("project_id", projektId)
+          .eq("entry_typ", "leistungsbericht")
           .in("user_id", activeMaIdsForCleanup) as any)
-          .or("entry_typ.eq.leistungsbericht,entry_typ.is.null")
           .not("taetigkeit", "in", '("Urlaub","Krankenstand","Fortbildung","Feiertag","Schule","Weiterbildung","ZA","Zeitausgleich")');
 
         // 2. Finde andere Leistungsberichte am gleichen Datum + GLEICHEM Projekt

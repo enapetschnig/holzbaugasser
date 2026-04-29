@@ -54,6 +54,12 @@ type EditableBlock = {
   startTime: string;
   endTime: string;
   projectId: string;
+  taetigkeit: string;
+};
+
+type TaetigkeitTemplate = {
+  id: string;
+  bezeichnung: string;
 };
 
 type AbsenceEntry = {
@@ -88,6 +94,7 @@ export default function VorfertigungTimeTracking() {
   const [date, setDate] = useState(() => localDateString());
 
   const [projects, setProjects] = useState<Project[]>([]);
+  const [taetigkeitTemplates, setTaetigkeitTemplates] = useState<TaetigkeitTemplate[]>([]);
   const [blocks, setBlocks] = useState<EditableBlock[]>([]);
   const [originalIds, setOriginalIds] = useState<string[]>([]);
   const [absences, setAbsences] = useState<AbsenceEntry[]>([]);
@@ -147,6 +154,14 @@ export default function VorfertigungTimeTracking() {
         .in("status", ["aktiv", "in_planung"])
         .order("name");
       if (projData) setProjects(projData);
+
+      // Tätigkeit-Templates
+      const { data: tplData } = await (supabase as any)
+        .from("taetigkeit_templates")
+        .select("id, bezeichnung")
+        .eq("is_active", true)
+        .order("sort_order");
+      if (tplData) setTaetigkeitTemplates(tplData);
     })();
   }, [navigate, toast]);
 
@@ -173,12 +188,17 @@ export default function VorfertigungTimeTracking() {
 
     for (const e of (data as any[]) || []) {
       if (e.entry_typ === "vorfertigung") {
+        // Tätigkeit aus DB-String extrahieren: "Vorfertigung: <projekt> — <taetigkeit>" → taetigkeit
+        const rawT = (e.taetigkeit as string) || "";
+        const sepIdx = rawT.indexOf(" — ");
+        const extractedTaetigkeit = sepIdx > -1 ? rawT.substring(sepIdx + 3) : "";
         vfBlocks.push({
           localId: e.id,
           dbId: e.id,
           startTime: e.start_time?.substring(0, 5) || "",
           endTime: e.end_time?.substring(0, 5) || "",
           projectId: e.project_id || "",
+          taetigkeit: extractedTaetigkeit,
         });
       } else if (
         e.entry_typ === "absenz" ||
@@ -242,6 +262,7 @@ export default function VorfertigungTimeTracking() {
         startTime: "07:00",
         endTime: "",
         projectId: "",
+        taetigkeit: "",
       });
     }
 
@@ -325,6 +346,7 @@ export default function VorfertigungTimeTracking() {
         startTime: startSuggestion,
         endTime: "",
         projectId: "",
+        taetigkeit: "",
       },
     ]);
   };
@@ -398,6 +420,9 @@ export default function VorfertigungTimeTracking() {
           projectId: b.projectId || null,
         });
         const projName = c.projectId ? projects.find((p) => p.id === c.projectId)?.name : null;
+        const baseLabel = c.projectId ? `Vorfertigung: ${projName}` : "Vorfertigung: Werk";
+        const userTaetigkeit = (b.taetigkeit || "").trim();
+        const fullTaetigkeit = userTaetigkeit ? `${baseLabel} — ${userTaetigkeit}` : baseLabel;
         return {
           dbId: b.dbId,
           row: {
@@ -410,7 +435,7 @@ export default function VorfertigungTimeTracking() {
             pause_minutes: c.pauseMinutes,
             stunden: c.stunden,
             project_id: c.projectId,
-            taetigkeit: c.projectId ? `Vorfertigung: ${projName}` : "Vorfertigung: Werk",
+            taetigkeit: fullTaetigkeit,
             entry_typ: "vorfertigung",
           },
         };
@@ -625,6 +650,7 @@ export default function VorfertigungTimeTracking() {
                       <Label className="text-xs">Start</Label>
                       <Input
                         type="time"
+                        step={900}
                         value={b.startTime}
                         onChange={(e) => updateBlock(b.localId, { startTime: e.target.value })}
                       />
@@ -633,6 +659,7 @@ export default function VorfertigungTimeTracking() {
                       <Label className="text-xs">Ende</Label>
                       <Input
                         type="time"
+                        step={900}
                         value={b.endTime}
                         onChange={(e) => updateBlock(b.localId, { endTime: e.target.value })}
                       />
@@ -655,6 +682,21 @@ export default function VorfertigungTimeTracking() {
                         ))}
                       </SelectContent>
                     </Select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <Label className="text-xs">Tätigkeit (optional)</Label>
+                    <Input
+                      list={`taetigkeit-templates-${b.localId}`}
+                      placeholder="z.B. Lieferung, Abbund..."
+                      value={b.taetigkeit}
+                      onChange={(e) => updateBlock(b.localId, { taetigkeit: e.target.value })}
+                    />
+                    <datalist id={`taetigkeit-templates-${b.localId}`}>
+                      {taetigkeitTemplates.map((t) => (
+                        <option key={t.id} value={t.bezeichnung} />
+                      ))}
+                    </datalist>
                   </div>
 
                   {err && (
