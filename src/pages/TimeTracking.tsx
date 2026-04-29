@@ -217,7 +217,7 @@ const TimeTracking = () => {
 
   // Saving state
   const [saving, setSaving] = useState(false);
-  const [existingEntriesWarning, setExistingEntriesWarning] = useState("");
+  // Replaced by existingTodayBerichte card with project details
   const [maExistingHours, setMaExistingHours] = useState<Record<string, number>>({});
 
   // Multi-Bericht: User's eigene Berichte für das aktuelle Datum (außer dem ggf. editierten)
@@ -1477,27 +1477,8 @@ const TimeTracking = () => {
     }
   };
 
-  // Check for existing entries on selected date
-  useEffect(() => {
-    const checkExisting = async () => {
-      if (!datum || !currentUserId) { setExistingEntriesWarning(""); return; }
-      // Nur für den eingeloggten User prüfen (nicht für alle MA)
-      const absTypes = ["Urlaub", "Krankenstand", "Fortbildung", "Feiertag", "Schule", "Weiterbildung"];
-      const { data } = await supabase
-        .from("time_entries")
-        .select("stunden, taetigkeit")
-        .eq("datum", datum)
-        .eq("user_id", currentUserId);
-      const workEntries = (data || []).filter(e => !absTypes.includes(e.taetigkeit));
-      if (workEntries.length > 0) {
-        const total = workEntries.reduce((s, e) => s + (parseFloat(e.stunden as any) || 0), 0);
-        setExistingEntriesWarning(`Für dich sind an diesem Tag bereits ${total}h eingetragen.`);
-      } else {
-        setExistingEntriesWarning("");
-      }
-    };
-    checkExisting();
-  }, [datum, currentUserId]);
+  // (Old simple warning removed — the existingTodayBerichte card above shows
+  // detailed info with project name, time range and edit button.)
 
   // Check existing hours for all selected MA
   useEffect(() => {
@@ -1605,15 +1586,28 @@ const TimeTracking = () => {
                   </div>
                 );
               })}
-              <div className="text-xs text-muted-foreground pt-1 border-t flex items-center justify-between">
-                <span>
-                  Gesamt heute (eigene Berichte): <strong>
-                    {existingTodayBerichte.reduce((s, b) => s + b.total_stunden, 0).toFixed(2).replace(".", ",")}h
-                  </strong>
-                </span>
-                {!editingBerichtId && (
-                  <span>Du erstellst einen weiteren Bericht für ein anderes Projekt.</span>
-                )}
+              <div className="text-xs text-muted-foreground pt-2 border-t space-y-1">
+                <div className="flex items-center justify-between flex-wrap gap-1">
+                  <span>
+                    Gesamt heute (eigene Berichte): <strong className="text-foreground">
+                      {existingTodayBerichte.reduce((s, b) => s + b.total_stunden, 0).toFixed(2).replace(".", ",")}h
+                    </strong>
+                  </span>
+                </div>
+                {!editingBerichtId && (() => {
+                  const last = [...existingTodayBerichte].sort((a, b) =>
+                    (b.abfahrt_zeit || "").localeCompare(a.abfahrt_zeit || "")
+                  )[0];
+                  if (last?.abfahrt_zeit) {
+                    return (
+                      <div className="text-blue-700 dark:text-blue-400">
+                        ℹ Arbeitsbeginn und Ankunft wurden automatisch auf <strong>{last.abfahrt_zeit.substring(0, 5)}</strong> gesetzt
+                        (Abfahrt der letzten Buchung). Bei Bedarf manuell anpassen.
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
               </div>
             </CardContent>
           </Card>
@@ -1655,13 +1649,6 @@ const TimeTracking = () => {
             </div>
           </CardHeader>
         </Card>
-
-        {/* Warning if entries exist for this date */}
-        {existingEntriesWarning && (
-          <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-800">
-            <strong>Achtung:</strong> {existingEntriesWarning}
-          </div>
-        )}
 
         {/* ---------- BAUVORHABEN ---------- */}
         <Card>
