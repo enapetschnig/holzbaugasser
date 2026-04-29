@@ -478,7 +478,7 @@ export default function Index() {
                 </div>
                 <CardTitle className="text-lg sm:text-xl">Vorfertigung / LKW</CardTitle>
                 <CardDescription className="text-sm">
-                  Blockweise Zeiten erfassen: Start, Ende, Projekt — mehrere Blöcke pro Tag
+                  Für mehrere Baustellen pro Tag blockweise Zeiten erfassen
                 </CardDescription>
               </CardHeader>
               <CardContent>
