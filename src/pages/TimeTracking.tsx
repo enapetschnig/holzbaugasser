@@ -186,8 +186,10 @@ const TimeTracking = () => {
   const [arbeitsbeginn, setArbeitsbeginn] = useState("06:30");
   const [ankunftZeit, setAnkunftZeit] = useState("07:00");
   const [abfahrtZeit, setAbfahrtZeit] = useState("16:00");
-  const [pauseVon, setPauseVon] = useState("12:00");
-  const [pauseBis, setPauseBis] = useState("12:30");
+  // Pause leer per Default — wird automatisch gesetzt wenn die Arbeitszeit
+  // über die Mittagspause (12:00–12:30) läuft.
+  const [pauseVon, setPauseVon] = useState("");
+  const [pauseBis, setPauseBis] = useState("");
   const [wetter, setWetter] = useState("");
   const [schmutzzulageAlle, setSchmutzzulageAlle] = useState(false);
   const [regenSchichtAlle, setRegenSchichtAlle] = useState(false);
@@ -284,6 +286,43 @@ const TimeTracking = () => {
     () => `Rüstzeit/Anfahrt, Ankunftszeit Baustelle: ${ankunftZeit}`,
     [ankunftZeit]
   );
+
+  // Pause-Auto-Fill: nur wenn die Arbeitszeit über die Mittagspause (12:00–12:30) läuft.
+  // Verläuft die Buchung komplett vor 12:00 oder komplett nach 12:30 → keine Pause.
+  // Im Edit-Modus wird nicht überschrieben (gespeicherte Pause respektieren).
+  useEffect(() => {
+    if (editingBerichtId) return;
+    if (!arbeitsbeginn) return;
+
+    const maxStunden = Math.max(
+      0,
+      ...mitarbeiterRows.filter((r) => r.mitarbeiterId).map((r) => sumStunden(r))
+    );
+    if (maxStunden <= 0) return; // keine Pause-Änderung wenn noch keine Stunden
+
+    const [bh, bm] = arbeitsbeginn.split(":").map(Number);
+    if (isNaN(bh) || isNaN(bm)) return;
+    const startMin = bh * 60 + bm;
+    const PAUSE_START = 12 * 60; // 12:00
+    const PAUSE_END = 12 * 60 + 30; // 12:30
+
+    // Endzeit ohne Pause
+    const endNoPause = startMin + Math.round(maxStunden * 60);
+
+    // Buchung läuft über die Pause? (Start vor 12:00 UND Ende nach 12:00)
+    const overlapsPause = startMin < PAUSE_START && endNoPause > PAUSE_START;
+
+    if (overlapsPause) {
+      // Pause auf 12:00–12:30 setzen
+      if (pauseVon !== "12:00") setPauseVon("12:00");
+      if (pauseBis !== "12:30") setPauseBis("12:30");
+    } else if (startMin >= PAUSE_END || endNoPause <= PAUSE_START) {
+      // Komplett vor oder nach Pause → leer
+      if (pauseVon) setPauseVon("");
+      if (pauseBis) setPauseBis("");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [arbeitsbeginn, mitarbeiterRows, editingBerichtId]);
 
   // Abfahrt Baustelle dynamisch berechnen: Arbeitsbeginn + max(Mitarbeiter-Stunden) + Pause-Dauer
   // Wenn keine Stunden eingetragen: Default je Wochentag (Fr 15:00, sonst 16:00)
@@ -850,11 +889,9 @@ const TimeTracking = () => {
     if (!datum) return "Bitte ein Datum eingeben.";
     if (!ankunftZeit) return "Ankunftszeit ist erforderlich.";
 
-    // Pause muss zwischen Ankunft und Abfahrt liegen (wenn gesetzt)
+    // Pause-Validation: nur wenn beide Zeiten gesetzt sind
     if (pauseVon && pauseBis) {
       if (pauseBis <= pauseVon) return "Pause-Ende muss nach Pause-Start liegen.";
-      if (pauseVon < ankunftZeit) return "Pause kann nicht vor Ankunft beginnen.";
-      if (abfahrtZeit && pauseBis > abfahrtZeit) return "Pause muss vor der Abfahrt enden.";
     } else if (pauseVon || pauseBis) {
       return "Pause: bitte beide Zeiten (von und bis) eingeben oder beide leer lassen.";
     }
@@ -1332,8 +1369,8 @@ const TimeTracking = () => {
     setArbeitsbeginn("06:30");
     setAnkunftZeit("07:00");
     setAbfahrtZeit("16:00");
-    setPauseVon("12:00");
-    setPauseBis("12:30");
+    setPauseVon("");
+    setPauseBis("");
     setWetter("");
     setSchmutzzulageAlle(false);
     setRegenSchichtAlle(false);
@@ -1373,8 +1410,8 @@ const TimeTracking = () => {
       setArbeitsbeginn(b.arbeitsbeginn || "06:30");
       setAnkunftZeit(b.ankunft_zeit || "07:00");
       setAbfahrtZeit(b.abfahrt_zeit || "16:00");
-      setPauseVon(b.pause_von || "12:00");
-      setPauseBis(b.pause_bis || "12:30");
+      setPauseVon(b.pause_von || "");
+      setPauseBis(b.pause_bis || "");
       setWetter(b.wetter || "");
       setSchmutzzulageAlle(b.schmutzzulage_alle || false);
       setRegenSchichtAlle(b.regen_schicht_alle || false);
