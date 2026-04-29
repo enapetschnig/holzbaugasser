@@ -253,6 +253,16 @@ const TimeTracking = () => {
     total_stunden: number;
   }[]>([]);
 
+  // Cross-Type: Vorfertigung- und Projektleiter-Einträge des Users für das aktuelle Datum
+  const [existingTodayOtherEntries, setExistingTodayOtherEntries] = useState<{
+    type: "vorfertigung" | "projektleiter";
+    stunden: number;
+    taetigkeit: string;
+    projectName: string | null;
+    startTime: string | null;
+    endTime: string | null;
+  }[]>([]);
+
   // Editing existing report
   const [editingBerichtId, setEditingBerichtId] = useState<string | null>(null);
 
@@ -412,6 +422,50 @@ const TimeTracking = () => {
     })();
     return () => { cancelled = true; };
   }, [datum, currentUserId, editingBerichtId]);
+
+  // Cross-Type: Lade Vorfertigung- und Projektleiter-Einträge für das aktuelle Datum
+  useEffect(() => {
+    if (!currentUserId || !datum) {
+      setExistingTodayOtherEntries([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const { data: entries } = await supabase
+        .from("time_entries")
+        .select("project_id, entry_typ, taetigkeit, stunden, start_time, end_time")
+        .eq("user_id", currentUserId)
+        .eq("datum", datum)
+        .in("entry_typ", ["vorfertigung", "projektleiter"]);
+
+      if (cancelled || !entries || entries.length === 0) {
+        if (!cancelled) setExistingTodayOtherEntries([]);
+        return;
+      }
+
+      // Projekt-Namen für referenzierte project_ids laden
+      const projIds = [...new Set((entries as any[]).map((e) => e.project_id).filter(Boolean))] as string[];
+      const projNameMap: Record<string, string> = {};
+      if (projIds.length > 0) {
+        const { data: projData } = await supabase
+          .from("projects")
+          .select("id, name")
+          .in("id", projIds);
+        (projData || []).forEach((p: any) => { projNameMap[p.id] = p.name; });
+      }
+
+      const result = (entries as any[]).map((e) => ({
+        type: e.entry_typ as "vorfertigung" | "projektleiter",
+        stunden: parseFloat(e.stunden) || 0,
+        taetigkeit: (e.taetigkeit as string) || "",
+        projectName: e.project_id ? projNameMap[e.project_id] || null : null,
+        startTime: e.start_time ? (e.start_time as string).substring(0, 5) : null,
+        endTime: e.end_time ? (e.end_time as string).substring(0, 5) : null,
+      }));
+      if (!cancelled) setExistingTodayOtherEntries(result);
+    })();
+    return () => { cancelled = true; };
+  }, [datum, currentUserId]);
 
   // Auto-Fill Arbeitsbeginn/Ankunft bei Datum-Wechsel:
   // - Tag OHNE Buchungen → Defaults (06:30 / 07:00)
@@ -1718,6 +1772,46 @@ const TimeTracking = () => {
                   }
                   return null;
                 })()}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Cross-Type: Vorfertigung / Projektleiter-Einträge desselben Tages */}
+        {existingTodayOtherEntries.length > 0 && (
+          <Card className="border-amber-200 bg-amber-50/30 dark:bg-amber-950/10 dark:border-amber-800">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base flex items-center gap-2">
+                <FileText className="h-4 w-4 text-amber-600" />
+                Außerdem heute gebucht (Vorfertigung / Projektleiter)
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {existingTodayOtherEntries.map((e, idx) => {
+                const label = e.type === "vorfertigung" ? "Vorfertigung" : "Projektleiter";
+                const projOrWerk = e.projectName || (e.type === "vorfertigung" ? "Werk" : "Büro");
+                const timeRange = e.startTime && e.endTime ? `${e.startTime}–${e.endTime}` : "";
+                return (
+                  <div
+                    key={idx}
+                    className="flex items-center justify-between gap-2 p-2 rounded border bg-card"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium text-sm truncate">
+                        {label}: {projOrWerk}
+                      </div>
+                      <div className="text-xs text-muted-foreground flex items-center gap-2 flex-wrap">
+                        {timeRange && <><span>{timeRange}</span><span>·</span></>}
+                        <span>{e.stunden.toFixed(2).replace(".", ",")}h</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+              <div className="text-xs text-muted-foreground pt-2 border-t">
+                Gesamt zusätzlich: <strong className="text-foreground">
+                  {existingTodayOtherEntries.reduce((s, e) => s + e.stunden, 0).toFixed(2).replace(".", ",")}h
+                </strong> — Leistungsbericht-Stunden kommen oben drauf, bitte Doppelbuchung vermeiden.
               </div>
             </CardContent>
           </Card>
