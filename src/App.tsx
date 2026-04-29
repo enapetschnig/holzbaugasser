@@ -14,6 +14,7 @@ import Index from "./pages/Index";
 import Auth from "./pages/Auth";
 import TimeTracking from "./pages/TimeTracking";
 import ProjektleiterTimeTracking from "./pages/ProjektleiterTimeTracking";
+import VorfertigungTimeTracking from "./pages/VorfertigungTimeTracking";
 import Projects from "./pages/Projects";
 import ProjectDetail from "./pages/ProjectDetail";
 import ProjectOverview from "./pages/ProjectOverview";
@@ -116,6 +117,7 @@ function AppContent() {
         <Route path="/auth" element={<Auth />} />
         <Route path="/time-tracking" element={<TimeTracking />} />
         <Route path="/projektleiter-zeiterfassung" element={<ProjektleiterTimeTracking />} />
+        <Route path="/vorfertigung-zeiterfassung" element={<VorfertigungTimeTracking />} />
         <Route path="/projects" element={<Projects />} />
         <Route path="/projects/:projectId" element={<ProjectOverview />} />
         <Route path="/projects/:projectId/:type" element={<ProjectDetail />} />

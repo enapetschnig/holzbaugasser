@@ -320,9 +320,12 @@ export default function Index() {
   const isVorarbeiter = userRole === "vorarbeiter";
   const isProjektleiter = userRole === "projektleiter";
   const isExtern = userRole === "extern";
+  const isMitarbeiter = userRole === "mitarbeiter";
   const canManageTime = isAdmin || isVorarbeiter || isProjektleiter;
   const canCreateProjects = isAdmin || isVorarbeiter || isProjektleiter;
   const canViewHoursReport = isAdmin || isProjektleiter;
+  // Vorfertigung/LKW-Zeiterfassung: alle außer Extern
+  const canUseVorfertigung = isAdmin || isVorarbeiter || isProjektleiter || isMitarbeiter;
 
   return (
     <div className="min-h-screen bg-background">
@@ -455,6 +458,27 @@ export default function Index() {
                 <CardTitle className="text-lg sm:text-xl">Meine Zeiterfassung</CardTitle>
                 <CardDescription className="text-sm">
                   Arbeitszeitblöcke erfassen: Start, Ende, Pause & Projekt (40h/Woche)
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Button className="w-full" size="sm" variant="secondary">Zeit erfassen</Button>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Vorfertigung / LKW-Fahrer Zeiterfassung */}
+          {canUseVorfertigung && (
+            <Card
+              className="cursor-pointer hover:shadow-lg transition-all hover:border-primary/50"
+              onClick={() => navigate("/vorfertigung-zeiterfassung")}
+            >
+              <CardHeader className="space-y-2 pb-3">
+                <div className="h-12 w-12 rounded-lg bg-amber-500/10 flex items-center justify-center">
+                  <Clock className="h-6 w-6 text-amber-600" />
+                </div>
+                <CardTitle className="text-lg sm:text-xl">Vorfertigung / LKW</CardTitle>
+                <CardDescription className="text-sm">
+                  Blockweise Zeiten erfassen: Start, Ende, Projekt — mehrere Blöcke pro Tag
                 </CardDescription>
               </CardHeader>
               <CardContent>
