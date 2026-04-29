@@ -78,7 +78,7 @@ export default function VorfertigungTimeTracking() {
 
   const [userId, setUserId] = useState<string | null>(null);
   const [userRole, setUserRole] = useState<string | null>(null);
-  const [weeklyHours, setWeeklyHours] = useState<number>(39);
+  const [customWeeklyHours, setCustomWeeklyHours] = useState<number | null>(null);
   const [date, setDate] = useState(() => localDateString());
 
   const [projects, setProjects] = useState<Project[]>([]);
@@ -131,7 +131,7 @@ export default function VorfertigungTimeTracking() {
         .eq("user_id", user.id)
         .maybeSingle();
       const empAny = emp as any;
-      if (empAny?.monats_soll_stunden) setWeeklyHours(empAny.monats_soll_stunden);
+      if (empAny?.monats_soll_stunden) setCustomWeeklyHours(empAny.monats_soll_stunden);
 
       // Projekte
       const { data: projData } = await supabase
@@ -157,17 +157,10 @@ export default function VorfertigungTimeTracking() {
       .eq("datum", date)
       .order("start_time", { ascending: true });
 
-    if (!data) {
-      setBlocks([]);
-      setOriginalIds([]);
-      setAbsences([]);
-      return;
-    }
-
     const vfBlocks: EditableBlock[] = [];
     const abs: AbsenceEntry[] = [];
 
-    for (const e of data as any[]) {
+    for (const e of (data as any[]) || []) {
       if (e.entry_typ === "vorfertigung") {
         vfBlocks.push({
           localId: e.id,
@@ -188,8 +181,24 @@ export default function VorfertigungTimeTracking() {
       }
     }
 
+    const dbIds = vfBlocks.map((b) => b.dbId).filter(Boolean) as string[];
+
+    // Auto-Fill: leerer Tag ohne blockierende Absenz → einen leeren Block ab 07:00 vorschlagen
+    const blockingAbs = abs.some((a) =>
+      ["Urlaub", "Krankenstand", "ZA", "Zeitausgleich"].includes(a.taetigkeit)
+    );
+    if (vfBlocks.length === 0 && !blockingAbs) {
+      vfBlocks.push({
+        localId: randomId(),
+        dbId: null,
+        startTime: "07:00",
+        endTime: "",
+        projectId: "",
+      });
+    }
+
     setBlocks(vfBlocks);
-    setOriginalIds(vfBlocks.map((b) => b.dbId).filter(Boolean) as string[]);
+    setOriginalIds(dbIds);
     setAbsences(abs);
   }, [userId, date]);
 
@@ -203,7 +212,9 @@ export default function VorfertigungTimeTracking() {
 
   const dow = new Date(date + "T00:00:00").getDay();
   const fullTimeSoll = userRole ? getTagesSoll(userRole as any, dow) : 0;
-  const tagesSoll = Math.round((weeklyHours / (userRole === "projektleiter" || userRole === "administrator" ? 40 : 39)) * fullTimeSoll * 100) / 100;
+  const fullTimeWeekly = userRole === "projektleiter" || userRole === "administrator" ? 40 : 39;
+  const effectiveWeekly = customWeeklyHours ?? fullTimeWeekly;
+  const tagesSoll = Math.round((effectiveWeekly / fullTimeWeekly) * fullTimeSoll * 100) / 100;
 
   // Live computed blocks
   const computed = useMemo(
@@ -223,14 +234,12 @@ export default function VorfertigungTimeTracking() {
   const isWeekend = dow === 0 || dow === 6;
 
   const hasUnsavedChanges = useMemo(() => {
-    // Vergleich: wenn sich Anzahl, IDs, oder Werte unterscheiden
-    if (blocks.length !== originalIds.length) return true;
-    if (blocks.some((b) => !b.dbId)) return true;
-    return blocks.some((b) => {
-      // Werte vs. DB ist im State kombiniert; einfache Heuristik: dirty-flag könnte ergänzt werden,
-      // aber ein Save bei jedem Click ist OK
-      return false;
-    });
+    // Neuer Block mit Inhalt (dbId=null + endTime gesetzt)?
+    if (blocks.some((b) => !b.dbId && b.endTime)) return true;
+    // DB-Block gelöscht? (Anzahl gespeicherter Blöcke != originale Anzahl)
+    const savedCount = blocks.filter((b) => b.dbId).length;
+    if (savedCount !== originalIds.length) return true;
+    return false;
   }, [blocks, originalIds]);
 
   const dateLabel = format(new Date(date + "T00:00:00"), "EEEE, d. MMMM yyyy", { locale: de });
@@ -272,37 +281,6 @@ export default function VorfertigungTimeTracking() {
 
   const removeBlock = (localId: string) => {
     setBlocks((prev) => prev.filter((b) => b.localId !== localId));
-  };
-
-  const applyStandardTag = () => {
-    if (blocks.length > 0 && istStunden > 0) {
-      setConfirmState({
-        title: "Standardtag eintragen?",
-        description: "Alle aktuellen Blöcke werden ersetzt durch einen Standardtag (07:00–16:00 mit Pause 12:00–12:30).",
-        onConfirm: () => {
-          setConfirmState(null);
-          setBlocks([
-            {
-              localId: randomId(),
-              dbId: null,
-              startTime: "07:00",
-              endTime: "16:00",
-              projectId: blocks[0]?.projectId || "",
-            },
-          ]);
-        },
-      });
-      return;
-    }
-    setBlocks([
-      {
-        localId: randomId(),
-        dbId: null,
-        startTime: "07:00",
-        endTime: "16:00",
-        projectId: "",
-      },
-    ]);
   };
 
   // -----------------------------------------------------------------
@@ -504,13 +482,6 @@ export default function VorfertigungTimeTracking() {
               </div>
             </CardContent>
           </Card>
-        )}
-
-        {/* Standardtag */}
-        {!isWeekend && (
-          <Button variant="outline" onClick={applyStandardTag} className="w-full">
-            ✨ Standardtag eintragen (07:00–16:00 mit Pause)
-          </Button>
         )}
 
         {/* Blöcke */}
