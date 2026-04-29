@@ -1005,9 +1005,10 @@ const TimeTracking = () => {
           .delete()
           .eq("bericht_id", editingBerichtId);
 
-        // Delete associated time_entries — nur für das AKTUELLE Projekt,
-        // damit andere Berichte (anderes Projekt am gleichen Tag) unangetastet bleiben.
-        await supabase
+        // Delete associated time_entries — nur für das AKTUELLE Projekt + Leistungsbericht-Typ,
+        // damit andere Berichte (anderes Projekt am gleichen Tag) bzw. Vorfertigung/PL-Einträge
+        // unangetastet bleiben.
+        await (supabase
           .from("time_entries")
           .delete()
           .eq("datum", datum)
@@ -1015,7 +1016,8 @@ const TimeTracking = () => {
           .in(
             "user_id",
             mitarbeiterRows.filter((r) => r.mitarbeiterId).map((r) => r.mitarbeiterId)
-          );
+          ) as any)
+          .or("entry_typ.eq.leistungsbericht,entry_typ.is.null");
 
         // Delete the bericht itself
         await supabase
@@ -1027,14 +1029,16 @@ const TimeTracking = () => {
       // Cleanup: Wenn der User "Überschreiben" gewählt hat (NEW-Modus mit existing entries),
       // alte Daten der betroffenen Mitarbeiter sauber entfernen.
       if (cleanupBeforeInsert && activeMaIdsForCleanup.length > 0) {
-        // 1. Lösche existierende time_entries (Arbeit, keine Absenzen) für die MA am Datum
-        // — nur für das AKTUELLE Projekt, damit Multi-Bericht-Tage andere Projekte behalten
+        // 1. Lösche existierende time_entries für die MA am Datum + Projekt — nur Leistungsbericht-Typ
+        // (entry_typ='leistungsbericht' ODER NULL für Alt-Daten ohne typ).
+        // Vorfertigung/Projektleiter/Absenz bleiben unangetastet.
         await (supabase
           .from("time_entries")
           .delete()
           .eq("datum", datum)
           .eq("project_id", projektId)
           .in("user_id", activeMaIdsForCleanup) as any)
+          .or("entry_typ.eq.leistungsbericht,entry_typ.is.null")
           .not("taetigkeit", "in", '("Urlaub","Krankenstand","Fortbildung","Feiertag","Schule","Weiterbildung","ZA","Zeitausgleich")');
 
         // 2. Finde andere Leistungsberichte am gleichen Datum + GLEICHEM Projekt
@@ -1259,6 +1263,7 @@ const TimeTracking = () => {
           end_time: computedAbfahrt || abfahrtZeit,
           pause_minutes: pauseMinuten,
           location_type: r.istWerkstatt ? "werkstatt" : "baustelle",
+          entry_typ: "leistungsbericht",
         };
       });
 

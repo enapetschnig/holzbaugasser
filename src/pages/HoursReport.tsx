@@ -17,7 +17,6 @@ import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import ProjectHoursReport from "@/components/ProjectHoursReport";
 import ProjektleiterAuswertung from "@/components/ProjektleiterAuswertung";
-import VorfertigungAuswertung from "@/components/VorfertigungAuswertung";
 import { FileSpreadsheet, Building2, ClipboardList, Loader2, Download, X, Clock, Pencil } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -1259,7 +1258,7 @@ export default function HoursReport() {
 
       <div className="container mx-auto p-4 space-y-6">
         <Tabs defaultValue={isAdmin ? "arbeitszeiterfassung" : "leistungsberichte"} className="w-full">
-          <TabsList className={`grid w-full ${isAdmin ? "grid-cols-5" : "grid-cols-2"}`}>
+          <TabsList className={`grid w-full ${isAdmin ? "grid-cols-4" : "grid-cols-2"}`}>
             {isAdmin && (
             <TabsTrigger value="arbeitszeiterfassung" className="text-xs sm:text-sm">
               <FileSpreadsheet className="w-4 h-4 mr-1 sm:mr-2 shrink-0" />
@@ -1274,12 +1273,6 @@ export default function HoursReport() {
             <TabsTrigger value="projektleiter" className="text-xs sm:text-sm">
               <Clock className="w-4 h-4 mr-1 sm:mr-2 shrink-0" />
               <span className="truncate">Projektleiter</span>
-            </TabsTrigger>
-            )}
-            {isAdmin && (
-            <TabsTrigger value="vorfertigung" className="text-xs sm:text-sm">
-              <Clock className="w-4 h-4 mr-1 sm:mr-2 shrink-0" />
-              <span className="truncate">Vorfertigung</span>
             </TabsTrigger>
             )}
             <TabsTrigger value="projektzeiterfassung" className="text-xs sm:text-sm">
@@ -2009,15 +2002,6 @@ export default function HoursReport() {
           {isAdmin && (
             <TabsContent value="projektleiter">
               <ProjektleiterAuswertung />
-            </TabsContent>
-          )}
-
-          {/* ============================================================= */}
-          {/* TAB: Vorfertigung / LKW-Auswertung                             */}
-          {/* ============================================================= */}
-          {isAdmin && (
-            <TabsContent value="vorfertigung">
-              <VorfertigungAuswertung />
             </TabsContent>
           )}
 

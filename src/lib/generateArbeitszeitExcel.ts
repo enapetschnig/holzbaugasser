@@ -47,7 +47,7 @@ export async function generateArbeitszeitExcel(options: ExportOptions) {
     .lte("datum", monthEnd)
     .order("datum");
 
-  // Fetch project names from leistungsberichte
+  // Fetch project names from leistungsberichte (für LB-Tage: Pause-Zeiten und Projektname)
   const { data: berichtMitarbeiter } = await supabase
     .from("leistungsbericht_mitarbeiter" as any)
     .select("bericht_id, mitarbeiter_id")
@@ -86,9 +86,57 @@ export async function generateArbeitszeitExcel(options: ExportOptions) {
     }
   }
 
-  // Build entry map by date
-  const entryMap: Record<string, any> = {};
-  (entries || []).forEach((e: any) => { entryMap[e.datum] = e; });
+  // Auch direkt aus time_entries.project_id (für Vorfertigung/PL-Tage ohne LB-Eintrag)
+  const directProjectIds = [
+    ...new Set(
+      (entries || [])
+        .map((e: any) => e.project_id)
+        .filter((id: string | null): id is string => !!id)
+    ),
+  ];
+  if (directProjectIds.length > 0) {
+    const { data: projData } = await supabase.from("projects").select("id, name").in("id", directProjectIds);
+    const lookupMap: Record<string, string> = {};
+    (projData || []).forEach((p: any) => { lookupMap[p.id] = p.name; });
+    (entries || []).forEach((e: any) => {
+      if (e.project_id && lookupMap[e.project_id] && !projektMap[e.datum]) {
+        projektMap[e.datum] = lookupMap[e.project_id];
+      }
+    });
+  }
+
+  // Aggregiere alle Einträge pro Tag (LB + PL + Vorfertigung + Absenz)
+  // Bei Multi-Entry-Tagen: Stunden summieren, Absenz hat Vorrang vor Arbeit
+  const ABSENCE_KEYWORDS = ["urlaub", "krank", "fortbildung", "weiterbildung", "feiertag", "schule", "berufsschule", "zeitausgleich", "za "];
+  const isAbsenceTaetigkeit = (t: string) => {
+    const lower = (t || "").toLowerCase();
+    return ABSENCE_KEYWORDS.some((kw) => lower.includes(kw));
+  };
+
+  const entryMap: Record<string, { stunden: number; taetigkeit: string; project_id: string | null }> = {};
+  (entries || []).forEach((e: any) => {
+    const stunden = parseFloat(e.stunden) || 0;
+    const taetigkeit = e.taetigkeit || "";
+    const isAbs = isAbsenceTaetigkeit(taetigkeit);
+    const existing = entryMap[e.datum];
+
+    if (!existing) {
+      entryMap[e.datum] = { stunden, taetigkeit, project_id: e.project_id || null };
+      return;
+    }
+
+    const existingIsAbs = isAbsenceTaetigkeit(existing.taetigkeit);
+    if (isAbs && !existingIsAbs) {
+      // Absenz hat Vorrang — überschreibt Arbeit
+      entryMap[e.datum] = { stunden, taetigkeit, project_id: e.project_id || null };
+    } else if (!isAbs && existingIsAbs) {
+      // Existing ist Absenz — neue Arbeit ignorieren
+    } else {
+      // Beides gleicher Typ → summieren, Tätigkeit/Projekt ggf. behalten
+      existing.stunden += stunden;
+      if (!existing.project_id && e.project_id) existing.project_id = e.project_id;
+    }
+  });
 
   // Build rows
   const rows: any[][] = [];
@@ -195,7 +243,18 @@ export async function generateArbeitszeitExcel(options: ExportOptions) {
       }
     }
 
-    const projekt = isAbsence ? label : (projektMap[dateStr] || "Baustelle");
+    let projekt: string;
+    if (isAbsence) {
+      projekt = label;
+    } else if (projektMap[dateStr]) {
+      projekt = projektMap[dateStr];
+    } else if ((entry.taetigkeit || "").startsWith("Vorfertigung:")) {
+      projekt = entry.taetigkeit.replace(/^Vorfertigung:\s*/, "");
+    } else if ((entry.taetigkeit || "").startsWith("PL:")) {
+      projekt = entry.taetigkeit.replace(/^PL:\s*/, "");
+    } else {
+      projekt = "Baustelle";
+    }
 
     rows.push([
       day,

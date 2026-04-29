@@ -7,7 +7,6 @@ import {
   Trash2,
   Clock,
   Save,
-  Building2,
   AlertTriangle,
   Coffee,
 } from "lucide-react";
@@ -63,6 +62,13 @@ type AbsenceEntry = {
   taetigkeit: string;
 };
 
+type OtherEntry = {
+  type: "leistungsbericht" | "projektleiter";
+  stunden: number;
+  taetigkeit: string;
+  projectName: string | null;
+};
+
 function randomId(): string {
   return `tmp_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -85,6 +91,7 @@ export default function VorfertigungTimeTracking() {
   const [blocks, setBlocks] = useState<EditableBlock[]>([]);
   const [originalIds, setOriginalIds] = useState<string[]>([]);
   const [absences, setAbsences] = useState<AbsenceEntry[]>([]);
+  const [otherEntries, setOtherEntries] = useState<OtherEntry[]>([]);
   const [saving, setSaving] = useState(false);
   const [confirmState, setConfirmState] = useState<{
     title: string;
@@ -152,13 +159,17 @@ export default function VorfertigungTimeTracking() {
 
     const { data } = await supabase
       .from("time_entries")
-      .select("id, start_time, end_time, project_id, entry_typ, taetigkeit, stunden")
+      .select("id, start_time, end_time, project_id, entry_typ, taetigkeit, stunden, datum")
       .eq("user_id", userId)
       .eq("datum", date)
       .order("start_time", { ascending: true });
 
+    const ABSENCE_TAETIGKEITEN = ["Urlaub", "Krankenstand", "ZA", "Zeitausgleich", "Fortbildung", "Schule"];
+
     const vfBlocks: EditableBlock[] = [];
     const abs: AbsenceEntry[] = [];
+    const others: OtherEntry[] = [];
+    const projectIdsToResolve = new Set<string>();
 
     for (const e of (data as any[]) || []) {
       if (e.entry_typ === "vorfertigung") {
@@ -171,13 +182,50 @@ export default function VorfertigungTimeTracking() {
         });
       } else if (
         e.entry_typ === "absenz" ||
-        (e.taetigkeit && ["Urlaub", "Krankenstand", "ZA", "Zeitausgleich", "Fortbildung", "Schule"].includes(e.taetigkeit))
+        (e.taetigkeit && ABSENCE_TAETIGKEITEN.includes(e.taetigkeit))
       ) {
         abs.push({
           datum: e.datum,
           stunden: parseFloat(e.stunden) || 0,
           taetigkeit: e.taetigkeit || "",
         });
+      } else if (e.entry_typ === "projektleiter") {
+        if (e.project_id) projectIdsToResolve.add(e.project_id);
+        others.push({
+          type: "projektleiter",
+          stunden: parseFloat(e.stunden) || 0,
+          taetigkeit: e.taetigkeit || "",
+          projectName: null,
+        });
+      } else {
+        // entry_typ NULL oder 'leistungsbericht' → reguläre Leistungsbericht-Stunden
+        if (e.project_id) projectIdsToResolve.add(e.project_id);
+        others.push({
+          type: "leistungsbericht",
+          stunden: parseFloat(e.stunden) || 0,
+          taetigkeit: e.taetigkeit || "",
+          projectName: null,
+        });
+      }
+    }
+
+    // Projektnamen für Other-Entries auflösen
+    if (projectIdsToResolve.size > 0) {
+      const { data: projData } = await supabase
+        .from("projects")
+        .select("id, name")
+        .in("id", Array.from(projectIdsToResolve));
+      const projNameMap: Record<string, string> = {};
+      (projData || []).forEach((p: any) => { projNameMap[p.id] = p.name; });
+      // Ergänze projectName direkt aus den ursprünglichen DB-Daten
+      let i = 0;
+      for (const e of (data as any[]) || []) {
+        if (e.entry_typ === "vorfertigung" || e.entry_typ === "absenz") continue;
+        if (e.taetigkeit && ABSENCE_TAETIGKEITEN.includes(e.taetigkeit)) continue;
+        if (others[i]) {
+          others[i].projectName = e.project_id ? projNameMap[e.project_id] || null : null;
+          i++;
+        }
       }
     }
 
@@ -200,6 +248,7 @@ export default function VorfertigungTimeTracking() {
     setBlocks(vfBlocks);
     setOriginalIds(dbIds);
     setAbsences(abs);
+    setOtherEntries(others);
   }, [userId, date]);
 
   useEffect(() => {
@@ -226,11 +275,16 @@ export default function VorfertigungTimeTracking() {
     [blocks]
   );
 
-  const istStunden = useMemo(
+  const istVorfertigung = useMemo(
     () => Math.round(computed.reduce((s, c) => s + c.stunden, 0) * 100) / 100,
     [computed]
   );
-  const diff = Math.round((istStunden - tagesSoll) * 100) / 100;
+  const istAndere = useMemo(
+    () => Math.round(otherEntries.reduce((s, o) => s + o.stunden, 0) * 100) / 100,
+    [otherEntries]
+  );
+  const istGesamt = Math.round((istVorfertigung + istAndere) * 100) / 100;
+  const diff = Math.round((istGesamt - tagesSoll) * 100) / 100;
   const isWeekend = dow === 0 || dow === 6;
 
   const hasUnsavedChanges = useMemo(() => {
@@ -387,7 +441,7 @@ export default function VorfertigungTimeTracking() {
         if (error) throw error;
       }
 
-      toast({ title: "Gespeichert", description: `${formatHours(istStunden)} für ${dateLabel}` });
+      toast({ title: "Gespeichert", description: `${formatHours(istVorfertigung)} Vorfertigung für ${dateLabel}` });
       await loadBlocks();
     } catch (err: any) {
       console.error("Save failed:", err);
@@ -447,30 +501,66 @@ export default function VorfertigungTimeTracking() {
                 Wochenende — kein Soll. Stunden zählen als Überstunden.
               </div>
             ) : (
-              <div className="grid grid-cols-3 gap-2 text-center">
-                <div>
-                  <div className="text-xs text-muted-foreground">Soll</div>
-                  <div className="text-xl font-semibold">{formatHours(tagesSoll)}</div>
-                </div>
-                <div>
-                  <div className="text-xs text-muted-foreground">Ist</div>
-                  <div className="text-xl font-semibold">{formatHours(istStunden)}</div>
-                </div>
-                <div>
-                  <div className="text-xs text-muted-foreground">Differenz</div>
-                  <div
-                    className={`text-xl font-semibold ${
-                      diff > 0 ? "text-green-600" : diff < 0 ? "text-orange-500" : ""
-                    }`}
-                  >
-                    {diff > 0 ? "+" : ""}
-                    {formatHours(diff)}
+              <>
+                <div className="grid grid-cols-3 gap-2 text-center">
+                  <div>
+                    <div className="text-xs text-muted-foreground">Soll</div>
+                    <div className="text-xl font-semibold">{formatHours(tagesSoll)}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground">Tag-Total</div>
+                    <div className="text-xl font-semibold">{formatHours(istGesamt)}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground">Differenz</div>
+                    <div
+                      className={`text-xl font-semibold ${
+                        diff > 0 ? "text-green-600" : diff < 0 ? "text-orange-500" : ""
+                      }`}
+                    >
+                      {diff > 0 ? "+" : ""}
+                      {formatHours(diff)}
+                    </div>
                   </div>
                 </div>
-              </div>
+                {istAndere > 0 && (
+                  <div className="mt-3 pt-3 border-t text-xs text-muted-foreground flex justify-between">
+                    <span>davon Vorfertigung:</span>
+                    <span className="font-medium text-foreground">{formatHours(istVorfertigung)}</span>
+                  </div>
+                )}
+              </>
             )}
           </CardContent>
         </Card>
+
+        {/* Cross-Type-Warnung: Stunden aus LB/PL bereits gebucht */}
+        {otherEntries.length > 0 && (
+          <Card className="border-blue-200 bg-blue-50 dark:bg-blue-950/30">
+            <CardContent className="pt-4 pb-4 space-y-2">
+              <div className="flex gap-2 items-start">
+                <AlertTriangle className="h-4 w-4 text-blue-600 shrink-0 mt-0.5" />
+                <div className="text-sm font-medium">
+                  Bereits an diesem Tag gebucht (außerhalb Vorfertigung):
+                </div>
+              </div>
+              <ul className="text-sm space-y-1 ml-6">
+                {otherEntries.map((o, idx) => (
+                  <li key={idx} className="flex justify-between gap-3">
+                    <span>
+                      {o.type === "leistungsbericht" ? "Leistungsbericht" : "Projektleiter"}
+                      {o.projectName ? ` — ${o.projectName}` : ""}
+                    </span>
+                    <span className="font-medium tabular-nums">{formatHours(o.stunden)}</span>
+                  </li>
+                ))}
+              </ul>
+              <div className="text-xs text-muted-foreground ml-6 pt-1 border-t">
+                Vorfertigung-Blöcke kommen <strong>zusätzlich</strong> zu diesen Stunden — bitte prüfen, dass keine Doppelbuchung entsteht.
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Absenz-Warnung */}
         {absences.length > 0 && (
