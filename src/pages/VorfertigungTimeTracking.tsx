@@ -75,6 +75,12 @@ type OtherEntry = {
   projectName: string | null;
 };
 
+type MitarbeiterOption = {
+  id: string;
+  name: string;
+  role: string | null;
+};
+
 function randomId(): string {
   return `tmp_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -99,7 +105,11 @@ export default function VorfertigungTimeTracking() {
   const [originalIds, setOriginalIds] = useState<string[]>([]);
   const [absences, setAbsences] = useState<AbsenceEntry[]>([]);
   const [otherEntries, setOtherEntries] = useState<OtherEntry[]>([]);
+  const [availableMitarbeiter, setAvailableMitarbeiter] = useState<MitarbeiterOption[]>([]);
+  const [selectedMitarbeiterIds, setSelectedMitarbeiterIds] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
+
+  const canBookForOthers = userRole === "administrator" || userRole === "vorarbeiter";
   const [confirmState, setConfirmState] = useState<{
     title: string;
     description: string;
@@ -162,6 +172,37 @@ export default function VorfertigungTimeTracking() {
         .eq("is_active", true)
         .order("sort_order");
       if (tplData) setTaetigkeitTemplates(tplData);
+
+      // Mitarbeiter-Auswahl: nur für VA/Admin relevant, aber wir laden grundsätzlich
+      // damit der eigene Name angezeigt werden kann.
+      if (role === "administrator" || role === "vorarbeiter") {
+        const [profilesRes, rolesRes] = await Promise.all([
+          supabase
+            .from("profiles")
+            .select("id, vorname, nachname, is_hidden")
+            .eq("is_active", true)
+            .order("nachname"),
+          supabase.from("user_roles").select("user_id, role"),
+        ]);
+        const externIds = new Set(
+          (rolesRes.data || [])
+            .filter((r: any) => r.role === "extern")
+            .map((r: any) => r.user_id)
+        );
+        const roleMap: Record<string, string> = {};
+        (rolesRes.data || []).forEach((r: any) => { roleMap[r.user_id] = r.role; });
+        const list: MitarbeiterOption[] = ((profilesRes.data || []) as any[])
+          .filter((p) => !p.is_hidden && !externIds.has(p.id))
+          .map((p) => ({
+            id: p.id,
+            name: `${p.vorname || ""} ${p.nachname || ""}`.trim() || "(ohne Name)",
+            role: roleMap[p.id] || null,
+          }));
+        setAvailableMitarbeiter(list);
+      }
+
+      // Default: nur eigener User vorausgewählt
+      setSelectedMitarbeiterIds([user.id]);
     })();
   }, [navigate, toast]);
 
@@ -412,8 +453,14 @@ export default function VorfertigungTimeTracking() {
 
     setSaving(true);
     try {
-      // 1. INSERTs/UPDATEs vorbereiten
-      const computedRows = blocks.map((b) => {
+      // Welche User bekommen NEUE Blöcke? Standard: nur der eingeloggte.
+      // Vorarbeiter/Admin können in der UI weitere MAs auswählen.
+      const targetUserIds = canBookForOthers && selectedMitarbeiterIds.length > 0
+        ? Array.from(new Set([userId, ...selectedMitarbeiterIds]))
+        : [userId];
+
+      // 1. Rows pro Block berechnen
+      const buildRowFor = (b: typeof blocks[number], targetUid: string) => {
         const c = computeBlock({
           startTime: b.startTime,
           endTime: b.endTime,
@@ -424,38 +471,44 @@ export default function VorfertigungTimeTracking() {
         const userTaetigkeit = (b.taetigkeit || "").trim();
         const fullTaetigkeit = userTaetigkeit ? `${baseLabel} — ${userTaetigkeit}` : baseLabel;
         return {
-          dbId: b.dbId,
-          row: {
-            user_id: userId,
-            datum: date,
-            start_time: c.startTime,
-            end_time: c.endTime,
-            pause_start: c.pauseStart,
-            pause_end: c.pauseEnd,
-            pause_minutes: c.pauseMinutes,
-            stunden: c.stunden,
-            project_id: c.projectId,
-            taetigkeit: fullTaetigkeit,
-            entry_typ: "vorfertigung",
-          },
+          user_id: targetUid,
+          datum: date,
+          start_time: c.startTime,
+          end_time: c.endTime,
+          pause_start: c.pauseStart,
+          pause_end: c.pauseEnd,
+          pause_minutes: c.pauseMinutes,
+          stunden: c.stunden,
+          project_id: c.projectId,
+          taetigkeit: fullTaetigkeit,
+          entry_typ: "vorfertigung",
         };
-      });
+      };
 
-      // 2. UPSERT (Update wenn dbId, sonst INSERT)
-      for (const item of computedRows) {
-        if (item.dbId) {
+      // 2. Existierende Blöcke (mit dbId) UPDATE — nur für eigenen User
+      // Neue Blöcke (ohne dbId) INSERT für alle targetUserIds
+      const newInserts: ReturnType<typeof buildRowFor>[] = [];
+      for (const b of blocks) {
+        if (b.dbId) {
+          // Update: bleibt am eigenen User (dbId gehört zum eingeloggten User)
           const { error } = await supabase
             .from("time_entries")
-            .update(item.row)
-            .eq("id", item.dbId);
+            .update(buildRowFor(b, userId))
+            .eq("id", b.dbId);
           if (error) throw error;
         } else {
-          const { error } = await supabase.from("time_entries").insert(item.row);
-          if (error) throw error;
+          // Neuer Block → für jeden ausgewählten MA eine Zeile
+          for (const targetUid of targetUserIds) {
+            newInserts.push(buildRowFor(b, targetUid));
+          }
         }
       }
+      if (newInserts.length > 0) {
+        const { error } = await supabase.from("time_entries").insert(newInserts);
+        if (error) throw error;
+      }
 
-      // 3. DELETE alle ursprünglichen die jetzt nicht mehr da sind
+      // 3. DELETE: nur eigene Blöcke, die nicht mehr im UI sind.
       const currentDbIds = new Set(blocks.map((b) => b.dbId).filter(Boolean) as string[]);
       const idsToDelete = originalIds.filter((id) => !currentDbIds.has(id));
       if (idsToDelete.length > 0) {
@@ -466,7 +519,11 @@ export default function VorfertigungTimeTracking() {
         if (error) throw error;
       }
 
-      toast({ title: "Gespeichert", description: `${formatHours(istVorfertigung)} Vorfertigung für ${dateLabel}` });
+      const extraCount = targetUserIds.length - 1;
+      const desc = extraCount > 0
+        ? `${formatHours(istVorfertigung)} für dich + ${extraCount} weitere Mitarbeiter`
+        : `${formatHours(istVorfertigung)} Vorfertigung für ${dateLabel}`;
+      toast({ title: "Gespeichert", description: desc });
       await loadBlocks();
     } catch (err: any) {
       console.error("Save failed:", err);
@@ -516,6 +573,50 @@ export default function VorfertigungTimeTracking() {
             )}
           </CardContent>
         </Card>
+
+        {/* Mitarbeiter-Auswahl (nur Vorarbeiter/Admin) */}
+        {canBookForOthers && (
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Mitarbeiter</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="text-xs text-muted-foreground">
+                Diese Blöcke werden für alle ausgewählten Mitarbeiter gespeichert.
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {availableMitarbeiter.map((m) => {
+                  const isSelected = selectedMitarbeiterIds.includes(m.id);
+                  const isSelf = m.id === userId;
+                  return (
+                    <Badge
+                      key={m.id}
+                      variant={isSelected ? "default" : "outline"}
+                      className={`cursor-pointer text-xs py-1.5 px-3 ${isSelf ? "ring-1 ring-primary/40" : ""}`}
+                      onClick={() => {
+                        if (isSelf) return; // eigener Eintrag bleibt fix
+                        setSelectedMitarbeiterIds((prev) =>
+                          prev.includes(m.id)
+                            ? prev.filter((id) => id !== m.id)
+                            : [...prev, m.id]
+                        );
+                      }}
+                    >
+                      {isSelected && <span className="mr-1">✓</span>}
+                      {m.name}
+                      {isSelf && <span className="ml-1 opacity-60">(ich)</span>}
+                    </Badge>
+                  );
+                })}
+              </div>
+              <div className="text-xs text-muted-foreground border-t pt-2">
+                {selectedMitarbeiterIds.length === 1
+                  ? "Buchung nur für dich."
+                  : `Buchung für ${selectedMitarbeiterIds.length} Mitarbeiter.`}
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Soll/Ist */}
         <Card>
