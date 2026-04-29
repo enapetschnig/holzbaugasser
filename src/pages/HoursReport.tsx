@@ -22,6 +22,16 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { getMonthlyTargetHours, getWorkingDaysInMonth, getTargetHoursForDate } from "@/lib/workingHours";
 import { generateStundenauswertungPDF, StundenauswertungPDFData } from "@/lib/generateStundenauswertungPDF";
@@ -879,6 +889,71 @@ export default function HoursReport() {
     setSelectedBerichte(new Set());
     toast({ title: archive ? `${ids.length} Bericht(e) archiviert` : `${ids.length} Bericht(e) wiederhergestellt` });
     fetchBerichte();
+  };
+
+  // Endgültiges Löschen archivierter Berichte (inkl. zugehöriger time_entries und Sub-Tables via cascade)
+  const [confirmDeleteBerichte, setConfirmDeleteBerichte] = useState(false);
+  const [deletingBerichte, setDeletingBerichte] = useState(false);
+
+  const handleDeleteBerichte = async () => {
+    if (selectedBerichte.size === 0) return;
+    setDeletingBerichte(true);
+    const ids = Array.from(selectedBerichte);
+
+    try {
+      // 1. Lade Bericht-Infos und zugehörige Mitarbeiter (für time_entries Cleanup)
+      const [{ data: berichte }, { data: maData }] = await Promise.all([
+        supabase
+          .from("leistungsberichte" as any)
+          .select("id, datum, projekt_id")
+          .in("id", ids),
+        supabase
+          .from("leistungsbericht_mitarbeiter" as any)
+          .select("bericht_id, mitarbeiter_id")
+          .in("bericht_id", ids),
+      ]);
+
+      // 2. Lösche time_entries für jeden Bericht (datum + project_id + mitarbeiter)
+      // — hat kein FK, muss manuell aufgeräumt werden, sonst Datenschrott in der Stundenauswertung
+      for (const b of (berichte as any[]) || []) {
+        const userIds = ((maData as any[]) || [])
+          .filter((m: any) => m.bericht_id === b.id)
+          .map((m: any) => m.mitarbeiter_id)
+          .filter(Boolean);
+        if (userIds.length > 0 && b.projekt_id) {
+          await supabase
+            .from("time_entries")
+            .delete()
+            .eq("datum", b.datum)
+            .eq("project_id", b.projekt_id)
+            .in("user_id", userIds);
+        }
+      }
+
+      // 3. Lösche Berichte (cascade löscht automatisch leistungsbericht_taetigkeiten,
+      // _mitarbeiter, _stunden, _geraete, _materialien)
+      const { error } = await supabase
+        .from("leistungsberichte" as any)
+        .delete()
+        .in("id", ids);
+      if (error) throw error;
+
+      setSelectedBerichte(new Set());
+      setConfirmDeleteBerichte(false);
+      toast({
+        title: `${ids.length} Bericht(e) endgültig gelöscht`,
+        description: "Inklusive zugehöriger Stunden und Daten.",
+      });
+      fetchBerichte();
+    } catch (err: any) {
+      toast({
+        variant: "destructive",
+        title: "Fehler beim Löschen",
+        description: err.message || "Berichte konnten nicht gelöscht werden.",
+      });
+    } finally {
+      setDeletingBerichte(false);
+    }
   };
 
   const toggleBerichtSelection = (id: string) => {
@@ -1757,15 +1832,25 @@ export default function HoursReport() {
                     </Button>
                   </div>
                   {selectedBerichte.size > 0 && (
-                    <div className="flex gap-2">
+                    <div className="flex gap-2 flex-wrap">
                       {!showArchived ? (
                         <Button variant="outline" size="sm" onClick={() => handleArchiveBerichte(true)}>
                           {selectedBerichte.size} archivieren
                         </Button>
                       ) : (
-                        <Button variant="outline" size="sm" onClick={() => handleArchiveBerichte(false)}>
-                          {selectedBerichte.size} wiederherstellen
-                        </Button>
+                        <>
+                          <Button variant="outline" size="sm" onClick={() => handleArchiveBerichte(false)}>
+                            {selectedBerichte.size} wiederherstellen
+                          </Button>
+                          <Button
+                            variant="destructive"
+                            size="sm"
+                            onClick={() => setConfirmDeleteBerichte(true)}
+                          >
+                            <X className="w-3.5 h-3.5 mr-1" />
+                            {selectedBerichte.size} endgültig löschen
+                          </Button>
+                        </>
                       )}
                     </div>
                   )}
@@ -2101,6 +2186,31 @@ export default function HoursReport() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Bestätigungs-Dialog: Archivierte Berichte endgültig löschen */}
+      <AlertDialog open={confirmDeleteBerichte} onOpenChange={setConfirmDeleteBerichte}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Berichte endgültig löschen?</AlertDialogTitle>
+            <AlertDialogDescription>
+              <strong>{selectedBerichte.size} archivierte/r Bericht(e)</strong> werden unwiderruflich gelöscht — inklusive aller zugehörigen Stunden, Tätigkeiten, Geräte und Materialien.
+              <br />
+              <br />
+              Diese Aktion kann nicht rückgängig gemacht werden.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Abbrechen</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={handleDeleteBerichte}
+              disabled={deletingBerichte}
+            >
+              {deletingBerichte ? "Lösche..." : "Endgültig löschen"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
