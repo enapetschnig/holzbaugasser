@@ -220,6 +220,18 @@ const TimeTracking = () => {
   const [existingEntriesWarning, setExistingEntriesWarning] = useState("");
   const [maExistingHours, setMaExistingHours] = useState<Record<string, number>>({});
 
+  // Multi-Bericht: User's eigene Berichte für das aktuelle Datum (außer dem ggf. editierten)
+  const [existingTodayBerichte, setExistingTodayBerichte] = useState<{
+    id: string;
+    projekt_id: string;
+    projekt_name: string;
+    ankunft_zeit: string | null;
+    abfahrt_zeit: string | null;
+    pause_von: string | null;
+    pause_bis: string | null;
+    total_stunden: number;
+  }[]>([]);
+
   // Editing existing report
   const [editingBerichtId, setEditingBerichtId] = useState<string | null>(null);
 
@@ -295,6 +307,86 @@ const TimeTracking = () => {
     if (!pauseVon || !pauseBis) return "Pause";
     return `Pause ${pauseVon}–${pauseBis} (${pauseMinuten} Min.)`;
   }, [pauseVon, pauseBis, pauseMinuten]);
+
+  // Multi-Bericht: Lade User's eigene Berichte für das aktuelle Datum (für UI + Auto-Fill).
+  // Ausgenommen: der gerade editierte Bericht (im Edit-Mode).
+  useEffect(() => {
+    if (!currentUserId || !datum) {
+      setExistingTodayBerichte([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      let q = supabase
+        .from("leistungsberichte" as any)
+        .select("id, projekt_id, ankunft_zeit, abfahrt_zeit, pause_von, pause_bis")
+        .eq("erstellt_von", currentUserId)
+        .eq("datum", datum);
+      if (editingBerichtId) q = q.neq("id", editingBerichtId);
+      const { data: berichte } = await q;
+      if (cancelled || !berichte || (berichte as any[]).length === 0) {
+        if (!cancelled) setExistingTodayBerichte([]);
+        return;
+      }
+
+      // Lade Projekt-Namen
+      const projIds = [...new Set((berichte as any[]).map((b: any) => b.projekt_id).filter(Boolean))];
+      const projNameMap: Record<string, string> = {};
+      if (projIds.length > 0) {
+        const { data: projData } = await supabase
+          .from("projects")
+          .select("id, name")
+          .in("id", projIds);
+        (projData || []).forEach((p: any) => { projNameMap[p.id] = p.name; });
+      }
+
+      // Lade Stundensummen pro Bericht (für aktuellen User)
+      const berichtIds = (berichte as any[]).map((b: any) => b.id);
+      const { data: maData } = await supabase
+        .from("leistungsbericht_mitarbeiter" as any)
+        .select("bericht_id, mitarbeiter_id, summe_stunden")
+        .in("bericht_id", berichtIds)
+        .eq("mitarbeiter_id", currentUserId);
+      const stundenPerBericht: Record<string, number> = {};
+      (maData as any[] || []).forEach((m: any) => {
+        stundenPerBericht[m.bericht_id] = parseFloat(m.summe_stunden) || 0;
+      });
+
+      const result = (berichte as any[]).map((b: any) => ({
+        id: b.id as string,
+        projekt_id: b.projekt_id as string,
+        projekt_name: projNameMap[b.projekt_id] || "-",
+        ankunft_zeit: b.ankunft_zeit,
+        abfahrt_zeit: b.abfahrt_zeit,
+        pause_von: b.pause_von,
+        pause_bis: b.pause_bis,
+        total_stunden: stundenPerBericht[b.id] || 0,
+      }));
+      if (!cancelled) setExistingTodayBerichte(result);
+    })();
+    return () => { cancelled = true; };
+  }, [datum, currentUserId, editingBerichtId]);
+
+  // Auto-Fill Arbeitsbeginn/Ankunft/Pause: bei zweitem Bericht des Tages
+  // setze Defaults basierend auf Abfahrt des letzten bestehenden Berichts.
+  useEffect(() => {
+    if (editingBerichtId) return;
+    if (existingTodayBerichte.length === 0) return;
+
+    // Letzter Bericht (sortiert nach abfahrt_zeit DESC)
+    const last = [...existingTodayBerichte].sort((a, b) =>
+      (b.abfahrt_zeit || "").localeCompare(a.abfahrt_zeit || "")
+    )[0];
+
+    if (last?.abfahrt_zeit) {
+      setArbeitsbeginn(last.abfahrt_zeit.substring(0, 5));
+      setAnkunftZeit(last.abfahrt_zeit.substring(0, 5));
+      // Pause leer, da Halbtags-Bericht (User kann manuell setzen)
+      setPauseVon("");
+      setPauseBis("");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [existingTodayBerichte.length, editingBerichtId]);
 
   // -------------------------------------------------------------------------
   // Role check
@@ -697,6 +789,15 @@ const TimeTracking = () => {
     if (!datum) return "Bitte ein Datum eingeben.";
     if (!ankunftZeit) return "Ankunftszeit ist erforderlich.";
 
+    // Pause muss zwischen Ankunft und Abfahrt liegen (wenn gesetzt)
+    if (pauseVon && pauseBis) {
+      if (pauseBis <= pauseVon) return "Pause-Ende muss nach Pause-Start liegen.";
+      if (pauseVon < ankunftZeit) return "Pause kann nicht vor Ankunft beginnen.";
+      if (abfahrtZeit && pauseBis > abfahrtZeit) return "Pause muss vor der Abfahrt enden.";
+    } else if (pauseVon || pauseBis) {
+      return "Pause: bitte beide Zeiten (von und bis) eingeben oder beide leer lassen.";
+    }
+
     const activeTaetigkeiten = taetigkeiten.filter((t) => t.bezeichnung.trim());
     if (activeTaetigkeiten.length === 0 && !pos1Text) {
       return "Mindestens eine Tätigkeit ist erforderlich.";
@@ -731,14 +832,15 @@ const TimeTracking = () => {
 
     const activeMaIds = mitarbeiterRows.filter(r => r.mitarbeiterId).map(r => r.mitarbeiterId);
 
-    // Pre-Check: Sind aktive MA bereits in einem ANDEREN Leistungsbericht am gleichen Datum?
-    // (Im Edit-Mode: Bericht selbst ausschließen via bericht_id != editingBerichtId)
-    if (activeMaIds.length > 0) {
+    // Pre-Check: Sind aktive MA bereits in einem ANDEREN Leistungsbericht für das GLEICHE Projekt
+    // am gleichen Datum? (Multi-Bericht für verschiedene Projekte am gleichen Tag = OK, kein Konflikt)
+    if (activeMaIds.length > 0 && projektId) {
       let mlbQuery = supabase
         .from("leistungsbericht_mitarbeiter" as any)
-        .select("mitarbeiter_id, bericht_id, summe_stunden, leistungsberichte!inner(id, datum, erstellt_von)")
+        .select("mitarbeiter_id, bericht_id, summe_stunden, leistungsberichte!inner(id, datum, projekt_id, erstellt_von)")
         .in("mitarbeiter_id", activeMaIds)
-        .eq("leistungsberichte.datum" as any, datum);
+        .eq("leistungsberichte.datum" as any, datum)
+        .eq("leistungsberichte.projekt_id" as any, projektId);
 
       if (editingBerichtId) {
         mlbQuery = mlbQuery.neq("bericht_id", editingBerichtId);
@@ -833,11 +935,13 @@ const TimeTracking = () => {
           .delete()
           .eq("bericht_id", editingBerichtId);
 
-        // Delete associated time_entries
+        // Delete associated time_entries — nur für das AKTUELLE Projekt,
+        // damit andere Berichte (anderes Projekt am gleichen Tag) unangetastet bleiben.
         await supabase
           .from("time_entries")
           .delete()
           .eq("datum", datum)
+          .eq("project_id", projektId)
           .in(
             "user_id",
             mitarbeiterRows.filter((r) => r.mitarbeiterId).map((r) => r.mitarbeiterId)
@@ -854,19 +958,23 @@ const TimeTracking = () => {
       // alte Daten der betroffenen Mitarbeiter sauber entfernen.
       if (cleanupBeforeInsert && activeMaIdsForCleanup.length > 0) {
         // 1. Lösche existierende time_entries (Arbeit, keine Absenzen) für die MA am Datum
+        // — nur für das AKTUELLE Projekt, damit Multi-Bericht-Tage andere Projekte behalten
         await (supabase
           .from("time_entries")
           .delete()
           .eq("datum", datum)
+          .eq("project_id", projektId)
           .in("user_id", activeMaIdsForCleanup) as any)
           .not("taetigkeit", "in", '("Urlaub","Krankenstand","Fortbildung","Feiertag","Schule","Weiterbildung","ZA","Zeitausgleich")');
 
-        // 2. Finde andere Leistungsberichte am gleichen Datum mit den betroffenen Mitarbeitern
+        // 2. Finde andere Leistungsberichte am gleichen Datum + GLEICHEM Projekt
+        // mit den betroffenen Mitarbeitern (Multi-Bericht für anderes Projekt = OK, nicht aufräumen)
         const { data: overlappingMA } = await supabase
           .from("leistungsbericht_mitarbeiter" as any)
-          .select("id, bericht_id, mitarbeiter_id, leistungsberichte!inner(id, datum)")
+          .select("id, bericht_id, mitarbeiter_id, leistungsberichte!inner(id, datum, projekt_id)")
           .in("mitarbeiter_id", activeMaIdsForCleanup)
-          .eq("leistungsberichte.datum" as any, datum);
+          .eq("leistungsberichte.datum" as any, datum)
+          .eq("leistungsberichte.projekt_id" as any, projektId);
 
         const otherBerichtIds = new Set<string>();
         const otherMaRowIds: string[] = [];
@@ -1454,6 +1562,61 @@ const TimeTracking = () => {
               Abbrechen
             </Button>
           </div>
+        )}
+
+        {/* "Buchungen heute"-Karte (Multi-Bericht-Übersicht) */}
+        {existingTodayBerichte.length > 0 && (
+          <Card className="border-blue-200 bg-blue-50/30 dark:bg-blue-950/10 dark:border-blue-800">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base flex items-center gap-2">
+                <FileText className="h-4 w-4 text-blue-600" />
+                {editingBerichtId ? "Weitere Buchungen heute" : "Bereits heute gebucht"}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {existingTodayBerichte.map((b) => {
+                const ankunft = b.ankunft_zeit ? b.ankunft_zeit.substring(0, 5) : "?";
+                const abfahrt = b.abfahrt_zeit ? b.abfahrt_zeit.substring(0, 5) : "?";
+                return (
+                  <div
+                    key={b.id}
+                    className="flex items-center justify-between gap-2 p-2 rounded border bg-card"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium text-sm truncate">
+                        {b.projekt_name}
+                      </div>
+                      <div className="text-xs text-muted-foreground flex items-center gap-2 flex-wrap">
+                        <span>{ankunft}–{abfahrt}</span>
+                        <span>·</span>
+                        <span>{b.total_stunden}h</span>
+                      </div>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setSearchParams({ edit: b.id });
+                      }}
+                    >
+                      <FileText className="h-3.5 w-3.5 mr-1" />
+                      Bearbeiten
+                    </Button>
+                  </div>
+                );
+              })}
+              <div className="text-xs text-muted-foreground pt-1 border-t flex items-center justify-between">
+                <span>
+                  Gesamt heute (eigene Berichte): <strong>
+                    {existingTodayBerichte.reduce((s, b) => s + b.total_stunden, 0).toFixed(2).replace(".", ",")}h
+                  </strong>
+                </span>
+                {!editingBerichtId && (
+                  <span>Du erstellst einen weiteren Bericht für ein anderes Projekt.</span>
+                )}
+              </div>
+            </CardContent>
+          </Card>
         )}
 
         {/* ---------- HEADER ---------- */}

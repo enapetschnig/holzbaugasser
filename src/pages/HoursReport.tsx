@@ -737,13 +737,48 @@ export default function HoursReport() {
     }
   };
 
-  const handleSaveCell = async () => {
+  const handleSaveCell = async (forceMultiBerichtOverwrite = false) => {
     if (!editingCell) return;
-    setSavingCell(true);
     const { userId, day } = editingCell;
     const dateStr = `${gridYear}-${String(gridMonth).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
     const stunden = parseFloat(editStunden) || 0;
 
+    // Pre-Check: Multi-Projekt-Tag erkennen — Direct-Edit der Zelle würde alle Projekte ersetzen
+    if (!forceMultiBerichtOverwrite && editType === "arbeit") {
+      const { data: existingEntries } = await supabase
+        .from("time_entries")
+        .select("id, project_id, taetigkeit, stunden")
+        .eq("user_id", userId)
+        .eq("datum", dateStr);
+
+      const distinctProjects = new Set(
+        (existingEntries || [])
+          .map((e: any) => e.project_id)
+          .filter(Boolean)
+      );
+
+      if (distinctProjects.size > 1) {
+        const profile = profileMap[userId];
+        const userName = profile ? `${profile.vorname} ${profile.nachname}` : "Mitarbeiter";
+        const details = (existingEntries || [])
+          .filter((e: any) => e.project_id)
+          .map((e: any) => `${e.taetigkeit || "?"}: ${e.stunden}h`);
+        setEditingCell(null);
+        // Use window.alert as simple way - the cell-edit dialog is already a Dialog, can't nest AlertDialog easily
+        const ok = window.confirm(
+          `${userName} hat am ${dateStr} Buchungen für mehrere Projekte:\n\n${details.join("\n")}\n\n` +
+          `Direktes Bearbeiten der Zelle würde alle Projekt-Einträge zu einem zusammenfassen!\n\n` +
+          `Bitte stattdessen den Bericht direkt bearbeiten (über den Tab "Leistungsberichte").\n\n` +
+          `Möchtest du trotzdem überschreiben?`
+        );
+        if (!ok) return;
+        // User hat bestätigt — re-open editingCell und fortfahren mit force
+        setEditingCell({ userId, day, name: profile ? `${profile.vorname} ${profile.nachname}` : "" });
+        return handleSaveCell(true);
+      }
+    }
+
+    setSavingCell(true);
     try {
       const isFriday = new Date(gridYear, gridMonth - 1, day).getDay() === 5;
       const standardDefault = isFriday ? 7 : 8;
