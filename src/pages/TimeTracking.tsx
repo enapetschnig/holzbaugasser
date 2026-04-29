@@ -450,12 +450,19 @@ const TimeTracking = () => {
     return () => { cancelled = true; };
   }, [datum, currentUserId, editingBerichtId]);
 
-  // Auto-Fill Arbeitsbeginn/Ankunft/Pause: bei zweitem Bericht des Tages
-  // setze Defaults basierend auf BERECHNETER Abfahrt des letzten bestehenden Berichts
-  // (nicht b.abfahrt_zeit weil das ein veralteter Default-Wert sein könnte).
+  // Auto-Fill Arbeitsbeginn/Ankunft bei Datum-Wechsel:
+  // - Tag OHNE Buchungen → Defaults (06:30 / 07:00)
+  // - Tag MIT Buchungen → Endzeit der letzten Buchung als Arbeitsbeginn/Ankunft
+  // Im Edit-Modus wird nichts überschrieben.
   useEffect(() => {
     if (editingBerichtId) return;
-    if (existingTodayBerichte.length === 0) return;
+
+    if (existingTodayBerichte.length === 0) {
+      // Tag ist leer → Defaults wieder herstellen
+      setArbeitsbeginn("06:30");
+      setAnkunftZeit("07:00");
+      return;
+    }
 
     // Berechne Endzeit für jeden Bericht aus arbeitsbeginn + stunden + pause
     const withComputed = existingTodayBerichte.map((b) => {
