@@ -225,6 +225,7 @@ const TimeTracking = () => {
     id: string;
     projekt_id: string;
     projekt_name: string;
+    arbeitsbeginn: string | null;
     ankunft_zeit: string | null;
     abfahrt_zeit: string | null;
     pause_von: string | null;
@@ -266,14 +267,38 @@ const TimeTracking = () => {
     [ankunftZeit]
   );
 
-  // Abfahrt Baustelle automatisch setzen je nach Wochentag (Fr 15:00, sonst 16:00).
-  // Wird nur fürs PDF und time_entries.end_time verwendet, nicht für Berechnungen.
+  // Abfahrt Baustelle dynamisch berechnen: Arbeitsbeginn + max(Mitarbeiter-Stunden) + Pause-Dauer
+  // Wenn keine Stunden eingetragen: Default je Wochentag (Fr 15:00, sonst 16:00)
   useEffect(() => {
-    if (!datum) return;
-    const dow = new Date(datum + "T00:00:00").getDay();
-    const auto = dow === 5 ? "15:00" : "16:00";
-    setAbfahrtZeit(auto);
-  }, [datum]);
+    if (!datum || !arbeitsbeginn) return;
+
+    // Höchste Stundensumme aller MA (wer am längsten gearbeitet hat)
+    const maxStunden = Math.max(
+      0,
+      ...mitarbeiterRows
+        .filter((r) => r.mitarbeiterId)
+        .map((r) => sumStunden(r))
+    );
+
+    if (maxStunden <= 0) {
+      // Keine Stunden eingegeben → Wochentag-Default
+      const dow = new Date(datum + "T00:00:00").getDay();
+      setAbfahrtZeit(dow === 5 ? "15:00" : "16:00");
+      return;
+    }
+
+    // Berechnet: arbeitsbeginn + maxStunden (Netto-Arbeit) + pauseMinuten
+    const [bh, bm] = arbeitsbeginn.split(":").map(Number);
+    if (isNaN(bh) || isNaN(bm)) return;
+    const startMin = bh * 60 + bm;
+    const totalMin = startMin + Math.round(maxStunden * 60) + (pauseMinuten || 0);
+
+    if (totalMin >= 24 * 60) return; // Übermitternacht ignorieren
+
+    const eh = Math.floor(totalMin / 60);
+    const em = totalMin % 60;
+    setAbfahrtZeit(`${String(eh).padStart(2, "0")}:${String(em).padStart(2, "0")}`);
+  }, [datum, arbeitsbeginn, mitarbeiterRows, pauseMinuten]);
 
   // Rüstzeit/Anfahrt = (Ankunft − Arbeitsbeginn) in Stunden, gerundet auf 0.25
   const ruestzeitStunden = useMemo(() => {
@@ -319,7 +344,7 @@ const TimeTracking = () => {
     (async () => {
       let q = supabase
         .from("leistungsberichte" as any)
-        .select("id, projekt_id, ankunft_zeit, abfahrt_zeit, pause_von, pause_bis")
+        .select("id, projekt_id, arbeitsbeginn, ankunft_zeit, abfahrt_zeit, pause_von, pause_bis")
         .eq("erstellt_von", currentUserId)
         .eq("datum", datum);
       if (editingBerichtId) q = q.neq("id", editingBerichtId);
@@ -356,6 +381,7 @@ const TimeTracking = () => {
         id: b.id as string,
         projekt_id: b.projekt_id as string,
         projekt_name: projNameMap[b.projekt_id] || "-",
+        arbeitsbeginn: b.arbeitsbeginn,
         ankunft_zeit: b.ankunft_zeit,
         abfahrt_zeit: b.abfahrt_zeit,
         pause_von: b.pause_von,
@@ -1556,7 +1582,8 @@ const TimeTracking = () => {
             </CardHeader>
             <CardContent className="space-y-2">
               {existingTodayBerichte.map((b) => {
-                const ankunft = b.ankunft_zeit ? b.ankunft_zeit.substring(0, 5) : "?";
+                // Start: arbeitsbeginn (echte Anwesenheit ab Werkstatt/zuhause), Fallback ankunft_zeit
+                const start = (b.arbeitsbeginn || b.ankunft_zeit || "").substring(0, 5) || "?";
                 const abfahrt = b.abfahrt_zeit ? b.abfahrt_zeit.substring(0, 5) : "?";
                 return (
                   <div
@@ -1568,7 +1595,7 @@ const TimeTracking = () => {
                         {b.projekt_name}
                       </div>
                       <div className="text-xs text-muted-foreground flex items-center gap-2 flex-wrap">
-                        <span>{ankunft}–{abfahrt}</span>
+                        <span>{start}–{abfahrt}</span>
                         <span>·</span>
                         <span>{b.total_stunden}h</span>
                       </div>
