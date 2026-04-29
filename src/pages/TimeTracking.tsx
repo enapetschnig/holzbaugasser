@@ -186,10 +186,10 @@ const TimeTracking = () => {
   const [arbeitsbeginn, setArbeitsbeginn] = useState("06:30");
   const [ankunftZeit, setAnkunftZeit] = useState("07:00");
   const [abfahrtZeit, setAbfahrtZeit] = useState("16:00");
-  // Pause leer per Default — wird automatisch gesetzt wenn die Arbeitszeit
-  // über die Mittagspause (12:00–12:30) läuft.
-  const [pauseVon, setPauseVon] = useState("");
-  const [pauseBis, setPauseBis] = useState("");
+  // Pause vorausgefüllt mit 12:00–12:30 (Standard-Mittagspause).
+  // Wird automatisch entfernt wenn die Buchung diese Zeit nicht überschneidet.
+  const [pauseVon, setPauseVon] = useState("12:00");
+  const [pauseBis, setPauseBis] = useState("12:30");
   const [wetter, setWetter] = useState("");
   const [schmutzzulageAlle, setSchmutzzulageAlle] = useState(false);
   const [regenSchichtAlle, setRegenSchichtAlle] = useState(false);
@@ -461,6 +461,8 @@ const TimeTracking = () => {
       // Tag ist leer → Defaults wieder herstellen
       setArbeitsbeginn("06:30");
       setAnkunftZeit("07:00");
+      setPauseVon("12:00");
+      setPauseBis("12:30");
       return;
     }
 
@@ -1376,8 +1378,8 @@ const TimeTracking = () => {
     setArbeitsbeginn("06:30");
     setAnkunftZeit("07:00");
     setAbfahrtZeit("16:00");
-    setPauseVon("");
-    setPauseBis("");
+    setPauseVon("12:00");
+    setPauseBis("12:30");
     setWetter("");
     setSchmutzzulageAlle(false);
     setRegenSchichtAlle(false);
@@ -1417,8 +1419,8 @@ const TimeTracking = () => {
       setArbeitsbeginn(b.arbeitsbeginn || "06:30");
       setAnkunftZeit(b.ankunft_zeit || "07:00");
       setAbfahrtZeit(b.abfahrt_zeit || "16:00");
-      setPauseVon(b.pause_von || "");
-      setPauseBis(b.pause_bis || "");
+      setPauseVon(b.pause_von || "12:00");
+      setPauseBis(b.pause_bis || "12:30");
       setWetter(b.wetter || "");
       setSchmutzzulageAlle(b.schmutzzulage_alle || false);
       setRegenSchichtAlle(b.regen_schicht_alle || false);
