@@ -243,17 +243,6 @@ export async function generateLeistungsberichtPDF(
   doc.text("Regie", contentRight, y, { align: "right" });
   y += 4;
 
-  // Red normalarbeitszeit text
-  doc.setTextColor(...RED);
-  doc.setFontSize(6);
-  doc.setFont("helvetica", "normal");
-  doc.text(
-    pdfText("Normalarbeitszeit Mo-Do 7-16 Uhr = 9 Std. - 1 Std. Pause = 8 Std.    Fr 7-15 Uhr = 8 Std. - 1 Std. Pause = 7 Std."),
-    mL + 2,
-    y
-  );
-  y += 4;
-
   // Build activity data
   const activityTexts: string[] = [];
   for (let i = 1; i <= 8; i++) {

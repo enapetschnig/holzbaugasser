@@ -1873,13 +1873,6 @@ const TimeTracking = () => {
               </div>
             </div>
 
-            {/* Normalarbeitszeit banner */}
-            <div className="rounded-md bg-red-50 border border-red-200 p-3">
-              <p className="text-xs sm:text-sm text-red-700 font-medium">
-                Normalarbeitszeit Mo–Do 7–16 Uhr = 9 Std. – 1 Std. Pause = 8
-                Std. &nbsp;&nbsp; Fr 7–15 Uhr = 8 Std. – 1 Std. Pause = 7 Std.
-              </p>
-            </div>
           </CardContent>
         </Card>
 
