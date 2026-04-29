@@ -238,12 +238,15 @@ export function InstallPromptDialog({ open, onClose }: InstallPromptDialogProps)
                       <Smartphone className="h-4 w-4 text-primary" />
                     </div>
                     <div>
-                      <h3 className="font-semibold mb-1">Für Android (Chrome/Edge):</h3>
+                      <h3 className="font-semibold mb-1">Anleitung für Android</h3>
                       <ol className="list-decimal pl-5 space-y-2 text-sm">
-                        <li>Tippe oben rechts auf das Menü-Symbol (drei Punkte)</li>
+                        <li>Tippe oben rechts auf das Menüsymbol (drei Punkte untereinander)</li>
                         <li>Wähle "App installieren" oder "Zum Startbildschirm hinzufügen"</li>
                         <li>Bestätige mit "Installieren"</li>
                       </ol>
+                      <div className="mt-3 bg-blue-50 border border-blue-200 dark:bg-blue-950/30 dark:border-blue-800 p-2 rounded text-xs text-blue-900 dark:text-blue-200">
+                        <strong>Info:</strong> Lade am besten im Play Store den Browser <strong>"Google Chrome"</strong> herunter.
+                      </div>
                     </div>
                   </div>
                 </div>

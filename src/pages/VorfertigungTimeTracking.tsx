@@ -109,7 +109,7 @@ export default function VorfertigungTimeTracking() {
   const [selectedMitarbeiterIds, setSelectedMitarbeiterIds] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
 
-  const canBookForOthers = userRole === "administrator" || userRole === "vorarbeiter";
+  const canBookForOthers = userRole === "administrator" || userRole === "vorarbeiter" || userRole === "projektleiter";
   const [confirmState, setConfirmState] = useState<{
     title: string;
     description: string;
@@ -173,9 +173,8 @@ export default function VorfertigungTimeTracking() {
         .order("sort_order");
       if (tplData) setTaetigkeitTemplates(tplData);
 
-      // Mitarbeiter-Auswahl: nur für VA/Admin relevant, aber wir laden grundsätzlich
-      // damit der eigene Name angezeigt werden kann.
-      if (role === "administrator" || role === "vorarbeiter") {
+      // Mitarbeiter-Auswahl: für VA/Admin/Projektleiter, damit sie für andere buchen können.
+      if (role === "administrator" || role === "vorarbeiter" || role === "projektleiter") {
         const [profilesRes, rolesRes] = await Promise.all([
           supabase
             .from("profiles")
