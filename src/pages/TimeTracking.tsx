@@ -1956,15 +1956,6 @@ const TimeTracking = () => {
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 items-end">
               <div className="space-y-2">
-                <Label>Abfahrt Baustelle</Label>
-                <div className="flex items-center h-10 px-3 rounded-md border bg-muted text-sm font-medium">
-                  {abfahrtZeit || "—"}
-                </div>
-                <p className="text-[10px] text-muted-foreground">
-                  Berechnet: Arbeitsbeginn + Stunden + Pause
-                </p>
-              </div>
-              <div className="space-y-2">
                 <Label>Pause</Label>
                 <div className="flex items-center h-10 px-3 rounded-md border bg-muted text-sm">
                   {pauseMinuten} Minuten
@@ -2346,6 +2337,23 @@ const TimeTracking = () => {
                   })}
                 </tbody>
               </table>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* ---------- ABFAHRT BAUSTELLE (read-only, automatisch berechnet) ---------- */}
+        <Card>
+          <CardContent className="pt-4 pb-4">
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div>
+                <Label className="text-base font-semibold">Abfahrt Baustelle</Label>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Berechnet aus Arbeitsbeginn + Stunden + Pause
+                </p>
+              </div>
+              <div className="text-2xl font-bold tabular-nums px-4 py-2 rounded-md border bg-muted">
+                {abfahrtZeit || "—"}
+              </div>
             </div>
           </CardContent>
         </Card>
