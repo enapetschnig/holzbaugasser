@@ -470,7 +470,7 @@ export default function VorfertigungTimeTracking() {
           projectId: b.projectId || null,
         });
         const projName = c.projectId ? projects.find((p) => p.id === c.projectId)?.name : null;
-        const baseLabel = c.projectId ? `Vorfertigung: ${projName}` : "Vorfertigung: Werk";
+        const baseLabel = c.projectId ? `Werkstätte: ${projName}` : "Werkstätte: Werk";
         const userTaetigkeit = (b.taetigkeit || "").trim();
         const fullTaetigkeit = userTaetigkeit ? `${baseLabel} — ${userTaetigkeit}` : baseLabel;
         return {
@@ -525,7 +525,7 @@ export default function VorfertigungTimeTracking() {
       const extraCount = targetUserIds.length - 1;
       const desc = extraCount > 0
         ? `${formatHours(istVorfertigung)} für dich + ${extraCount} weitere Mitarbeiter`
-        : `${formatHours(istVorfertigung)} Vorfertigung für ${dateLabel}`;
+        : `${formatHours(istVorfertigung)} Werkstätte für ${dateLabel}`;
       toast({ title: "Gespeichert", description: desc });
       await loadBlocks();
     } catch (err: any) {
@@ -546,7 +546,7 @@ export default function VorfertigungTimeTracking() {
 
   return (
     <div className="min-h-screen bg-background pb-24">
-      <PageHeader title="Vorfertigung / LKW-Fahrer" />
+      <PageHeader title="Werkstätte / LKW" />
 
       <main className="container mx-auto px-3 sm:px-4 py-4 sm:py-6 max-w-2xl space-y-4">
         {/* Datum-Navigation */}
@@ -710,7 +710,7 @@ export default function VorfertigungTimeTracking() {
                 </div>
                 {istAndere > 0 && (
                   <div className="mt-3 pt-3 border-t text-xs text-muted-foreground flex justify-between">
-                    <span>davon Vorfertigung:</span>
+                    <span>davon Werkstätte/LKW:</span>
                     <span className="font-medium text-foreground">{formatHours(istVorfertigung)}</span>
                   </div>
                 )}
@@ -726,7 +726,7 @@ export default function VorfertigungTimeTracking() {
               <div className="flex gap-2 items-start">
                 <AlertTriangle className="h-4 w-4 text-blue-600 shrink-0 mt-0.5" />
                 <div className="text-sm font-medium">
-                  Bereits an diesem Tag gebucht (außerhalb Vorfertigung):
+                  Bereits an diesem Tag gebucht (außerhalb Werkstätte/LKW):
                 </div>
               </div>
               <ul className="text-sm space-y-1 ml-6">
@@ -741,7 +741,7 @@ export default function VorfertigungTimeTracking() {
                 ))}
               </ul>
               <div className="text-xs text-muted-foreground ml-6 pt-1 border-t">
-                Vorfertigung-Blöcke kommen <strong>zusätzlich</strong> zu diesen Stunden — bitte prüfen, dass keine Doppelbuchung entsteht.
+                Werkstätte/LKW-Blöcke kommen <strong>zusätzlich</strong> zu diesen Stunden — bitte prüfen, dass keine Doppelbuchung entsteht.
               </div>
             </CardContent>
           </Card>

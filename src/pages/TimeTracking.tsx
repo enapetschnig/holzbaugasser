@@ -1783,12 +1783,12 @@ const TimeTracking = () => {
             <CardHeader className="pb-2">
               <CardTitle className="text-base flex items-center gap-2">
                 <FileText className="h-4 w-4 text-amber-600" />
-                Außerdem heute gebucht (Vorfertigung / Projektleiter)
+                Außerdem heute gebucht (Werkstätte/LKW / Projektleiter)
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">
               {existingTodayOtherEntries.map((e, idx) => {
-                const label = e.type === "vorfertigung" ? "Vorfertigung" : "Projektleiter";
+                const label = e.type === "vorfertigung" ? "Werkstätte/LKW" : "Projektleiter";
                 const projOrWerk = e.projectName || (e.type === "vorfertigung" ? "Werk" : "Büro");
                 const timeRange = e.startTime && e.endTime ? `${e.startTime}–${e.endTime}` : "";
                 return (
