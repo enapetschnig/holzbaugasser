@@ -1956,6 +1956,15 @@ const TimeTracking = () => {
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 items-end">
               <div className="space-y-2">
+                <Label>Abfahrt Baustelle</Label>
+                <div className="flex items-center h-10 px-3 rounded-md border bg-muted text-sm font-medium">
+                  {abfahrtZeit || "—"}
+                </div>
+                <p className="text-[10px] text-muted-foreground">
+                  Berechnet: Arbeitsbeginn + Stunden + Pause
+                </p>
+              </div>
+              <div className="space-y-2">
                 <Label>Pause</Label>
                 <div className="flex items-center h-10 px-3 rounded-md border bg-muted text-sm">
                   {pauseMinuten} Minuten

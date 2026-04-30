@@ -1027,6 +1027,32 @@ export default function HoursReport() {
         .eq("bericht_id", berichtId);
 
       const b: any = bericht;
+
+      // Abfahrtszeit dynamisch berechnen (statt evtl. veralteten Default aus DB):
+      // Arbeitsbeginn + max(Mitarbeiter-Stunden) + Pause-Dauer
+      const maxStunden = Math.max(
+        0,
+        ...(mitarbeiterData || []).map((m: any) => parseFloat(m.summe_stunden) || 0)
+      );
+      let pauseMin = 0;
+      if (b.pause_von && b.pause_bis) {
+        const [pvh, pvm] = (b.pause_von as string).split(":").map(Number);
+        const [pbh, pbm] = (b.pause_bis as string).split(":").map(Number);
+        pauseMin = Math.max(0, (pbh * 60 + pbm) - (pvh * 60 + pvm));
+      }
+      const startStr = ((b.arbeitsbeginn || b.ankunft_zeit || "") as string).substring(0, 5);
+      let computedAbfahrt = "";
+      if (startStr && maxStunden > 0) {
+        const [bh, bm] = startStr.split(":").map(Number);
+        if (!isNaN(bh) && !isNaN(bm)) {
+          const totalMin = bh * 60 + bm + Math.round(maxStunden * 60) + pauseMin;
+          if (totalMin < 24 * 60) {
+            computedAbfahrt = `${String(Math.floor(totalMin / 60)).padStart(2, "0")}:${String(totalMin % 60).padStart(2, "0")}`;
+          }
+        }
+      }
+      const abfahrtForPdf = computedAbfahrt || (b.abfahrt_zeit ? (b.abfahrt_zeit as string).substring(0, 5) : "");
+
       const pdfData: LeistungsberichtPDFData = {
         projektName: projekt?.name || "-",
         projektOrt: `${projekt?.plz || ""} ${projekt?.adresse || ""}`.trim(),
@@ -1034,7 +1060,7 @@ export default function HoursReport() {
         datum: b.datum,
         wetter: b.wetter || "",
         ankunftZeit: b.ankunft_zeit || "",
-        abfahrtZeit: b.abfahrt_zeit || "",
+        abfahrtZeit: abfahrtForPdf,
         pauseVon: b.pause_von || "",
         pauseBis: b.pause_bis || "",
         lkwStunden: b.lkw_stunden || 0,
