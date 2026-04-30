@@ -1058,7 +1058,6 @@ export default function HoursReport() {
         projektOrt: `${projekt?.plz || ""} ${projekt?.adresse || ""}`.trim(),
         objekt: b.objekt || "",
         datum: b.datum,
-        wetter: b.wetter || "",
         ankunftZeit: b.ankunft_zeit || "",
         abfahrtZeit: abfahrtForPdf,
         pauseVon: b.pause_von || "",

@@ -190,7 +190,6 @@ const TimeTracking = () => {
   // Wird automatisch entfernt wenn die Buchung diese Zeit nicht überschneidet.
   const [pauseVon, setPauseVon] = useState("12:00");
   const [pauseBis, setPauseBis] = useState("12:30");
-  const [wetter, setWetter] = useState("");
   const [schmutzzulageAlle, setSchmutzzulageAlle] = useState(false);
   const [regenSchichtAlle, setRegenSchichtAlle] = useState(false);
 
@@ -1166,7 +1165,6 @@ const TimeTracking = () => {
           pause_von: pauseVon || null,
           pause_bis: pauseBis || null,
           pause_minuten: pauseMinuten,
-          wetter: wetter || null,
           anmerkungen: anmerkungen || null,
           fertiggestellt,
           schmutzzulage_alle: schmutzzulageAlle,
@@ -1401,7 +1399,6 @@ const TimeTracking = () => {
     setAbfahrtZeit("16:00");
     setPauseVon("12:00");
     setPauseBis("12:30");
-    setWetter("");
     setSchmutzzulageAlle(false);
     setRegenSchichtAlle(false);
     setGeraete([]);
@@ -1442,7 +1439,6 @@ const TimeTracking = () => {
       setAbfahrtZeit(b.abfahrt_zeit || "16:00");
       setPauseVon(b.pause_von || "12:00");
       setPauseBis(b.pause_bis || "12:30");
-      setWetter(b.wetter || "");
       setSchmutzzulageAlle(b.schmutzzulage_alle || false);
       setRegenSchichtAlle(b.regen_schicht_alle || false);
       setAnmerkungen(b.anmerkungen || "");
@@ -1960,14 +1956,6 @@ const TimeTracking = () => {
                 <div className="flex items-center h-10 px-3 rounded-md border bg-muted text-sm">
                   {pauseMinuten} Minuten
                 </div>
-              </div>
-              <div className="space-y-2">
-                <Label>Wetter</Label>
-                <Input
-                  value={wetter}
-                  onChange={(e) => setWetter(e.target.value)}
-                  placeholder="z.B. sonnig, Regen..."
-                />
               </div>
             </div>
 

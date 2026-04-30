@@ -17,7 +17,6 @@ export type LeistungsberichtPDFData = {
   projektOrt: string;
   objekt: string;
   datum: string;
-  wetter: string;
   ankunftZeit: string;
   abfahrtZeit: string;
   pauseVon: string;
@@ -214,18 +213,12 @@ export async function generateLeistungsberichtPDF(
   drawLine(doc, valX, y + 0.8, rightBlockX - 4, y + 0.8, 0.15);
   y += 5;
 
-  // Objekt + Wetter
+  // Objekt
   doc.setFont("helvetica", "bold");
   doc.text("Objekt:", labelX, y);
   doc.setFont("helvetica", "normal");
   doc.text(pdfText(data.objekt), valX, y);
-  drawLine(doc, valX, y + 0.8, rightBlockX - 4, y + 0.8, 0.15);
-
-  doc.setFont("helvetica", "bold");
-  doc.text("Wetter:", rightBlockX, y);
-  doc.setFont("helvetica", "normal");
-  doc.text(data.wetter, rightValX, y);
-  drawLine(doc, rightValX, y + 0.8, contentRight, y + 0.8, 0.15);
+  drawLine(doc, valX, y + 0.8, contentRight, y + 0.8, 0.15);
   y += 6;
 
   // ════════════════════════════════════════════════════════════════════════════
