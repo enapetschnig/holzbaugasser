@@ -248,6 +248,10 @@ export async function generateArbeitszeitExcel(options: ExportOptions) {
       projekt = label;
     } else if (projektMap[dateStr]) {
       projekt = projektMap[dateStr];
+    } else if ((entry.taetigkeit || "").startsWith("Werk:")) {
+      projekt = entry.taetigkeit.replace(/^Werk:\s*/, "");
+    } else if ((entry.taetigkeit || "").startsWith("LKW:")) {
+      projekt = entry.taetigkeit.replace(/^LKW:\s*/, "");
     } else if ((entry.taetigkeit || "").startsWith("Werkstätte:")) {
       projekt = entry.taetigkeit.replace(/^Werkstätte:\s*/, "");
     } else if ((entry.taetigkeit || "").startsWith("Vorfertigung:")) {

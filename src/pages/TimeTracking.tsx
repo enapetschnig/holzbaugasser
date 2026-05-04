@@ -252,9 +252,9 @@ const TimeTracking = () => {
     total_stunden: number;
   }[]>([]);
 
-  // Cross-Type: Vorfertigung- und Projektleiter-Einträge des Users für das aktuelle Datum
+  // Cross-Type: Vorfertigung-/Werk-/LKW-/Projektleiter-Einträge des Users für das aktuelle Datum
   const [existingTodayOtherEntries, setExistingTodayOtherEntries] = useState<{
-    type: "vorfertigung" | "projektleiter";
+    type: "vorfertigung" | "projektleiter" | "werk" | "lkw";
     stunden: number;
     taetigkeit: string;
     projectName: string | null;
@@ -435,7 +435,7 @@ const TimeTracking = () => {
         .select("project_id, entry_typ, taetigkeit, stunden, start_time, end_time")
         .eq("user_id", currentUserId)
         .eq("datum", datum)
-        .in("entry_typ", ["vorfertigung", "projektleiter"]);
+        .in("entry_typ", ["vorfertigung", "projektleiter", "werk", "lkw"]);
 
       if (cancelled || !entries || entries.length === 0) {
         if (!cancelled) setExistingTodayOtherEntries([]);
@@ -454,7 +454,7 @@ const TimeTracking = () => {
       }
 
       const result = (entries as any[]).map((e) => ({
-        type: e.entry_typ as "vorfertigung" | "projektleiter",
+        type: e.entry_typ as "vorfertigung" | "projektleiter" | "werk" | "lkw",
         stunden: parseFloat(e.stunden) || 0,
         taetigkeit: (e.taetigkeit as string) || "",
         projectName: e.project_id ? projNameMap[e.project_id] || null : null,
@@ -1779,13 +1779,19 @@ const TimeTracking = () => {
             <CardHeader className="pb-2">
               <CardTitle className="text-base flex items-center gap-2">
                 <FileText className="h-4 w-4 text-amber-600" />
-                Außerdem heute gebucht (Werkstätte/LKW / Projektleiter)
+                Außerdem heute gebucht (Werk / LKW / Projektleiter)
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">
               {existingTodayOtherEntries.map((e, idx) => {
-                const label = e.type === "vorfertigung" ? "Werkstätte/LKW" : "Projektleiter";
-                const projOrWerk = e.projectName || (e.type === "vorfertigung" ? "Werk" : "Büro");
+                const labelMap: Record<string, string> = {
+                  vorfertigung: "Werkstätte/LKW (alt)",
+                  projektleiter: "Projektleiter",
+                  werk: "Werk-Bericht",
+                  lkw: "LKW-Bericht",
+                };
+                const label = labelMap[e.type] || e.type;
+                const projOrWerk = e.projectName || (e.type === "vorfertigung" || e.type === "werk" ? "Werk" : e.type === "lkw" ? "LKW" : "Büro");
                 const timeRange = e.startTime && e.endTime ? `${e.startTime}–${e.endTime}` : "";
                 return (
                   <div

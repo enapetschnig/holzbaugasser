@@ -466,23 +466,44 @@ export default function Index() {
             </Card>
           )}
 
-          {/* Vorfertigung / LKW-Fahrer Zeiterfassung */}
+          {/* Werk-Bericht (Matrix) */}
           {canUseVorfertigung && (
             <Card
               className="cursor-pointer hover:shadow-lg transition-all hover:border-primary/50"
-              onClick={() => navigate("/vorfertigung-zeiterfassung")}
+              onClick={() => navigate("/werk-bericht")}
             >
               <CardHeader className="space-y-2 pb-3">
                 <div className="h-12 w-12 rounded-lg bg-amber-500/10 flex items-center justify-center">
                   <Clock className="h-6 w-6 text-amber-600" />
                 </div>
-                <CardTitle className="text-lg sm:text-xl">Werkstätte / LKW</CardTitle>
+                <CardTitle className="text-lg sm:text-xl">Werk-Bericht</CardTitle>
                 <CardDescription className="text-sm">
-                  Für mehrere Baustellen pro Tag blockweise Zeiten erfassen
+                  Mehrere Projekte pro Tag, Mitarbeiter-Matrix wie der Leistungsbericht
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <Button className="w-full" size="sm" variant="secondary">Zeit erfassen</Button>
+                <Button className="w-full" size="sm" variant="secondary">Bericht erstellen</Button>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* LKW-Bericht (Matrix) */}
+          {canUseVorfertigung && (
+            <Card
+              className="cursor-pointer hover:shadow-lg transition-all hover:border-primary/50"
+              onClick={() => navigate("/lkw-bericht")}
+            >
+              <CardHeader className="space-y-2 pb-3">
+                <div className="h-12 w-12 rounded-lg bg-orange-500/10 flex items-center justify-center">
+                  <Clock className="h-6 w-6 text-orange-600" />
+                </div>
+                <CardTitle className="text-lg sm:text-xl">LKW-Bericht</CardTitle>
+                <CardDescription className="text-sm">
+                  Stunden-Matrix für LKW-Fahrer mit mehreren Baustellen
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Button className="w-full" size="sm" variant="secondary">Bericht erstellen</Button>
               </CardContent>
             </Card>
           )}
