@@ -10,9 +10,9 @@
  * angelegt mit entry_typ='werk' bzw. 'lkw' und project_id = projekt-zelle.
  */
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Plus, Trash2, Save, Users, X, Check, ChevronDown, AlertTriangle, FileText } from "lucide-react";
+import { Plus, Trash2, Save, AlertTriangle, FileText } from "lucide-react";
 import { format } from "date-fns";
 import { de } from "date-fns/locale";
 import { PageHeader } from "@/components/PageHeader";
@@ -27,7 +27,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -154,8 +153,6 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
   // ----- Reference-Daten -----
   const [projects, setProjects] = useState<Project[]>([]);
   const [availableMitarbeiter, setAvailableMitarbeiter] = useState<MitarbeiterOption[]>([]);
-  const [maPickerOpen, setMaPickerOpen] = useState(false);
-  const [maSearch, setMaSearch] = useState("");
   const [gleicheStundenFuerAlle, setGleicheStundenFuerAlle] = useState(false);
 
   // ----- Geräte / Material / Anmerkungen -----
@@ -195,14 +192,6 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
   }, [projects]);
 
   const pauseHours = pauseMinuten / 60;
-
-  // Brutto-Summe pro MA (sum of cells, before Pause-Abzug)
-  const grossSumPerMa = (row: MitarbeiterRow): number =>
-    projektZeilen.reduce((s, z) => s + parseStunden(row.stunden[z.localId] || ""), 0);
-
-  // Netto-Summe pro MA (mit Pause-Abzug, aber nicht negativ)
-  const netSumPerMa = (row: MitarbeiterRow): number =>
-    Math.max(0, grossSumPerMa(row) - pauseHours);
 
   // Tag-Total: Summe aller MA-Netto-Stunden (Pause schon pro MA abgezogen)
   const tagTotalStunden = useMemo(() => {
@@ -456,12 +445,12 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
       if (berichtTyp === "werk") otherTyps.push("lkw");
       else otherTyps.push("werk");
 
-      const { data } = await supabase
+      const teQuery: any = supabase
         .from("time_entries")
         .select("project_id, entry_typ, taetigkeit, stunden")
         .eq("user_id", currentUserId)
-        .eq("datum", datum)
-        .in("entry_typ", otherTyps);
+        .eq("datum", datum);
+      const { data } = await teQuery.in("entry_typ", otherTyps);
 
       if (cancelled) return;
       const list: CrossTypeEntry[] = ((data || []) as any[]).map((e) => ({
@@ -511,12 +500,25 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
   };
 
   const addMitarbeiter = (id: string) => {
-    if (mitarbeiterRows.some((r) => r.mitarbeiterId === id)) return;
+    if (id && mitarbeiterRows.some((r) => r.mitarbeiterId === id)) return;
     // Wenn Toggle ON: Stunden des ersten existierenden MAs übernehmen
     const initialStunden: Record<string, string> = gleicheStundenFuerAlle && mitarbeiterRows.length > 0
       ? { ...mitarbeiterRows[0].stunden }
       : {};
     setMitarbeiterRows((prev) => [...prev, { localId: randomId(), mitarbeiterId: id, stunden: initialStunden }]);
+  };
+
+  // Eine leere MA-Zeile hinzufügen (User wählt dann via Select). Pre-fill mit erstem nicht-vergebenen MA.
+  const addEmptyMitarbeiterRow = () => {
+    const usedIds = new Set(mitarbeiterRows.map((r) => r.mitarbeiterId).filter(Boolean));
+    const nextMa = availableMitarbeiter.find((m) => !usedIds.has(m.id));
+    addMitarbeiter(nextMa?.id || "");
+  };
+
+  const updateMitarbeiterId = (rowLocalId: string, newId: string) => {
+    setMitarbeiterRows((prev) => prev.map((r) =>
+      r.localId === rowLocalId ? { ...r, mitarbeiterId: newId } : r
+    ));
   };
 
   const removeMitarbeiter = (rowLocalId: string) => {
@@ -593,12 +595,8 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
         // time_entries: alle alten MAs (originalMaIds) ∪ aktuelle MAs für den Tag mit unserem Typ
         const allAffectedMaIds = Array.from(new Set([...originalMaIds, ...activeMaRows.map((r) => r.mitarbeiterId)]));
         if (allAffectedMaIds.length > 0) {
-          await supabase
-            .from("time_entries")
-            .delete()
-            .eq("datum", datum)
-            .eq("entry_typ", berichtTyp)
-            .in("user_id", allAffectedMaIds);
+          const teQuery: any = supabase.from("time_entries").delete();
+          await teQuery.eq("datum", datum).eq("entry_typ", berichtTyp).in("user_id", allAffectedMaIds);
         }
         await supabase.from("leistungsberichte" as any).delete().eq("id", cleanupBerichtId);
       }
@@ -792,8 +790,6 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
   }
 
   const datumLabel = format(new Date(datum + "T00:00:00"), "EEEE, d. MMMM yyyy", { locale: de });
-  const dow = new Date(datum + "T00:00:00").getDay();
-  const isWeekend = dow === 0 || dow === 6;
 
   return (
     <div className="min-h-screen bg-background pb-32">
@@ -913,93 +909,6 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
           </CardContent>
         </Card>
 
-        {/* Mitarbeiter-Auswahl (nur VA/Admin/PL) */}
-        {canBookForOthers && (
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base flex items-center gap-2">
-                <Users className="h-4 w-4" />
-                Mitarbeiter
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <Popover open={maPickerOpen} onOpenChange={(open) => {
-                setMaPickerOpen(open);
-                if (!open) setMaSearch("");
-              }}>
-                <PopoverTrigger asChild>
-                  <Button variant="outline" className="w-full justify-between" type="button">
-                    <span className="text-sm">+ Mitarbeiter hinzufügen</span>
-                    <ChevronDown className="h-4 w-4 opacity-60" />
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="p-0 w-[--radix-popover-trigger-width]" align="start">
-                  <div className="p-2 border-b">
-                    <Input
-                      placeholder="Suchen…"
-                      value={maSearch}
-                      onChange={(e) => setMaSearch(e.target.value)}
-                      className="h-9"
-                    />
-                  </div>
-                  <div className="max-h-64 overflow-y-auto py-1">
-                    {availableMitarbeiter
-                      .filter((m) => m.id !== currentUserId)
-                      .filter((m) => !mitarbeiterRows.some((r) => r.mitarbeiterId === m.id))
-                      .filter((m) => m.name.toLowerCase().includes(maSearch.toLowerCase()))
-                      .map((m) => (
-                        <button
-                          key={m.id}
-                          type="button"
-                          className="w-full flex items-center justify-between px-3 py-2.5 text-sm hover:bg-muted active:bg-muted text-left"
-                          onClick={() => {
-                            addMitarbeiter(m.id);
-                            setMaPickerOpen(false);
-                            setMaSearch("");
-                          }}
-                        >
-                          <span className="truncate">{m.name}</span>
-                        </button>
-                      ))}
-                  </div>
-                </PopoverContent>
-              </Popover>
-
-              {/* Aktuell ausgewählte Mitarbeiter als Chips */}
-              <div className="flex flex-wrap gap-2">
-                {mitarbeiterRows.filter((r) => r.mitarbeiterId).map((r) => {
-                  const ma = availableMitarbeiter.find((m) => m.id === r.mitarbeiterId);
-                  const name = ma?.name || (r.mitarbeiterId === currentUserId ? "Ich" : "?");
-                  const isSelf = r.mitarbeiterId === currentUserId;
-                  return (
-                    <Badge
-                      key={r.localId}
-                      variant={isSelf ? "default" : "secondary"}
-                      className="text-xs py-1 pl-2 pr-1"
-                    >
-                      {name}
-                      {isSelf && <span className="ml-1 opacity-70">(ich)</span>}
-                      {!isSelf && (
-                        <button
-                          type="button"
-                          className="ml-1 rounded-full hover:bg-background/40 p-0.5"
-                          onClick={() => removeMitarbeiter(r.localId)}
-                          aria-label={`${name} entfernen`}
-                        >
-                          <X className="h-3 w-3" />
-                        </button>
-                      )}
-                    </Badge>
-                  );
-                })}
-              </div>
-              <div className="text-xs text-muted-foreground border-t pt-2">
-                Buchung für {mitarbeiterRows.filter((r) => r.mitarbeiterId).length} Mitarbeiter.
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
         {/* Projekt-Zeilen */}
         <Card>
           <CardHeader className="pb-3">
@@ -1051,43 +960,74 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
         {/* Mitarbeiter & Stunden */}
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-lg">Mitarbeiter & Stunden</CardTitle>
+            <div className="flex items-center justify-between gap-2">
+              <CardTitle className="text-lg">Mitarbeiter & Stunden</CardTitle>
+              {canBookForOthers && (
+                <Button variant="outline" size="sm" onClick={addEmptyMitarbeiterRow} type="button">
+                  <Plus className="h-4 w-4 mr-1" />
+                  Mitarbeiter
+                </Button>
+              )}
+            </div>
           </CardHeader>
           <CardContent className="space-y-3">
-            {/* "Stunden für alle übernehmen"-Toggle */}
-            <div className="flex items-center gap-2 pb-2 border-b">
-              <Switch
-                id="gleiche-stunden"
-                checked={gleicheStundenFuerAlle}
-                onCheckedChange={setGleicheStundenFuerAlle}
-              />
-              <Label htmlFor="gleiche-stunden" className="text-sm cursor-pointer">
-                Stunden für alle Mitarbeiter übernehmen
-              </Label>
-            </div>
+            {/* "Stunden für alle übernehmen"-Toggle (nur VA/Admin/PL) */}
+            {canBookForOthers && (
+              <div className="flex items-center gap-2 pb-2 border-b">
+                <Switch
+                  id="gleiche-stunden"
+                  checked={gleicheStundenFuerAlle}
+                  onCheckedChange={setGleicheStundenFuerAlle}
+                />
+                <Label htmlFor="gleiche-stunden" className="text-sm cursor-pointer">
+                  Stunden für alle Mitarbeiter übernehmen
+                </Label>
+              </div>
+            )}
 
             {/* MOBILE — eine Card pro Mitarbeiter */}
             <div className="sm:hidden space-y-3">
               {mitarbeiterRows.map((r) => {
-                const ma = availableMitarbeiter.find((m) => m.id === r.mitarbeiterId);
                 const summeGross = projektZeilen.reduce((s, z) => s + parseStunden(r.stunden[z.localId] || ""), 0);
                 const summe = Math.max(0, summeGross - pauseHours);
                 const isSelf = r.mitarbeiterId === currentUserId;
-                const name = ma?.name || (isSelf ? "Ich" : "?");
+                // Optionen für Select: alle MAs, die NICHT in anderen Zeilen schon ausgewählt sind, plus die aktuelle Auswahl
+                const usedInOtherRows = new Set(
+                  mitarbeiterRows.filter((x) => x.localId !== r.localId).map((x) => x.mitarbeiterId).filter(Boolean)
+                );
+                const selectOptions = availableMitarbeiter.filter((m) => m.id === r.mitarbeiterId || !usedInOtherRows.has(m.id));
                 return (
                   <div key={r.localId} className="border-2 rounded-xl p-4 bg-card space-y-3">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="font-semibold truncate">{name}{isSelf && <span className="ml-1 text-xs text-muted-foreground font-normal">(ich)</span>}</span>
-                      {!isSelf && canBookForOthers && (
+                    <div className="flex items-center gap-2">
+                      {canBookForOthers ? (
+                        <Select
+                          value={r.mitarbeiterId || ""}
+                          onValueChange={(v) => updateMitarbeiterId(r.localId, v)}
+                        >
+                          <SelectTrigger className="h-11 text-base font-semibold flex-1">
+                            <SelectValue placeholder="Mitarbeiter wählen…" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {selectOptions.map((m) => (
+                              <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <span className="font-semibold text-base flex-1">
+                          {availableMitarbeiter.find((m) => m.id === r.mitarbeiterId)?.name || "Ich"}
+                        </span>
+                      )}
+                      {canBookForOthers && mitarbeiterRows.length > 1 && (
                         <Button
                           variant="ghost"
                           size="icon"
                           onClick={() => removeMitarbeiter(r.localId)}
-                          className="text-destructive hover:text-destructive h-8 w-8 shrink-0"
+                          className="text-destructive hover:text-destructive h-10 w-10 shrink-0"
                           type="button"
-                          aria-label={`${name} entfernen`}
+                          aria-label="Mitarbeiter entfernen"
                         >
-                          <X className="h-4 w-4" />
+                          <Trash2 className="h-5 w-5" />
                         </Button>
                       )}
                     </div>
@@ -1096,7 +1036,7 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
                         const projName = z.projektId ? (projektMap[z.projektId] || "?") : `Zeile ${idx + 1}`;
                         return (
                           <div key={z.localId} className="flex items-center gap-2">
-                            <span className="w-5 text-right text-xs text-muted-foreground shrink-0">{idx + 1}.</span>
+                            <span className="w-5 text-right text-xs text-muted-foreground shrink-0 font-mono">{idx + 1}.</span>
                             <span className="flex-1 truncate text-sm">{projName}</span>
                             <Input
                               type="text"
@@ -1104,17 +1044,14 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
                               value={r.stunden[z.localId] || ""}
                               onChange={(e) => updateMaStunden(r.localId, z.localId, e.target.value)}
                               placeholder="0"
-                              className="w-20 text-center h-9 shrink-0"
+                              className="w-20 text-center h-10 shrink-0 text-base"
                             />
                           </div>
                         );
                       })}
                     </div>
-                    <div className="flex items-center justify-between pt-2 border-t">
-                      <span className="text-sm">Summe (netto)</span>
-                      <Badge variant={summe > 0 ? "default" : "outline"} className="tabular-nums">
-                        Σ {summe.toFixed(2).replace(".", ",")} h
-                      </Badge>
+                    <div className={`text-right text-base font-bold rounded-lg px-3 py-2 ${summe > 0 ? "bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-200" : "bg-muted text-muted-foreground"}`}>
+                      {summe > 0 ? `Σ ${summe.toFixed(2).replace(".", ",")} Stunden` : "Keine Stunden"}
                     </div>
                   </div>
                 );
@@ -1126,7 +1063,7 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
               <table className="w-full text-sm border-collapse">
                 <thead>
                   <tr className="border-b">
-                    <th className="text-left p-2 font-semibold sticky left-0 z-10 bg-card min-w-[140px]">Mitarbeiter</th>
+                    <th className="text-left p-2 font-semibold sticky left-0 z-10 bg-card min-w-[180px]">Mitarbeiter</th>
                     {projektZeilen.map((z, idx) => {
                       const projName = z.projektId ? (projektMap[z.projektId] || "?") : `Zeile ${idx + 1}`;
                       return (
@@ -1141,13 +1078,35 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
                 </thead>
                 <tbody>
                   {mitarbeiterRows.map((r) => {
-                    const ma = availableMitarbeiter.find((m) => m.id === r.mitarbeiterId);
                     const summeGross = projektZeilen.reduce((s, z) => s + parseStunden(r.stunden[z.localId] || ""), 0);
                     const summe = Math.max(0, summeGross - pauseHours);
-                    const isSelf = r.mitarbeiterId === currentUserId;
+                    const usedInOtherRows = new Set(
+                      mitarbeiterRows.filter((x) => x.localId !== r.localId).map((x) => x.mitarbeiterId).filter(Boolean)
+                    );
+                    const selectOptions = availableMitarbeiter.filter((m) => m.id === r.mitarbeiterId || !usedInOtherRows.has(m.id));
                     return (
                       <tr key={r.localId} className="border-b">
-                        <td className="p-2 truncate max-w-[180px] sticky left-0 z-10 bg-card">{ma?.name || (isSelf ? "Ich" : "?")}</td>
+                        <td className="p-2 sticky left-0 z-10 bg-card">
+                          {canBookForOthers ? (
+                            <Select
+                              value={r.mitarbeiterId || ""}
+                              onValueChange={(v) => updateMitarbeiterId(r.localId, v)}
+                            >
+                              <SelectTrigger className="h-9">
+                                <SelectValue placeholder="Mitarbeiter wählen…" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {selectOptions.map((m) => (
+                                  <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          ) : (
+                            <span className="truncate">
+                              {availableMitarbeiter.find((m) => m.id === r.mitarbeiterId)?.name || "Ich"}
+                            </span>
+                          )}
+                        </td>
                         {projektZeilen.map((z) => (
                           <td key={z.localId} className="p-1 text-center">
                             <Input
@@ -1163,7 +1122,7 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
                         <td className="p-2 text-center font-semibold tabular-nums">{summe > 0 ? summe.toFixed(2).replace(".", ",") : "—"}</td>
                         {canBookForOthers && (
                           <td className="p-1">
-                            {!isSelf && (
+                            {mitarbeiterRows.length > 1 && (
                               <Button
                                 variant="ghost"
                                 size="icon"
@@ -1171,7 +1130,7 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
                                 className="text-destructive hover:text-destructive h-8 w-8"
                                 type="button"
                               >
-                                <X className="h-4 w-4" />
+                                <Trash2 className="h-4 w-4" />
                               </Button>
                             )}
                           </td>
