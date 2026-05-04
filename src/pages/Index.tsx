@@ -529,8 +529,8 @@ export default function Index() {
             </Card>
           )}
 
-          {/* Meine Stunden - Für Admin + Vorarbeiter */}
-          {canManageTime && (
+          {/* Meine Stunden — alle Rollen außer Extern */}
+          {!isExtern && (
             <Card
               className="cursor-pointer hover:shadow-lg transition-all hover:border-primary/50"
               onClick={() => navigate("/my-hours")}
@@ -541,7 +541,7 @@ export default function Index() {
                 </div>
                 <CardTitle className="text-lg sm:text-xl">Meine Stunden</CardTitle>
                 <CardDescription className="text-sm">
-                  Übersicht gebuchter Zeiten
+                  Stunden, Zeitkonto & Urlaubskonto
                 </CardDescription>
               </CardHeader>
               <CardContent>

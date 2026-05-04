@@ -37,7 +37,9 @@ const MyHours = () => {
   const [loading, setLoading] = useState(true);
   const [roleChecked, setRoleChecked] = useState(false);
 
-  // Role check: redirect mitarbeiter
+  // Role check: extern hat keinen Zugriff. Alle anderen Rollen (mitarbeiter,
+  // vorarbeiter, projektleiter, administrator) sehen ihre eigenen Stunden +
+  // Zeitkonto + Urlaubskonto.
   useEffect(() => {
     const checkRole = async () => {
       const { data: { user } } = await supabase.auth.getUser();
@@ -47,8 +49,8 @@ const MyHours = () => {
         .select("role")
         .eq("user_id", user.id)
         .single();
-      if (data?.role === "mitarbeiter") {
-        toast({ variant: "destructive", title: "Kein Zugriff", description: "Diese Seite ist nur für Administratoren und Vorarbeiter zugänglich." });
+      if (data?.role === "extern") {
+        toast({ variant: "destructive", title: "Kein Zugriff", description: "Externe Mitarbeiter haben keinen Zugriff auf diese Seite." });
         navigate("/");
         return;
       }
@@ -67,11 +69,17 @@ const MyHours = () => {
   const [projectOptions, setProjectOptions] = useState<ProjectOption[]>([]);
   const [vacationBalance, setVacationBalance] = useState<{ total: number; used: number } | null>(null);
   const [vacationHistory, setVacationHistory] = useState<{ datum: string; stunden: number }[]>([]);
+  // Leave-Log (Zugangs-/Korrektur-Buchungen vom Admin)
+  const [leaveLog, setLeaveLog] = useState<{ id: string; action: string; days: number; description: string | null; created_at: string }[]>([]);
+  // Zeitkonto (Zeitausgleich)
+  const [zeitkontoBalance, setZeitkontoBalance] = useState<number>(0);
+  const [zeitkontoTransactions, setZeitkontoTransactions] = useState<{ id: string; change_type: string; hours: number; balance_before: number; balance_after: number; reason: string | null; created_at: string; changed_by: string | null }[]>([]);
 
   useEffect(() => {
     fetchEntries();
     fetchProjects();
     fetchVacationData();
+    fetchZeitkontoData();
   }, [selectedMonth]);
 
   const fetchProjects = async () => {
@@ -114,6 +122,37 @@ const MyHours = () => {
 
     setVacationBalance({ total: totalDays, used: usedDays });
     setVacationHistory(vacEntries || []);
+
+    // Leave-Log laden (Admin-Korrekturen, Monats-Credits, etc.)
+    const { data: logData } = await supabase
+      .from("leave_log")
+      .select("id, action, days, description, created_at")
+      .eq("user_id", user.id)
+      .eq("year", currentYear)
+      .order("created_at", { ascending: false });
+    setLeaveLog((logData as any[]) || []);
+  };
+
+  const fetchZeitkontoData = async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    // Saldo aus time_accounts
+    const { data: account } = await supabase
+      .from("time_accounts")
+      .select("balance_hours")
+      .eq("user_id", user.id)
+      .maybeSingle();
+    setZeitkontoBalance(parseFloat(((account as any)?.balance_hours as any) || 0) || 0);
+
+    // Transaktions-Historie
+    const { data: txData } = await supabase
+      .from("time_account_transactions")
+      .select("id, change_type, hours, balance_before, balance_after, reason, created_at, changed_by")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false })
+      .limit(100);
+    setZeitkontoTransactions((txData as any[]) || []);
   };
 
   const fetchEntries = async () => {
@@ -441,9 +480,114 @@ const MyHours = () => {
               {vacationHistory.length === 0 && (
                 <p className="text-sm text-muted-foreground text-center py-2">Noch kein Urlaub genommen in {new Date().getFullYear()}</p>
               )}
+
+              {leaveLog.length > 0 && (
+                <div className="mt-4">
+                  <h4 className="text-sm font-medium mb-2">Buchungs-Verlauf (Korrekturen / Credits)</h4>
+                  <div className="space-y-1.5 max-h-64 overflow-y-auto">
+                    {leaveLog.map((l) => {
+                      const isPositive = l.action === "credit" || l.action === "manual_add" || (l.days > 0 && l.action !== "use");
+                      const sign = l.days > 0 ? "+" : "";
+                      const actionLabel: Record<string, string> = {
+                        credit: "Monats-Gutschrift",
+                        manual_add: "Manuelle Gutschrift",
+                        manual_subtract: "Manueller Abzug",
+                        carry_over: "Übertrag aus Vorjahr",
+                        use: "Urlaub genommen",
+                        correction: "Korrektur",
+                      };
+                      return (
+                        <div key={l.id} className="flex items-start justify-between gap-2 py-2 px-3 rounded bg-muted/30 text-sm">
+                          <div className="flex-1 min-w-0">
+                            <div className="font-medium text-xs">
+                              {actionLabel[l.action] || l.action}
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                              {new Date(l.created_at).toLocaleDateString("de-DE", { day: "2-digit", month: "long", year: "numeric" })}
+                            </div>
+                            {l.description && (
+                              <div className="text-xs mt-0.5 italic text-muted-foreground">{l.description}</div>
+                            )}
+                          </div>
+                          <Badge variant={isPositive ? "default" : "secondary"} className="tabular-nums shrink-0">
+                            {sign}{l.days} Tage
+                          </Badge>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
         )}
+
+        {/* Zeitkonto (Zeitausgleich) */}
+        <Card className="mt-6">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Clock className="h-5 w-5" />
+              Mein Zeitkonto (Zeitausgleich)
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="bg-primary/5 rounded-lg p-4 mb-4 flex items-center justify-between">
+              <div>
+                <p className="text-sm text-muted-foreground">Aktueller Saldo</p>
+                <p className={`text-3xl font-bold tabular-nums ${zeitkontoBalance > 0 ? "text-green-600 dark:text-green-400" : zeitkontoBalance < 0 ? "text-orange-600 dark:text-orange-400" : ""}`}>
+                  {zeitkontoBalance > 0 ? "+" : ""}{zeitkontoBalance.toFixed(2).replace(".", ",")} h
+                </p>
+              </div>
+              <div className="text-xs text-muted-foreground text-right">
+                {zeitkontoBalance > 0 ? "Überstunden / ZA-Guthaben" : zeitkontoBalance < 0 ? "Minusstunden" : "Ausgeglichen"}
+              </div>
+            </div>
+
+            {zeitkontoTransactions.length > 0 ? (
+              <div>
+                <h4 className="text-sm font-medium mb-2">Buchungs-Verlauf</h4>
+                <div className="space-y-1.5 max-h-96 overflow-y-auto">
+                  {zeitkontoTransactions.map((t) => {
+                    const sign = t.hours > 0 ? "+" : "";
+                    const isPositive = t.hours > 0;
+                    const typLabel: Record<string, string> = {
+                      add: "Gutschrift (Überstunden)",
+                      subtract: "Abzug (ZA genommen)",
+                      manual_add: "Manuelle Gutschrift",
+                      manual_subtract: "Manueller Abzug",
+                      auto_overtime: "Auto-Überstunden",
+                      auto_undertime: "Auto-Minusstunden",
+                      za_taken: "Zeitausgleich genommen",
+                      correction: "Korrektur",
+                      reset: "Reset",
+                    };
+                    return (
+                      <div key={t.id} className="flex items-start justify-between gap-2 py-2 px-3 rounded bg-muted/30 text-sm">
+                        <div className="flex-1 min-w-0">
+                          <div className="font-medium text-xs">
+                            {typLabel[t.change_type] || t.change_type}
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            {new Date(t.created_at).toLocaleDateString("de-DE", { day: "2-digit", month: "long", year: "numeric" })}
+                            {" · "}Saldo nach: {t.balance_after.toFixed(2).replace(".", ",")} h
+                          </div>
+                          {t.reason && (
+                            <div className="text-xs mt-0.5 italic text-muted-foreground">{t.reason}</div>
+                          )}
+                        </div>
+                        <Badge variant={isPositive ? "default" : "secondary"} className="tabular-nums shrink-0">
+                          {sign}{t.hours.toFixed(2).replace(".", ",")} h
+                        </Badge>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground text-center py-4">Noch keine Zeitkonto-Buchungen vorhanden.</p>
+            )}
+          </CardContent>
+        </Card>
       </main>
 
       {/* Edit Dialog */}
