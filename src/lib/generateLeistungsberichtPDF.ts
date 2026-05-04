@@ -13,6 +13,13 @@ function pdfText(s: string): string {
 }
 
 export type LeistungsberichtPDFData = {
+  /**
+   * Bericht-Typ. Default 'leistungsbericht' (= bestehende Logik unverändert).
+   * 'werk' / 'lkw': matrix-basierter Bericht mit Projekten in Zeilen statt Tätigkeiten.
+   *   Header zeigt keinen Projekt-Namen, Zeilen-Labels sind Projekt-Namen,
+   *   Page-Title ist "Werk-Bericht" / "LKW-Bericht".
+   */
+  typ?: "leistungsbericht" | "werk" | "lkw";
   projektName: string;
   projektOrt: string;
   objekt: string;
@@ -157,72 +164,102 @@ export async function generateLeistungsberichtPDF(
   }
 
   // ════════════════════════════════════════════════════════════════════════════
-  // TITLE
+  // TITLE (abhängig vom Bericht-Typ)
   // ════════════════════════════════════════════════════════════════════════════
+  const typ = data.typ ?? "leistungsbericht";
+  const titleByTyp: Record<string, string> = {
+    leistungsbericht: "Leistungsbericht:",
+    werk: "Werk-Bericht:",
+    lkw: "LKW-Bericht:",
+  };
+  const subTitleByTyp: Record<string, string> = {
+    leistungsbericht: "Der Leistungsbericht ist täglich abzugeben!",
+    werk: "Der Werk-Bericht ist täglich abzugeben!",
+    lkw: "Der LKW-Bericht ist täglich abzugeben!",
+  };
+
   let y = 12;
   doc.setTextColor(...TITLE_COLOR);
   doc.setFontSize(15);
   doc.setFont("helvetica", "bold");
-  doc.text("Leistungsbericht:", mL, y);
+  doc.text(titleByTyp[typ], mL, y);
 
   y += 5;
   doc.setTextColor(...ORANGE_RED);
   doc.setFontSize(8);
   doc.setFont("helvetica", "italic");
-  doc.text(pdfText("Der Leistungsbericht ist täglich abzugeben!"), mL, y);
+  doc.text(pdfText(subTitleByTyp[typ]), mL, y);
 
   // ════════════════════════════════════════════════════════════════════════════
-  // BAUVORHABEN SECTION
+  // HEADER SECTION
+  // - typ='leistungsbericht': vollständige Bauvorhaben-Sektion (Name, Ort, Objekt, Datum)
+  // - typ='werk' / 'lkw':     nur Datum (kein Header-Projekt)
   // ════════════════════════════════════════════════════════════════════════════
-  y += 6;
-  doc.setTextColor(...TITLE_COLOR);
-  doc.setFontSize(10);
-  doc.setFont("helvetica", "bold");
-  doc.text("Bauvorhaben:", mL, y);
-  y += 5;
-
   const labelX = mL + 2;
   const valX = mL + 18;
   const rightBlockX = mL + contentW * 0.56;
   const rightValX = rightBlockX + 16;
 
-  doc.setFontSize(8.5);
+  if (typ === "leistungsbericht") {
+    y += 6;
+    doc.setTextColor(...TITLE_COLOR);
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "bold");
+    doc.text("Bauvorhaben:", mL, y);
+    y += 5;
 
-  // Name + Datum
-  doc.setTextColor(...BLACK);
-  doc.setFont("helvetica", "bold");
-  doc.text("Name:", labelX, y);
-  doc.setFont("helvetica", "normal");
-  doc.text(pdfText(data.projektName), valX, y);
-  drawLine(doc, valX, y + 0.8, rightBlockX - 4, y + 0.8, 0.15);
+    doc.setFontSize(8.5);
 
-  doc.setFont("helvetica", "bold");
-  doc.text("Datum:", rightBlockX, y);
-  doc.setTextColor(...RED);
-  doc.setFont("helvetica", "bold");
-  doc.text(formatGermanDate(data.datum), rightValX, y);
-  doc.setTextColor(...BLACK);
-  drawLine(doc, rightValX, y + 0.8, contentRight, y + 0.8, 0.15);
-  y += 5;
+    // Name + Datum
+    doc.setTextColor(...BLACK);
+    doc.setFont("helvetica", "bold");
+    doc.text("Name:", labelX, y);
+    doc.setFont("helvetica", "normal");
+    doc.text(pdfText(data.projektName), valX, y);
+    drawLine(doc, valX, y + 0.8, rightBlockX - 4, y + 0.8, 0.15);
 
-  // Ort
-  doc.setFont("helvetica", "bold");
-  doc.text("Ort:", labelX, y);
-  doc.setFont("helvetica", "normal");
-  doc.text(pdfText(data.projektOrt), valX, y);
-  drawLine(doc, valX, y + 0.8, rightBlockX - 4, y + 0.8, 0.15);
-  y += 5;
+    doc.setFont("helvetica", "bold");
+    doc.text("Datum:", rightBlockX, y);
+    doc.setTextColor(...RED);
+    doc.setFont("helvetica", "bold");
+    doc.text(formatGermanDate(data.datum), rightValX, y);
+    doc.setTextColor(...BLACK);
+    drawLine(doc, rightValX, y + 0.8, contentRight, y + 0.8, 0.15);
+    y += 5;
 
-  // Objekt
-  doc.setFont("helvetica", "bold");
-  doc.text("Objekt:", labelX, y);
-  doc.setFont("helvetica", "normal");
-  doc.text(pdfText(data.objekt), valX, y);
-  drawLine(doc, valX, y + 0.8, contentRight, y + 0.8, 0.15);
-  y += 6;
+    // Ort
+    doc.setFont("helvetica", "bold");
+    doc.text("Ort:", labelX, y);
+    doc.setFont("helvetica", "normal");
+    doc.text(pdfText(data.projektOrt), valX, y);
+    drawLine(doc, valX, y + 0.8, rightBlockX - 4, y + 0.8, 0.15);
+    y += 5;
+
+    // Objekt
+    doc.setFont("helvetica", "bold");
+    doc.text("Objekt:", labelX, y);
+    doc.setFont("helvetica", "normal");
+    doc.text(pdfText(data.objekt), valX, y);
+    drawLine(doc, valX, y + 0.8, contentRight, y + 0.8, 0.15);
+    y += 6;
+  } else {
+    // Werk / LKW: nur Datum prominent
+    y += 6;
+    doc.setFontSize(8.5);
+    doc.setTextColor(...BLACK);
+    doc.setFont("helvetica", "bold");
+    doc.text("Datum:", labelX, y);
+    doc.setTextColor(...RED);
+    doc.text(formatGermanDate(data.datum), valX, y);
+    doc.setTextColor(...BLACK);
+    drawLine(doc, valX, y + 0.8, rightBlockX - 4, y + 0.8, 0.15);
+    y += 6;
+  }
 
   // ════════════════════════════════════════════════════════════════════════════
-  // TAETIGKEITEN SECTION
+  // TAETIGKEITEN / PROJEKTE SECTION
+  // - typ='leistungsbericht': fixe 8 Zeilen mit Tätigkeits-Texten + Pause + LKW
+  // - typ='werk' / 'lkw':     dynamische Zeilen (1–8) mit Projekt-Namen + Pause-Zeile
   // ════════════════════════════════════════════════════════════════════════════
   drawLine(doc, mL, y, contentRight, y, 0.4);
   y += 5;
@@ -230,21 +267,31 @@ export async function generateLeistungsberichtPDF(
   doc.setTextColor(...TITLE_COLOR);
   doc.setFontSize(10);
   doc.setFont("helvetica", "bold");
-  doc.text(pdfText("Tätigkeiten:"), mL, y);
+  doc.text(
+    pdfText(typ === "leistungsbericht" ? "Tätigkeiten:" : "Projekte:"),
+    mL,
+    y
+  );
 
-  doc.setFontSize(8);
-  doc.text("Regie", contentRight, y, { align: "right" });
+  if (typ === "leistungsbericht") {
+    doc.setFontSize(8);
+    doc.text("Regie", contentRight, y, { align: "right" });
+  }
   y += 4;
 
-  // Build activity data
+  // Build row labels
+  const totalRows = 8; // Grid bleibt fix bei 8 Zeilen für konsistentes Layout
   const activityTexts: string[] = [];
-  for (let i = 1; i <= 8; i++) {
+  for (let i = 1; i <= totalRows; i++) {
     const found = data.taetigkeiten.find((t) => t.position === i);
     activityTexts.push(found ? found.bezeichnung : "");
   }
-  // Row 1: Rüstzeit/Anfahrt with arrival time
-  if (!activityTexts[0]) {
-    activityTexts[0] = `Rüstzeit/Anfahrt, Ankunftszeit Baustelle: ${data.ankunftZeit}`;
+
+  if (typ === "leistungsbericht") {
+    // LB: Row 1 default = Rüstzeit/Anfahrt
+    if (!activityTexts[0]) {
+      activityTexts[0] = `Rüstzeit/Anfahrt, Ankunftszeit Baustelle: ${data.ankunftZeit}`;
+    }
   }
 
   // Activity grid (8 rows)
@@ -254,7 +301,7 @@ export async function generateLeistungsberichtPDF(
   const actTextW = contentW - actNumW;
   const actGridTop = y;
 
-  for (let i = 0; i < 8; i++) {
+  for (let i = 0; i < totalRows; i++) {
     const posNum = i + 1;
     const rowY = y + i * actRowH;
 
@@ -264,28 +311,34 @@ export async function generateLeistungsberichtPDF(
     doc.setFont("helvetica", "bold");
     doc.text(`${posNum}.`, actTableX + 1.5, rowY + actRowH * 0.65);
 
-    // Activity text
+    // Activity / Projekt text
     doc.setFont("helvetica", "normal");
     let text = activityTexts[i];
-    // Row 7 (index 6): LKW AN+ABFAHRT
-    if (posNum === 7 && !text) {
-      text = `LKW AN+ ABFAHRT`;
-    }
-    // Row 8 (index 7): Pause
-    if (posNum === 8) {
-      text = `Pause, Von: ${data.pauseVon}   Bis: ${data.pauseBis}`;
-    }
-    doc.text(pdfText(text), actTableX + actNumW + 1, rowY + actRowH * 0.65);
 
-    // If row 7, show LKW hours on right
-    if (posNum === 7 && data.lkwStunden > 0) {
-      doc.text(
-        formatNumber(data.lkwStunden),
-        contentRight - 2,
-        rowY + actRowH * 0.65,
-        { align: "right" }
-      );
+    if (typ === "leistungsbericht") {
+      // Row 7 (index 6): LKW AN+ABFAHRT (Default falls leer)
+      if (posNum === 7 && !text) text = `LKW AN+ ABFAHRT`;
+      // Row 8: Pause
+      if (posNum === 8) {
+        text = `Pause, Von: ${data.pauseVon}   Bis: ${data.pauseBis}`;
+      }
+      // LKW-Stunden in Spalte rechts auf Zeile 7
+      if (posNum === 7 && data.lkwStunden > 0) {
+        doc.text(
+          formatNumber(data.lkwStunden),
+          contentRight - 2,
+          rowY + actRowH * 0.65,
+          { align: "right" }
+        );
+      }
+    } else {
+      // Werk / LKW: alle Zeilen sind Projekte; Pause-Info wenn freie Zeile + pauseVon vorhanden
+      if (!text && posNum === totalRows && data.pauseVon && data.pauseBis) {
+        text = `Pause, Von: ${data.pauseVon}   Bis: ${data.pauseBis}`;
+      }
     }
+
+    doc.text(pdfText(text), actTableX + actNumW + 1, rowY + actRowH * 0.65);
   }
 
   // Draw the activity grid lines
