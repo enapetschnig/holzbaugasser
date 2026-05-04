@@ -193,6 +193,19 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
 
   const pauseHours = pauseMinuten / 60;
 
+  // Wenn "Stunden für alle übernehmen" aktiviert wird, übernimmt sofort die Stunden
+  // des ersten MAs auf alle anderen Zeilen (analog zum Leistungsbericht).
+  useEffect(() => {
+    if (gleicheStundenFuerAlle) {
+      setMitarbeiterRows((prev) => {
+        if (prev.length <= 1) return prev;
+        const firstStunden = prev[0].stunden;
+        return prev.map((r, i) => i === 0 ? r : { ...r, stunden: { ...firstStunden } });
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gleicheStundenFuerAlle]);
+
   // Tag-Total: Summe aller MA-Netto-Stunden (Pause schon pro MA abgezogen)
   const tagTotalStunden = useMemo(() => {
     let sum = 0;
@@ -990,7 +1003,6 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
               {mitarbeiterRows.map((r) => {
                 const summeGross = projektZeilen.reduce((s, z) => s + parseStunden(r.stunden[z.localId] || ""), 0);
                 const summe = Math.max(0, summeGross - pauseHours);
-                const isSelf = r.mitarbeiterId === currentUserId;
                 // Optionen für Select: alle MAs, die NICHT in anderen Zeilen schon ausgewählt sind, plus die aktuelle Auswahl
                 const usedInOtherRows = new Set(
                   mitarbeiterRows.filter((x) => x.localId !== r.localId).map((x) => x.mitarbeiterId).filter(Boolean)
