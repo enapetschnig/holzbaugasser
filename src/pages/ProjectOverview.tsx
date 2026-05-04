@@ -7,7 +7,7 @@ import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 
 type DocumentCategory = {
-  type: "plans" | "reports" | "photos" | "chef";
+  type: "plans" | "reports" | "leistungsberichte" | "photos" | "chef";
   title: string;
   description: string;
   icon: React.ReactNode;
@@ -37,9 +37,9 @@ const ProjectOverview = () => {
       count: 0,
     },
     {
-      type: "reports",
-      title: "Regieberichte",
-      description: "Bautagebücher und Stundenberichte",
+      type: "leistungsberichte",
+      title: "Leistungsberichte",
+      description: "Tagesberichte, Werkstatt und LKW",
       icon: <FileCheck className="h-8 w-8" />,
       count: 0,
     },
@@ -110,7 +110,27 @@ const ProjectOverview = () => {
           return { ...category, count: 0 };
         }
 
+        // Leistungsberichte: aus DB (alle Bericht-Typen, die dieses Projekt betreffen)
+        if (category.type === "leistungsberichte") {
+          // Standard-LB: projekt_id = projektId direkt im Header
+          const { count: lbCount } = await supabase
+            .from("leistungsberichte" as any)
+            .select("id", { count: "exact", head: true })
+            .eq("projekt_id", projectId);
+          // Werkstatt/LKW: projekt_id ist im taetigkeiten-Eintrag
+          const { data: tRows } = await supabase
+            .from("leistungsbericht_taetigkeiten" as any)
+            .select("bericht_id")
+            .eq("projekt_id", projectId);
+          const distinctIds = new Set(((tRows as any[]) || []).map((t: any) => t.bericht_id));
+          return {
+            ...category,
+            count: (lbCount || 0) + distinctIds.size,
+          };
+        }
+
         const bucket = bucketMap[category.type];
+        if (!bucket) return { ...category, count: 0 };
         const { data } = await supabase
           .storage
           .from(bucket)

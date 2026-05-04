@@ -1,15 +1,18 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
-import { Upload, FileText, Trash2, Eye, Download } from "lucide-react";
+import { Upload, FileText, Trash2, Eye, Download, Pencil } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { PageHeader } from "@/components/PageHeader";
 import { FileViewer } from "@/components/FileViewer";
+import { downloadLeistungsberichtPDF } from "@/lib/downloadLeistungsberichtPDF";
 
-type DocumentType = "plans" | "reports" | "photos" | "chef";
+type DocumentType = "plans" | "reports" | "leistungsberichte" | "photos" | "chef";
 
 type StorageFile = {
   name: string;
@@ -18,7 +21,7 @@ type StorageFile = {
   metadata: any;
 };
 
-const bucketMap: Record<DocumentType, string> = {
+const bucketMap: Record<string, string> = {
   plans: "project-plans",
   reports: "project-reports",
   photos: "project-photos",
@@ -28,14 +31,29 @@ const bucketMap: Record<DocumentType, string> = {
 const titleMap: Record<DocumentType, string> = {
   plans: "Pläne",
   reports: "Regieberichte",
+  leistungsberichte: "Leistungsberichte",
   photos: "Fotos",
   chef: "🔒 Chefordner",
 };
 
+type LBListItem = {
+  id: string;
+  bericht_typ: "leistungsbericht" | "werk" | "lkw";
+  datum: string;
+  ersteller: string;
+  total_stunden: number;
+  ma_count: number;
+  // Für Werkstatt/LKW: weitere Projekte (außer dem aktuellen) zur Hinweis-Anzeige
+  other_projects: string[];
+};
+
 const ProjectDetail = () => {
   const { projectId, type } = useParams<{ projectId: string; type: DocumentType }>();
+  const navigate = useNavigate();
   const { toast } = useToast();
   const [files, setFiles] = useState<StorageFile[]>([]);
+  const [lbList, setLbList] = useState<LBListItem[]>([]);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [projectName, setProjectName] = useState("");
@@ -125,7 +143,18 @@ const ProjectDetail = () => {
   const fetchFiles = async () => {
     if (!projectId || !type) return;
 
+    // Spezial-Branch: Leistungsberichte aus DB statt Storage
+    if (type === "leistungsberichte") {
+      await fetchLeistungsberichte();
+      setLoading(false);
+      return;
+    }
+
     const bucket = bucketMap[type];
+    if (!bucket) {
+      setLoading(false);
+      return;
+    }
     const { data, error } = await supabase
       .storage
       .from(bucket)
@@ -137,6 +166,117 @@ const ProjectDetail = () => {
       setFiles(data);
     }
     setLoading(false);
+  };
+
+  const fetchLeistungsberichte = async () => {
+    if (!projectId) return;
+
+    // 1) Klassische Leistungsberichte (LB) — projekt_id im Header
+    const { data: lbData } = await supabase
+      .from("leistungsberichte" as any)
+      .select("id, bericht_typ, datum, erstellt_von")
+      .eq("projekt_id", projectId)
+      .order("datum", { ascending: false });
+
+    // 2) Werkstatt/LKW-Berichte — projekt_id ist im taetigkeiten-Eintrag
+    const { data: tRows } = await supabase
+      .from("leistungsbericht_taetigkeiten" as any)
+      .select("bericht_id")
+      .eq("projekt_id", projectId);
+    const matrixIds = [...new Set(((tRows as any[]) || []).map((r: any) => r.bericht_id))];
+
+    let matrixData: any[] = [];
+    if (matrixIds.length > 0) {
+      const { data: mData } = await supabase
+        .from("leistungsberichte" as any)
+        .select("id, bericht_typ, datum, erstellt_von")
+        .in("id", matrixIds);
+      matrixData = (mData as any[]) || [];
+    }
+
+    // Beide Listen mergen, Duplikate per id raus (sollte selten sein)
+    const allBerichteMap = new Map<string, any>();
+    for (const b of (lbData as any[]) || []) allBerichteMap.set(b.id, b);
+    for (const b of matrixData) allBerichteMap.set(b.id, b);
+    const allBerichte = Array.from(allBerichteMap.values()).sort((a, b) =>
+      (b.datum as string).localeCompare(a.datum as string)
+    );
+
+    if (allBerichte.length === 0) {
+      setLbList([]);
+      return;
+    }
+
+    const allIds = allBerichte.map((b) => b.id);
+
+    // Alle taetigkeiten dieser Berichte laden — für andere Projekte (Hinweis)
+    const { data: allTaet } = await supabase
+      .from("leistungsbericht_taetigkeiten" as any)
+      .select("bericht_id, projekt_id")
+      .in("bericht_id", allIds);
+
+    // Mitarbeiter-Stunden + Anzahl
+    const { data: maRows } = await supabase
+      .from("leistungsbericht_mitarbeiter" as any)
+      .select("bericht_id, summe_stunden")
+      .in("bericht_id", allIds);
+
+    // Andere Projekt-IDs pro Bericht (außer dem aktuellen)
+    const otherProjektIds: Record<string, Set<string>> = {};
+    for (const t of (allTaet as any[]) || []) {
+      if (!t.projekt_id || t.projekt_id === projectId) continue;
+      if (!otherProjektIds[t.bericht_id]) otherProjektIds[t.bericht_id] = new Set();
+      otherProjektIds[t.bericht_id].add(t.projekt_id);
+    }
+
+    // Projekt-Namen für die anderen Projekt-IDs auflösen
+    const distinctOtherIds = new Set<string>();
+    Object.values(otherProjektIds).forEach((s) => s.forEach((id) => distinctOtherIds.add(id)));
+    const projNameMap: Record<string, string> = {};
+    if (distinctOtherIds.size > 0) {
+      const { data: projData } = await supabase
+        .from("projects")
+        .select("id, name")
+        .in("id", Array.from(distinctOtherIds));
+      (projData || []).forEach((p: any) => { projNameMap[p.id] = p.name; });
+    }
+
+    // Stunden + MA-Count pro Bericht
+    const stundenMap: Record<string, { sum: number; count: number }> = {};
+    for (const m of (maRows as any[]) || []) {
+      if (!stundenMap[m.bericht_id]) stundenMap[m.bericht_id] = { sum: 0, count: 0 };
+      stundenMap[m.bericht_id].sum += parseFloat(m.summe_stunden) || 0;
+      stundenMap[m.bericht_id].count += 1;
+    }
+
+    // Ersteller-Namen
+    const erstellerIds = [...new Set(allBerichte.map((b) => b.erstellt_von).filter(Boolean))];
+    const erstellerMap: Record<string, string> = {};
+    if (erstellerIds.length > 0) {
+      const { data: profileData } = await supabase
+        .from("profiles")
+        .select("id, vorname, nachname")
+        .in("id", erstellerIds);
+      (profileData || []).forEach((p: any) => {
+        erstellerMap[p.id] = `${p.vorname || ""} ${p.nachname || ""}`.trim() || "—";
+      });
+    }
+
+    const list: LBListItem[] = allBerichte.map((b) => {
+      const otherSet = otherProjektIds[b.id] || new Set<string>();
+      const otherNames = Array.from(otherSet).map((pid) => projNameMap[pid]).filter(Boolean);
+      const stats = stundenMap[b.id] || { sum: 0, count: 0 };
+      return {
+        id: b.id,
+        bericht_typ: ((b.bericht_typ as string) || "leistungsbericht") as "leistungsbericht" | "werk" | "lkw",
+        datum: b.datum,
+        ersteller: erstellerMap[b.erstellt_von] || "—",
+        total_stunden: Math.round(stats.sum * 100) / 100,
+        ma_count: stats.count,
+        other_projects: otherNames,
+      };
+    });
+    setLbList(list);
   };
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -219,6 +359,109 @@ const ProjectDetail = () => {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <p>Lädt...</p>
+      </div>
+    );
+  }
+
+  // Leistungsberichte-Branch: eigene Liste (DB), kein Upload, PDF on-the-fly
+  if (type === "leistungsberichte") {
+    return (
+      <div className="min-h-screen bg-background">
+        <PageHeader title={`${projectName} - ${titleMap[type]}`} backPath="/projects" />
+        <main className="container mx-auto px-4 py-6 max-w-5xl">
+          <Card>
+            <CardHeader>
+              <CardTitle>Leistungsberichte</CardTitle>
+              <CardDescription>
+                {lbList.length === 0 ? "Keine Berichte für dieses Projekt vorhanden" : `${lbList.length} ${lbList.length === 1 ? "Bericht" : "Berichte"}`}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="p-6">
+              {lbList.length === 0 ? (
+                <div className="text-center py-12">
+                  <FileText className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
+                  <p className="text-lg font-semibold mb-2">Noch keine Leistungsberichte</p>
+                  <p className="text-sm text-muted-foreground">
+                    Berichte erscheinen hier automatisch, sobald sie für dieses Projekt erstellt wurden.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {lbList.map((lb) => {
+                    const isWerk = lb.bericht_typ === "werk";
+                    const isLkw = lb.bericht_typ === "lkw";
+                    const typLabel = isWerk ? "Werkstatt" : isLkw ? "LKW" : "Leistungsbericht";
+                    const editPath = isWerk ? "/werk-bericht" : isLkw ? "/lkw-bericht" : "/time-tracking";
+                    return (
+                      <div
+                        key={lb.id}
+                        className="flex items-start gap-3 p-4 rounded-lg border bg-card hover:bg-accent/50 transition-colors"
+                      >
+                        <FileText className="w-10 h-10 text-muted-foreground shrink-0 mt-1" />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap mb-1">
+                            <Badge
+                              variant="outline"
+                              className={
+                                isWerk ? "border-amber-300 text-amber-700 bg-amber-50"
+                                : isLkw ? "border-orange-300 text-orange-700 bg-orange-50"
+                                : "border-blue-300 text-blue-700 bg-blue-50"
+                              }
+                            >
+                              {typLabel}
+                            </Badge>
+                            <span className="font-medium">
+                              {new Date(lb.datum + "T00:00:00").toLocaleDateString("de-DE", { weekday: "short", day: "2-digit", month: "long", year: "numeric" })}
+                            </span>
+                          </div>
+                          <div className="text-sm text-muted-foreground">
+                            {lb.ma_count} {lb.ma_count === 1 ? "Mitarbeiter" : "Mitarbeiter"} · {lb.total_stunden.toFixed(2).replace(".", ",")} h gesamt · erstellt von {lb.ersteller}
+                          </div>
+                          {lb.other_projects.length > 0 && (
+                            <div className="text-xs text-blue-700 dark:text-blue-400 mt-1">
+                              ℹ Auch in: {lb.other_projects.join(", ")}
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex flex-col sm:flex-row gap-2 shrink-0">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={downloadingId === lb.id}
+                            onClick={async () => {
+                              setDownloadingId(lb.id);
+                              try {
+                                await downloadLeistungsberichtPDF(lb.id);
+                              } catch (err: any) {
+                                toast({ variant: "destructive", title: "Fehler", description: err?.message || "PDF konnte nicht erstellt werden." });
+                              } finally {
+                                setDownloadingId(null);
+                              }
+                            }}
+                          >
+                            <Download className="w-4 h-4 sm:mr-2" />
+                            <span className="hidden sm:inline">{downloadingId === lb.id ? "..." : "PDF"}</span>
+                          </Button>
+                          {isAdmin && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => navigate(`${editPath}?edit=${lb.id}`)}
+                              title="Bericht bearbeiten"
+                            >
+                              <Pencil className="w-4 h-4 sm:mr-2" />
+                              <span className="hidden sm:inline">Bearbeiten</span>
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </main>
       </div>
     );
   }
