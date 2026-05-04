@@ -12,7 +12,7 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Plus, Trash2, Save, AlertTriangle, FileText } from "lucide-react";
+import { Plus, Trash2, Save, FileText } from "lucide-react";
 import { format } from "date-fns";
 import { de } from "date-fns/locale";
 import { PageHeader } from "@/components/PageHeader";
@@ -61,13 +61,6 @@ type MitarbeiterRow = {
   localId: string;
   mitarbeiterId: string;
   stunden: Record<string, string>; // key = projektZeile.localId, value = Stunden als String
-};
-
-type CrossTypeEntry = {
-  type: "leistungsbericht" | "projektleiter" | "lkw" | "werk" | "vorfertigung";
-  stunden: number;
-  taetigkeit: string;
-  projectName: string | null;
 };
 
 type GeraetItem = { id: string; geraet: string; stunden: string };
@@ -165,11 +158,20 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
   const editingBerichtId = searchParams.get("edit");
   const [originalMaIds, setOriginalMaIds] = useState<string[]>([]);
 
-  // ----- Cross-Type-Warnung -----
-  const [crossTypeEntries, setCrossTypeEntries] = useState<CrossTypeEntry[]>([]);
+  // ----- "Bereits heute gebucht"-Card: alle eigenen Berichte (LB + Werkstatt + LKW)
+  // für (User, Datum), exkl. dem aktuell editierten. -----
+  const [existingTodayBerichte, setExistingTodayBerichte] = useState<{
+    id: string;
+    bericht_typ: "leistungsbericht" | "werk" | "lkw";
+    projekt_name: string;
+    arbeitsbeginn: string | null;
+    pause_von: string | null;
+    pause_bis: string | null;
+    total_stunden: number;
+  }[]>([]);
 
-  // ----- Eigener Bericht heute (gleicher Typ) — für "Bereits heute gebucht"-Card -----
-  const [ownTodayBericht, setOwnTodayBericht] = useState<{ id: string; total_stunden: number; ma_count: number } | null>(null);
+  // Aggregierte Projektleiter-Stunden des Users für den Tag (separate Info-Zeile).
+  const [existingTodayPLStunden, setExistingTodayPLStunden] = useState<number>(0);
 
   // ----- Saving -----
   const [saving, setSaving] = useState(false);
@@ -413,69 +415,75 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
     return () => { cancelled = true; };
   }, [editingBerichtId, currentUserId, berichtTyp, navigate, toast, isAdmin, isVorarbeiter, isProjektleiter]);
 
-  // ----------------------------- Existierender Bericht (eigener, gleicher Typ, gleiches Datum) -----------------------------
-  // Wird als "Bereits heute gebucht"-Card angezeigt (mit Bearbeiten-Button).
-  // Datum bleibt editierbar, sodass User auf andere Tage wechseln kann.
+  // ----------------------------- "Bereits heute gebucht": alle eigenen Berichte für den Tag -----------------------------
+  // Lädt LB + Werkstatt + LKW Berichte des Users für den Tag (außer dem editierten),
+  // plus aggregierte PL-Stunden. Edit-Button routet typ-aware zur jeweiligen Page.
   useEffect(() => {
     if (!currentUserId || !datum) return;
-    if (editingBerichtId) return; // im Edit-Mode brauchen wir die Card nicht
     let cancelled = false;
     (async () => {
-      const { data: bericht } = await supabase
+      // Berichte ALLER Typen
+      let q = supabase
         .from("leistungsberichte" as any)
-        .select("id")
+        .select("id, projekt_id, bericht_typ, arbeitsbeginn, ankunft_zeit, pause_von, pause_bis")
         .eq("erstellt_von", currentUserId)
-        .eq("datum", datum)
-        .eq("bericht_typ", berichtTyp)
-        .maybeSingle();
-      if (cancelled || !bericht) {
-        if (!cancelled) setOwnTodayBericht(null);
-        return;
-      }
-      const berichtId = (bericht as any).id as string;
-      // Stunden + MA-Count laden für die Card-Anzeige
-      const { data: maData } = await supabase
-        .from("leistungsbericht_mitarbeiter" as any)
-        .select("summe_stunden")
-        .eq("bericht_id", berichtId);
-      const total = ((maData || []) as any[]).reduce((s, m) => s + (parseFloat(m.summe_stunden) || 0), 0);
+        .eq("datum", datum);
+      if (editingBerichtId) q = q.neq("id", editingBerichtId);
+      const { data: berichte } = await q;
+
       if (cancelled) return;
-      setOwnTodayBericht({
-        id: berichtId,
-        total_stunden: Math.round(total * 100) / 100,
-        ma_count: (maData || []).length,
-      });
+
+      if (!berichte || (berichte as any[]).length === 0) {
+        if (!cancelled) setExistingTodayBerichte([]);
+      } else {
+        // Projekt-Namen für LB-Berichte (Werkstatt/LKW haben projekt_id=NULL)
+        const projIds = [...new Set((berichte as any[]).map((b: any) => b.projekt_id).filter(Boolean))];
+        const projNameMap: Record<string, string> = {};
+        if (projIds.length > 0) {
+          const { data: projData } = await supabase
+            .from("projects")
+            .select("id, name")
+            .in("id", projIds);
+          (projData || []).forEach((p: any) => { projNameMap[p.id] = p.name; });
+        }
+
+        // Stunden pro Bericht (für aktuellen User)
+        const berichtIds = (berichte as any[]).map((b: any) => b.id);
+        const { data: maData } = await supabase
+          .from("leistungsbericht_mitarbeiter" as any)
+          .select("bericht_id, mitarbeiter_id, summe_stunden")
+          .in("bericht_id", berichtIds)
+          .eq("mitarbeiter_id", currentUserId);
+        const stundenPerBericht: Record<string, number> = {};
+        (maData as any[] || []).forEach((m: any) => {
+          stundenPerBericht[m.bericht_id] = parseFloat(m.summe_stunden) || 0;
+        });
+
+        const list = (berichte as any[]).map((b: any) => ({
+          id: b.id as string,
+          bericht_typ: ((b.bericht_typ as string) || "leistungsbericht") as "leistungsbericht" | "werk" | "lkw",
+          projekt_name: b.projekt_id ? (projNameMap[b.projekt_id] || "-") : "",
+          arbeitsbeginn: b.arbeitsbeginn,
+          pause_von: b.pause_von,
+          pause_bis: b.pause_bis,
+          total_stunden: stundenPerBericht[b.id] || 0,
+        }));
+        if (!cancelled) setExistingTodayBerichte(list);
+      }
+
+      // PL-Aggregat (Projektleiter-Stunden für den Tag, separater Info-Eintrag)
+      const plQuery: any = supabase
+        .from("time_entries")
+        .select("stunden")
+        .eq("user_id", currentUserId)
+        .eq("datum", datum);
+      const { data: plEntries } = await plQuery.eq("entry_typ", "projektleiter");
+      if (cancelled) return;
+      const plSum = ((plEntries as any[]) || []).reduce((s, e) => s + (parseFloat(e.stunden) || 0), 0);
+      if (!cancelled) setExistingTodayPLStunden(Math.round(plSum * 100) / 100);
     })();
     return () => { cancelled = true; };
   }, [currentUserId, datum, berichtTyp, editingBerichtId]);
-
-  // ----------------------------- Cross-Type-Warnung laden -----------------------------
-  useEffect(() => {
-    if (!currentUserId || !datum) return;
-    let cancelled = false;
-    (async () => {
-      const otherTyps: string[] = ["leistungsbericht", "projektleiter", "vorfertigung"];
-      if (berichtTyp === "werk") otherTyps.push("lkw");
-      else otherTyps.push("werk");
-
-      const teQuery: any = supabase
-        .from("time_entries")
-        .select("project_id, entry_typ, taetigkeit, stunden")
-        .eq("user_id", currentUserId)
-        .eq("datum", datum);
-      const { data } = await teQuery.in("entry_typ", otherTyps);
-
-      if (cancelled) return;
-      const list: CrossTypeEntry[] = ((data || []) as any[]).map((e) => ({
-        type: e.entry_typ,
-        stunden: parseFloat(e.stunden) || 0,
-        taetigkeit: e.taetigkeit || "",
-        projectName: e.project_id ? projektMap[e.project_id] || null : null,
-      }));
-      setCrossTypeEntries(list);
-    })();
-    return () => { cancelled = true; };
-  }, [currentUserId, datum, berichtTyp, projektMap]);
 
   // ----------------------------- Helpers UI -----------------------------
   const addProjektZeile = () => {
@@ -823,8 +831,8 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
           </CardContent>
         </Card>
 
-        {/* Eigener bestehender Bericht heute (gleicher Typ) */}
-        {!editingBerichtId && ownTodayBericht && (
+        {/* "Bereits heute gebucht" — alle Berichte (LB + Werkstatt + LKW) + PL-Aggregat */}
+        {(existingTodayBerichte.length > 0 || existingTodayPLStunden > 0) && (
           <Card className="border-blue-200 bg-blue-50/30 dark:bg-blue-950/10 dark:border-blue-800">
             <CardHeader className="pb-2">
               <CardTitle className="text-base flex items-center gap-2">
@@ -833,60 +841,82 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">
-              <div className="flex items-center justify-between gap-2 p-2 rounded border bg-card">
-                <div className="flex-1 min-w-0">
-                  <div className="font-medium text-sm">{pageTitle}</div>
-                  <div className="text-xs text-muted-foreground">
-                    {ownTodayBericht.ma_count} {ownTodayBericht.ma_count === 1 ? "Mitarbeiter" : "Mitarbeiter"} · {ownTodayBericht.total_stunden.toFixed(2).replace(".", ",")}h netto
-                  </div>
-                </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setSearchParams({ edit: ownTodayBericht.id }, { replace: true })}
-                >
-                  <FileText className="h-3.5 w-3.5 mr-1" />
-                  Bearbeiten
-                </Button>
-              </div>
-              <div className="text-xs text-muted-foreground pt-1 border-t">
-                Speichern auf diesem Tag überschreibt den existierenden Bericht.
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Cross-Type-Warnung */}
-        {crossTypeEntries.length > 0 && (
-          <Card className="border-amber-200 bg-amber-50/30 dark:bg-amber-950/10 dark:border-amber-800">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base flex items-center gap-2">
-                <AlertTriangle className="h-4 w-4 text-amber-600" />
-                Bereits an diesem Tag gebucht
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              {crossTypeEntries.map((e, idx) => {
-                const labelByTyp: Record<string, string> = {
-                  leistungsbericht: "Leistungsbericht",
-                  projektleiter: "Projektleiter",
-                  werk: "Leistungsbericht Werkstatt",
-                  lkw: "Leistungsbericht LKW",
-                  vorfertigung: "Werkstätte/LKW (alt)",
-                };
-                const label = labelByTyp[e.type] || e.type;
+              {existingTodayBerichte.map((b) => {
+                const isLB = b.bericht_typ === "leistungsbericht";
+                const isWerk = b.bericht_typ === "werk";
+                const isLkw = b.bericht_typ === "lkw";
+                const titleLabel = isWerk
+                  ? "Leistungsbericht Werkstatt"
+                  : isLkw
+                    ? "Leistungsbericht LKW"
+                    : (b.projekt_name || "Leistungsbericht");
+                // Pause-Minuten berechnen
+                let pauseMin = 0;
+                if (b.pause_von && b.pause_bis) {
+                  const [pvh, pvm] = b.pause_von.split(":").map(Number);
+                  const [pbh, pbm] = b.pause_bis.split(":").map(Number);
+                  pauseMin = Math.max(0, (pbh * 60 + pbm) - (pvh * 60 + pvm));
+                }
+                const startRaw = (b.arbeitsbeginn || "").substring(0, 5);
+                const start = startRaw || "?";
+                const abfahrt = startRaw && b.total_stunden > 0
+                  ? computeAbfahrt(startRaw, b.total_stunden, pauseMin)
+                  : "?";
+                // Edit-Routing: aktuelle Page (gleicher Typ) → setSearchParams; sonst navigate
+                const editPath = isWerk ? "/werk-bericht" : isLkw ? "/lkw-bericht" : "/time-tracking";
+                const isCurrentTyp = b.bericht_typ === berichtTyp;
                 return (
-                  <div key={idx} className="flex items-center justify-between gap-2 p-2 rounded border bg-card">
+                  <div key={b.id} className="flex items-center justify-between gap-2 p-2 rounded border bg-card">
                     <div className="flex-1 min-w-0">
-                      <div className="font-medium text-sm truncate">{label}{e.projectName ? ` — ${e.projectName}` : ""}</div>
+                      <div className="font-medium text-sm truncate flex items-center gap-2">
+                        {!isLB && (
+                          <Badge variant="outline" className={isWerk ? "border-amber-300 text-amber-700 bg-amber-50" : "border-orange-300 text-orange-700 bg-orange-50"}>
+                            {isWerk ? "Werkstatt" : "LKW"}
+                          </Badge>
+                        )}
+                        <span className="truncate">{titleLabel}</span>
+                      </div>
+                      <div className="text-xs text-muted-foreground flex items-center gap-2 flex-wrap">
+                        <span>{start}–{abfahrt}</span>
+                        <span>·</span>
+                        <span>{b.total_stunden.toFixed(2).replace(".", ",")}h</span>
+                      </div>
                     </div>
-                    <span className="font-medium tabular-nums">{e.stunden.toFixed(2).replace(".", ",")}h</span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        if (isCurrentTyp) {
+                          setSearchParams({ edit: b.id }, { replace: true });
+                        } else {
+                          navigate(`${editPath}?edit=${b.id}`);
+                        }
+                      }}
+                    >
+                      <FileText className="h-3.5 w-3.5 mr-1" />
+                      Bearbeiten
+                    </Button>
                   </div>
                 );
               })}
-              <div className="text-xs text-muted-foreground pt-1 border-t">
-                {pageTitle}-Stunden kommen <strong>zusätzlich</strong> dazu — bitte Doppelbuchung vermeiden.
-              </div>
+              {existingTodayPLStunden > 0 && (
+                <div className="flex items-center justify-between gap-2 p-2 rounded border bg-card">
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium text-sm flex items-center gap-2">
+                      <Badge variant="outline" className="border-purple-300 text-purple-700 bg-purple-50">PL</Badge>
+                      <span>Projektleiter-Stunden</span>
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      {existingTodayPLStunden.toFixed(2).replace(".", ",")}h gesamt
+                    </div>
+                  </div>
+                </div>
+              )}
+              {existingTodayBerichte.some((b) => b.bericht_typ === berichtTyp) && (
+                <div className="text-xs text-muted-foreground pt-1 border-t">
+                  Speichern auf diesem Tag überschreibt den existierenden {pageTitle}.
+                </div>
+              )}
             </CardContent>
           </Card>
         )}
