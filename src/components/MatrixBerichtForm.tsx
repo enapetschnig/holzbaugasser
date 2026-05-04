@@ -137,7 +137,8 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
   // ----- Datum & Zeit -----
   const [datum, setDatum] = useState(() => localDateString());
   const [arbeitsbeginn, setArbeitsbeginn] = useState("06:30");
-  const [ankunftZeit, setAnkunftZeit] = useState("07:00");
+  // Werkstatt/LKW haben kein "Ankunft Baustelle" — wir verwenden arbeitsbeginn als
+  // Fallback für DB-Felder, die NOT NULL sind.
   const [pauseVon, setPauseVon] = useState("12:00");
   const [pauseBis, setPauseBis] = useState("12:30");
 
@@ -188,8 +189,28 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
     return m;
   }, [projects]);
 
-  // Tag-Total: Summe aller MA-Stunden, abzüglich Pause × MAs (Pause gilt einmal pro MA)
+  const pauseHours = pauseMinuten / 60;
+
+  // Brutto-Summe pro MA (sum of cells, before Pause-Abzug)
+  const grossSumPerMa = (row: MitarbeiterRow): number =>
+    projektZeilen.reduce((s, z) => s + parseStunden(row.stunden[z.localId] || ""), 0);
+
+  // Netto-Summe pro MA (mit Pause-Abzug, aber nicht negativ)
+  const netSumPerMa = (row: MitarbeiterRow): number =>
+    Math.max(0, grossSumPerMa(row) - pauseHours);
+
+  // Tag-Total: Summe aller MA-Netto-Stunden (Pause schon pro MA abgezogen)
   const tagTotalStunden = useMemo(() => {
+    let sum = 0;
+    for (const row of mitarbeiterRows) {
+      if (!row.mitarbeiterId) continue;
+      const gross = projektZeilen.reduce((s, z) => s + parseStunden(row.stunden[z.localId] || ""), 0);
+      sum += Math.max(0, gross - pauseHours);
+    }
+    return Math.round(sum * 100) / 100;
+  }, [mitarbeiterRows, projektZeilen, pauseHours]);
+
+  const tagGrossStunden = useMemo(() => {
     let sum = 0;
     for (const row of mitarbeiterRows) {
       if (!row.mitarbeiterId) continue;
@@ -204,14 +225,12 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
     let max = 0;
     for (const row of mitarbeiterRows) {
       if (!row.mitarbeiterId) continue;
-      let s = 0;
-      for (const z of projektZeilen) {
-        s += parseStunden(row.stunden[z.localId] || "");
-      }
-      if (s > max) max = s;
+      const gross = projektZeilen.reduce((s, z) => s + parseStunden(row.stunden[z.localId] || ""), 0);
+      const net = Math.max(0, gross - pauseHours);
+      if (net > max) max = net;
     }
     return max;
-  }, [mitarbeiterRows, projektZeilen]);
+  }, [mitarbeiterRows, projektZeilen, pauseHours]);
 
   const computedAbfahrt = useMemo(
     () => computeAbfahrt(arbeitsbeginn, maxMaStunden, pauseMinuten),
@@ -321,7 +340,6 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
       // Felder befüllen
       setDatum(b.datum);
       setArbeitsbeginn(b.arbeitsbeginn?.substring(0, 5) || "06:30");
-      setAnkunftZeit(b.ankunft_zeit?.substring(0, 5) || "07:00");
       setPauseVon(b.pause_von?.substring(0, 5) || "12:00");
       setPauseBis(b.pause_bis?.substring(0, 5) || "12:30");
       setAnmerkungen(b.anmerkungen || "");
@@ -543,7 +561,9 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
 
       // 2. INSERT leistungsberichte
       // ankunft_zeit + abfahrt_zeit sind in der DB NOT NULL → niemals null senden.
-      const safeAnkunft = ankunftZeit || "07:00";
+      // ankunft_zeit + abfahrt_zeit sind in der DB NOT NULL. Wir verwenden arbeitsbeginn
+      // als Fallback für ankunft_zeit (Werkstatt/LKW haben kein eigenes Ankunfts-Feld).
+      const safeAnkunft = arbeitsbeginn || "06:30";
       const safeAbfahrt = computedAbfahrt || safeAnkunft;
       const { data: berichtData, error: berichtErr } = await supabase
         .from("leistungsberichte" as any)
@@ -597,16 +617,17 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
         if (matching) localIdToTaetId[matching.localId] = t.id;
       });
 
-      // 4. INSERT leistungsbericht_mitarbeiter
+      // 4. INSERT leistungsbericht_mitarbeiter — summe_stunden = NETTO (mit Pause-Abzug)
       const maInserts = activeMaRows.map((r) => {
-        const summe = validZeilen.reduce(
+        const grossSum = validZeilen.reduce(
           (acc, z) => acc + parseStunden(r.stunden[z.localId] || ""),
           0
         );
+        const netSum = Math.max(0, grossSum - pauseHours);
         return {
           bericht_id: berichtId,
           mitarbeiter_id: r.mitarbeiterId,
-          summe_stunden: Math.round(summe * 100) / 100,
+          summe_stunden: Math.round(netSum * 100) / 100,
         };
       });
       const { error: maErr } = await supabase
@@ -614,7 +635,7 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
         .insert(maInserts as any);
       if (maErr) { await cleanupOrphan(); throw maErr; }
 
-      // 5. INSERT leistungsbericht_stunden — Matrix
+      // 5. INSERT leistungsbericht_stunden — Matrix-Zellen wie eingegeben (für PDF-Anzeige)
       const stundenInserts: any[] = [];
       for (const r of activeMaRows) {
         for (const z of validZeilen) {
@@ -636,21 +657,29 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
         if (sErr) { await cleanupOrphan(); throw sErr; }
       }
 
-      // 6. INSERT time_entries — pro (MA × Projekt-Zelle mit Stunden)
+      // 6. INSERT time_entries — pro (MA × Projekt-Zelle), Stunden = NETTO (Pause pro-rata abgezogen)
+      // Damit landen in der Stundenauswertung die echten Arbeitsstunden ohne Pause.
       const timeEntryInserts: any[] = [];
       for (const r of activeMaRows) {
+        const grossSum = validZeilen.reduce(
+          (acc, z) => acc + parseStunden(r.stunden[z.localId] || ""),
+          0
+        );
+        const netSum = Math.max(0, grossSum - pauseHours);
+        const ratio = grossSum > 0 ? netSum / grossSum : 0;
         for (const z of validZeilen) {
-          const stunden = parseStunden(r.stunden[z.localId] || "");
-          if (stunden > 0) {
+          const grossCell = parseStunden(r.stunden[z.localId] || "");
+          if (grossCell > 0) {
+            const netCell = Math.round(grossCell * ratio * 100) / 100;
             const projName = projektMap[z.projektId] || "(unbekannt)";
             timeEntryInserts.push({
               user_id: r.mitarbeiterId,
               project_id: z.projektId,
               datum,
-              stunden,
+              stunden: netCell,
               taetigkeit: `${taetigkeitPrefix}: ${projName}`,
-              start_time: arbeitsbeginn || ankunftZeit,
-              end_time: computedAbfahrt || ankunftZeit,
+              start_time: arbeitsbeginn || "06:30",
+              end_time: computedAbfahrt || arbeitsbeginn || "06:30",
               pause_minutes: pauseMinuten,
               entry_typ: berichtTyp,
             });
@@ -783,14 +812,10 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
             <CardTitle className="text-lg">Zeitangaben</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <div className="grid grid-cols-3 gap-4">
               <div className="space-y-2">
                 <Label>Arbeitsbeginn</Label>
                 <Input type="time" step={900} value={arbeitsbeginn} onChange={(e) => setArbeitsbeginn(e.target.value)} />
-              </div>
-              <div className="space-y-2">
-                <Label>Ankunft Baustelle</Label>
-                <Input type="time" step={900} value={ankunftZeit} onChange={(e) => setAnkunftZeit(e.target.value)} />
               </div>
               <div className="space-y-2">
                 <Label>Pause von</Label>
@@ -863,8 +888,37 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
                   </div>
                 </PopoverContent>
               </Popover>
-              <div className="text-xs text-muted-foreground">
-                Aktuell {mitarbeiterRows.filter((r) => r.mitarbeiterId).length} Mitarbeiter im Bericht.
+
+              {/* Aktuell ausgewählte Mitarbeiter als Chips */}
+              <div className="flex flex-wrap gap-2">
+                {mitarbeiterRows.filter((r) => r.mitarbeiterId).map((r) => {
+                  const ma = availableMitarbeiter.find((m) => m.id === r.mitarbeiterId);
+                  const name = ma?.name || (r.mitarbeiterId === currentUserId ? "Ich" : "?");
+                  const isSelf = r.mitarbeiterId === currentUserId;
+                  return (
+                    <Badge
+                      key={r.localId}
+                      variant={isSelf ? "default" : "secondary"}
+                      className="text-xs py-1 pl-2 pr-1"
+                    >
+                      {name}
+                      {isSelf && <span className="ml-1 opacity-70">(ich)</span>}
+                      {!isSelf && (
+                        <button
+                          type="button"
+                          className="ml-1 rounded-full hover:bg-background/40 p-0.5"
+                          onClick={() => removeMitarbeiter(r.localId)}
+                          aria-label={`${name} entfernen`}
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      )}
+                    </Badge>
+                  );
+                })}
+              </div>
+              <div className="text-xs text-muted-foreground border-t pt-2">
+                Buchung für {mitarbeiterRows.filter((r) => r.mitarbeiterId).length} Mitarbeiter.
               </div>
             </CardContent>
           </Card>
@@ -944,7 +998,8 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
                 <tbody>
                   {mitarbeiterRows.map((r) => {
                     const ma = availableMitarbeiter.find((m) => m.id === r.mitarbeiterId);
-                    const summe = projektZeilen.reduce((s, z) => s + parseStunden(r.stunden[z.localId] || ""), 0);
+                    const summeGross = projektZeilen.reduce((s, z) => s + parseStunden(r.stunden[z.localId] || ""), 0);
+                    const summe = Math.max(0, summeGross - pauseHours);
                     const isSelf = r.mitarbeiterId === currentUserId;
                     return (
                       <tr key={r.localId} className="border-b">
@@ -1089,11 +1144,15 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
               <span className="font-medium">{projektZeilen.filter((z) => z.projektId).length}</span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-sm text-muted-foreground">Pause</span>
-              <span className="font-medium">{pauseMinuten} Min</span>
+              <span className="text-sm text-muted-foreground">Stunden eingegeben (brutto)</span>
+              <span className="font-medium tabular-nums">{tagGrossStunden.toFixed(2).replace(".", ",")}h</span>
+            </div>
+            <div className="flex items-center justify-between text-orange-700 dark:text-orange-400">
+              <span className="text-sm">Pause-Abzug ({pauseMinuten} Min × {mitarbeiterRows.filter((r) => r.mitarbeiterId).length} MA)</span>
+              <span className="font-medium tabular-nums">−{(pauseHours * mitarbeiterRows.filter((r) => r.mitarbeiterId).length).toFixed(2).replace(".", ",")}h</span>
             </div>
             <div className="flex items-center justify-between pt-2 border-t">
-              <span className="text-base font-semibold">Stunden gesamt (alle MA)</span>
+              <span className="text-base font-semibold">Stunden gebucht (netto)</span>
               <span className="text-xl font-bold tabular-nums">{tagTotalStunden.toFixed(2).replace(".", ",")}h</span>
             </div>
             {computedAbfahrt && (
