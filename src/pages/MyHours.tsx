@@ -440,33 +440,36 @@ const MyHours = () => {
         </Card>
 
         {/* Zeitausgleich + Urlaubskonto in EINER Card */}
-        {vacationBalance && (
-          <Card className="mt-6">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Palmtree className="h-5 w-5" />
-                Mein Zeitausgleich & Urlaubskonto {new Date().getFullYear()}
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-6">
+        <Card className="mt-6">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Palmtree className="h-5 w-5" />
+              Mein Zeitausgleich & Urlaubskonto {new Date().getFullYear()}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-6">
 
               {/* Saldo-Übersicht: Urlaub + ZA als Boxen */}
               <div className="flex flex-wrap gap-4">
-                <div className="bg-muted/50 rounded-lg p-3 flex-1 min-w-[110px]">
-                  <p className="text-xs text-muted-foreground">Urlaub gesamt</p>
-                  <p className="text-2xl font-bold">{vacationBalance.total}</p>
-                  <p className="text-xs text-muted-foreground">Tage</p>
-                </div>
-                <div className="bg-muted/50 rounded-lg p-3 flex-1 min-w-[110px]">
-                  <p className="text-xs text-muted-foreground">Verbraucht</p>
-                  <p className="text-2xl font-bold">{vacationBalance.used}</p>
-                  <p className="text-xs text-muted-foreground">Tage</p>
-                </div>
-                <div className="bg-primary/10 rounded-lg p-3 flex-1 min-w-[110px]">
-                  <p className="text-xs text-muted-foreground">Urlaub verbleibend</p>
-                  <p className="text-2xl font-bold text-primary">{vacationBalance.total - vacationBalance.used}</p>
-                  <p className="text-xs text-muted-foreground">Tage</p>
-                </div>
+                {vacationBalance && (
+                  <>
+                    <div className="bg-muted/50 rounded-lg p-3 flex-1 min-w-[110px]">
+                      <p className="text-xs text-muted-foreground">Urlaub gesamt</p>
+                      <p className="text-2xl font-bold">{vacationBalance.total}</p>
+                      <p className="text-xs text-muted-foreground">Tage</p>
+                    </div>
+                    <div className="bg-muted/50 rounded-lg p-3 flex-1 min-w-[110px]">
+                      <p className="text-xs text-muted-foreground">Verbraucht</p>
+                      <p className="text-2xl font-bold">{vacationBalance.used}</p>
+                      <p className="text-xs text-muted-foreground">Tage</p>
+                    </div>
+                    <div className="bg-primary/10 rounded-lg p-3 flex-1 min-w-[110px]">
+                      <p className="text-xs text-muted-foreground">Urlaub verbleibend</p>
+                      <p className="text-2xl font-bold text-primary">{vacationBalance.total - vacationBalance.used}</p>
+                      <p className="text-xs text-muted-foreground">Tage</p>
+                    </div>
+                  </>
+                )}
                 <div className={`rounded-lg p-3 flex-1 min-w-[110px] ${zeitkontoBalance > 0 ? "bg-green-50 dark:bg-green-950/30" : zeitkontoBalance < 0 ? "bg-orange-50 dark:bg-orange-950/30" : "bg-muted/50"}`}>
                   <p className="text-xs text-muted-foreground">Zeitausgleich</p>
                   <p className={`text-2xl font-bold tabular-nums ${zeitkontoBalance > 0 ? "text-green-700 dark:text-green-300" : zeitkontoBalance < 0 ? "text-orange-700 dark:text-orange-300" : ""}`}>
@@ -578,7 +581,6 @@ const MyHours = () => {
               )}
             </CardContent>
           </Card>
-        )}
       </main>
 
       {/* Edit Dialog */}
