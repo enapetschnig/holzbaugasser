@@ -506,7 +506,7 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
 
     // Validierung
     if (projektZeilen.length === 0) {
-      toast({ variant: "destructive", title: "Fehler", description: "Mindestens eine Projekt-Zeile erforderlich." });
+      toast({ variant: "destructive", title: "Fehler", description: "Mindestens ein Projekt erforderlich." });
       return;
     }
     const validZeilen = projektZeilen.filter((z) => z.projektId);
@@ -967,7 +967,7 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
               type="button"
             >
               <Plus className="h-4 w-4 mr-2" />
-              Projekt-Zeile ({projektZeilen.length}/12)
+              Projekt ({projektZeilen.length}/12)
             </Button>
           </CardContent>
         </Card>
@@ -1140,7 +1140,7 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
               <span className="font-medium">{mitarbeiterRows.filter((r) => r.mitarbeiterId).length}</span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-sm text-muted-foreground">Projekt-Zeilen</span>
+              <span className="text-sm text-muted-foreground">Projekte</span>
               <span className="font-medium">{projektZeilen.filter((z) => z.projektId).length}</span>
             </div>
             <div className="flex items-center justify-between">
