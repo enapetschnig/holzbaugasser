@@ -169,6 +169,9 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
   // ----- Cross-Type-Warnung -----
   const [crossTypeEntries, setCrossTypeEntries] = useState<CrossTypeEntry[]>([]);
 
+  // ----- Eigener Bericht heute (gleicher Typ) — für "Bereits heute gebucht"-Card -----
+  const [ownTodayBericht, setOwnTodayBericht] = useState<{ id: string; total_stunden: number; ma_count: number } | null>(null);
+
   // ----- Saving -----
   const [saving, setSaving] = useState(false);
 
@@ -406,28 +409,41 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
     return () => { cancelled = true; };
   }, [editingBerichtId, currentUserId, berichtTyp, navigate, toast, isAdmin, isVorarbeiter, isProjektleiter]);
 
-  // ----------------------------- Auto-Edit-Mode bei existierendem Bericht -----------------------------
-  // Wenn der User für (currentUserId, datum, berichtTyp) schon einen Bericht hat,
-  // automatisch in Edit-Mode wechseln. Verhindert UNIQUE-Constraint-Violation.
+  // ----------------------------- Existierender Bericht (eigener, gleicher Typ, gleiches Datum) -----------------------------
+  // Wird als "Bereits heute gebucht"-Card angezeigt (mit Bearbeiten-Button).
+  // Datum bleibt editierbar, sodass User auf andere Tage wechseln kann.
   useEffect(() => {
-    if (!currentUserId || !datum || editingBerichtId) return;
+    if (!currentUserId || !datum) return;
+    if (editingBerichtId) return; // im Edit-Mode brauchen wir die Card nicht
     let cancelled = false;
     (async () => {
-      const { data } = await supabase
+      const { data: bericht } = await supabase
         .from("leistungsberichte" as any)
         .select("id")
         .eq("erstellt_von", currentUserId)
         .eq("datum", datum)
         .eq("bericht_typ", berichtTyp)
         .maybeSingle();
-      if (cancelled) return;
-      if (data) {
-        // Existiert → in Edit-Mode wechseln (URL-Param updaten)
-        setSearchParams({ edit: (data as any).id }, { replace: true });
+      if (cancelled || !bericht) {
+        if (!cancelled) setOwnTodayBericht(null);
+        return;
       }
+      const berichtId = (bericht as any).id as string;
+      // Stunden + MA-Count laden für die Card-Anzeige
+      const { data: maData } = await supabase
+        .from("leistungsbericht_mitarbeiter" as any)
+        .select("summe_stunden")
+        .eq("bericht_id", berichtId);
+      const total = ((maData || []) as any[]).reduce((s, m) => s + (parseFloat(m.summe_stunden) || 0), 0);
+      if (cancelled) return;
+      setOwnTodayBericht({
+        id: berichtId,
+        total_stunden: Math.round(total * 100) / 100,
+        ma_count: (maData || []).length,
+      });
     })();
     return () => { cancelled = true; };
-  }, [currentUserId, datum, berichtTyp, editingBerichtId, setSearchParams]);
+  }, [currentUserId, datum, berichtTyp, editingBerichtId]);
 
   // ----------------------------- Cross-Type-Warnung laden -----------------------------
   useEffect(() => {
@@ -538,13 +554,27 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
 
     setSaving(true);
     try {
-      // 1. Editing? Alte Daten löschen
-      if (editingBerichtId) {
-        await supabase.from("leistungsbericht_stunden" as any).delete().eq("bericht_id", editingBerichtId);
-        await supabase.from("leistungsbericht_mitarbeiter" as any).delete().eq("bericht_id", editingBerichtId);
-        await supabase.from("leistungsbericht_taetigkeiten" as any).delete().eq("bericht_id", editingBerichtId);
-        await supabase.from("leistungsbericht_geraete" as any).delete().eq("bericht_id", editingBerichtId);
-        await supabase.from("leistungsbericht_materialien" as any).delete().eq("bericht_id", editingBerichtId);
+      // Wenn nicht im URL-Edit-Mode, aber ein bestehender Bericht für (user, datum, typ) existiert,
+      // diesen wie Edit-Mode behandeln (überschreiben). Vermeidet UNIQUE-Constraint-Violation.
+      let cleanupBerichtId: string | null = editingBerichtId;
+      if (!cleanupBerichtId) {
+        const { data: existing } = await supabase
+          .from("leistungsberichte" as any)
+          .select("id")
+          .eq("erstellt_von", currentUserId)
+          .eq("datum", datum)
+          .eq("bericht_typ", berichtTyp)
+          .maybeSingle();
+        if (existing) cleanupBerichtId = (existing as any).id as string;
+      }
+
+      // 1. Editing oder Auto-Overwrite? Alte Daten löschen
+      if (cleanupBerichtId) {
+        await supabase.from("leistungsbericht_stunden" as any).delete().eq("bericht_id", cleanupBerichtId);
+        await supabase.from("leistungsbericht_mitarbeiter" as any).delete().eq("bericht_id", cleanupBerichtId);
+        await supabase.from("leistungsbericht_taetigkeiten" as any).delete().eq("bericht_id", cleanupBerichtId);
+        await supabase.from("leistungsbericht_geraete" as any).delete().eq("bericht_id", cleanupBerichtId);
+        await supabase.from("leistungsbericht_materialien" as any).delete().eq("bericht_id", cleanupBerichtId);
 
         // time_entries: alle alten MAs (originalMaIds) ∪ aktuelle MAs für den Tag mit unserem Typ
         const allAffectedMaIds = Array.from(new Set([...originalMaIds, ...activeMaRows.map((r) => r.mitarbeiterId)]));
@@ -556,7 +586,7 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
             .eq("entry_typ", berichtTyp)
             .in("user_id", allAffectedMaIds);
         }
-        await supabase.from("leistungsberichte" as any).delete().eq("id", editingBerichtId);
+        await supabase.from("leistungsberichte" as any).delete().eq("id", cleanupBerichtId);
       }
 
       // 2. INSERT leistungsberichte
@@ -764,12 +794,44 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
               type="date"
               value={datum}
               onChange={(e) => setDatum(e.target.value)}
-              disabled={!!editingBerichtId}
               className="max-w-[220px]"
             />
             <div className="text-xs text-muted-foreground mt-1">{datumLabel}</div>
           </CardContent>
         </Card>
+
+        {/* Eigener bestehender Bericht heute (gleicher Typ) */}
+        {!editingBerichtId && ownTodayBericht && (
+          <Card className="border-blue-200 bg-blue-50/30 dark:bg-blue-950/10 dark:border-blue-800">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base flex items-center gap-2">
+                <FileText className="h-4 w-4 text-blue-600" />
+                Bereits heute gebucht
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <div className="flex items-center justify-between gap-2 p-2 rounded border bg-card">
+                <div className="flex-1 min-w-0">
+                  <div className="font-medium text-sm">{pageTitle}</div>
+                  <div className="text-xs text-muted-foreground">
+                    {ownTodayBericht.ma_count} {ownTodayBericht.ma_count === 1 ? "Mitarbeiter" : "Mitarbeiter"} · {ownTodayBericht.total_stunden.toFixed(2).replace(".", ",")}h netto
+                  </div>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setSearchParams({ edit: ownTodayBericht.id }, { replace: true })}
+                >
+                  <FileText className="h-3.5 w-3.5 mr-1" />
+                  Bearbeiten
+                </Button>
+              </div>
+              <div className="text-xs text-muted-foreground pt-1 border-t">
+                Speichern auf diesem Tag überschreibt den existierenden Bericht.
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Cross-Type-Warnung */}
         {crossTypeEntries.length > 0 && (
