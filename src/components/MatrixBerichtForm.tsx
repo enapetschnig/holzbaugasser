@@ -756,7 +756,7 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
                 const labelByTyp: Record<string, string> = {
                   leistungsbericht: "Leistungsbericht",
                   projektleiter: "Projektleiter",
-                  werk: "Leistungsbericht Werk",
+                  werk: "Leistungsbericht Werkstatt",
                   lkw: "Leistungsbericht LKW",
                   vorfertigung: "Werkstätte/LKW (alt)",
                 };

@@ -169,12 +169,12 @@ export async function generateLeistungsberichtPDF(
   const typ = data.typ ?? "leistungsbericht";
   const titleByTyp: Record<string, string> = {
     leistungsbericht: "Leistungsbericht:",
-    werk: "Leistungsbericht Werk:",
+    werk: "Leistungsbericht Werkstatt:",
     lkw: "Leistungsbericht LKW:",
   };
   const subTitleByTyp: Record<string, string> = {
     leistungsbericht: "Der Leistungsbericht ist täglich abzugeben!",
-    werk: "Der Leistungsbericht Werk ist täglich abzugeben!",
+    werk: "Der Leistungsbericht Werkstatt ist täglich abzugeben!",
     lkw: "Der Leistungsbericht LKW ist täglich abzugeben!",
   };
 

@@ -690,27 +690,15 @@ export default function HoursReport() {
     if (isAdmin && Object.keys(profileMap).length > 0) fetchBerichte();
   }, [isAdmin, fetchBerichte, profileMap]);
 
-  // Filter berichte (Tab "Leistungsberichte" — nur klassische LBs)
+  // Filter berichte (Tab "Leistungsberichte" — alle Typen: leistungsbericht, werk, lkw)
   const filteredBerichte = useMemo(() => {
     return berichte.filter((b) => {
-      if (b.bericht_typ !== "leistungsbericht") return false;
       if (b.archived !== showArchived) return false;
+      // Werk/LKW haben kein Header-Projekt → bei aktivem Projekt-Filter raus
       if (berichteProjekt !== "all" && b.projekt_name !== berichteProjects.find(p => p.id === berichteProjekt)?.name) return false;
       return true;
     });
   }, [berichte, berichteProjekt, berichteProjects, showArchived]);
-
-  // Werk-Berichte (Tab "Werk")
-  const filteredWerkBerichte = useMemo(
-    () => berichte.filter((b) => b.bericht_typ === "werk" && b.archived === showArchived),
-    [berichte, showArchived]
-  );
-
-  // LKW-Berichte (Tab "LKW")
-  const filteredLkwBerichte = useMemo(
-    () => berichte.filter((b) => b.bericht_typ === "lkw" && b.archived === showArchived),
-    [berichte, showArchived]
-  );
 
   // -------------------------------------------------------------------------
   // Cell editing
@@ -1307,29 +1295,17 @@ export default function HoursReport() {
 
       <div className="container mx-auto p-4 space-y-6">
         <Tabs defaultValue={isAdmin ? "arbeitszeiterfassung" : "leistungsberichte"} className="w-full">
-          <TabsList className={`grid w-full ${isAdmin ? "grid-cols-3 lg:grid-cols-6" : "grid-cols-2"}`}>
+          <TabsList className={`grid w-full ${isAdmin ? "grid-cols-4" : "grid-cols-2"}`}>
             {isAdmin && (
             <TabsTrigger value="arbeitszeiterfassung" className="text-xs sm:text-sm">
               <FileSpreadsheet className="w-4 h-4 mr-1 sm:mr-2 shrink-0" />
-              <span className="truncate">Arbeitszeit</span>
+              <span className="truncate">Arbeitszeiterfassung</span>
             </TabsTrigger>
             )}
             <TabsTrigger value="leistungsberichte" className="text-xs sm:text-sm">
               <ClipboardList className="w-4 h-4 mr-1 sm:mr-2 shrink-0" />
-              <span className="truncate">Leistungsber.</span>
+              <span className="truncate">Leistungsberichte</span>
             </TabsTrigger>
-            {isAdmin && (
-            <TabsTrigger value="werk" className="text-xs sm:text-sm">
-              <Clock className="w-4 h-4 mr-1 sm:mr-2 shrink-0" />
-              <span className="truncate">Werk</span>
-            </TabsTrigger>
-            )}
-            {isAdmin && (
-            <TabsTrigger value="lkw" className="text-xs sm:text-sm">
-              <Clock className="w-4 h-4 mr-1 sm:mr-2 shrink-0" />
-              <span className="truncate">LKW</span>
-            </TabsTrigger>
-            )}
             {isAdmin && (
             <TabsTrigger value="projektleiter" className="text-xs sm:text-sm">
               <Clock className="w-4 h-4 mr-1 sm:mr-2 shrink-0" />
@@ -1338,7 +1314,7 @@ export default function HoursReport() {
             )}
             <TabsTrigger value="projektzeiterfassung" className="text-xs sm:text-sm">
               <Building2 className="w-4 h-4 mr-1 sm:mr-2 shrink-0" />
-              <span className="truncate">Projektzeit</span>
+              <span className="truncate">Projektzeiterfassung</span>
             </TabsTrigger>
           </TabsList>
 
@@ -1948,7 +1924,10 @@ export default function HoursReport() {
                             Datum
                           </th>
                           <th className="border-b px-3 py-2 text-left font-semibold">
-                            Projekt
+                            Typ
+                          </th>
+                          <th className="border-b px-3 py-2 text-left font-semibold">
+                            Projekt / Inhalt
                           </th>
                           <th className="border-b px-3 py-2 text-left font-semibold">
                             Objekt
@@ -1980,8 +1959,19 @@ export default function HoursReport() {
                                 locale: de,
                               })}
                             </td>
+                            <td className="border-b px-3 py-2 whitespace-nowrap">
+                              {b.bericht_typ === "werk" ? (
+                                <Badge variant="outline" className="border-amber-300 text-amber-700 bg-amber-50">Werkstatt</Badge>
+                              ) : b.bericht_typ === "lkw" ? (
+                                <Badge variant="outline" className="border-orange-300 text-orange-700 bg-orange-50">LKW</Badge>
+                              ) : (
+                                <Badge variant="outline" className="border-blue-300 text-blue-700 bg-blue-50">Standard</Badge>
+                              )}
+                            </td>
                             <td className="border-b px-3 py-2">
-                              {b.projekt_name}
+                              {b.bericht_typ === "werk" || b.bericht_typ === "lkw"
+                                ? <span className="text-muted-foreground italic">Mehrere Projekte (Matrix)</span>
+                                : b.projekt_name}
                             </td>
                             <td className="border-b px-3 py-2 text-muted-foreground">
                               {b.objekt || "-"}
@@ -2034,7 +2024,7 @@ export default function HoursReport() {
                       <tfoot>
                         <tr className="bg-muted/30">
                           <td
-                            colSpan={4}
+                            colSpan={5}
                             className="px-3 py-2 font-bold text-right"
                           >
                             Gesamt:
@@ -2059,162 +2049,6 @@ export default function HoursReport() {
               </CardContent>
             </Card>
           </TabsContent>
-
-          {/* ============================================================= */}
-          {/* TAB: Werk-Berichte                                             */}
-          {/* ============================================================= */}
-          {isAdmin && (
-            <TabsContent value="werk">
-              <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-lg">Leistungsberichte Werk</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {berichteLoading ? (
-                    <div className="flex items-center justify-center py-12">
-                      <Loader2 className="w-6 h-6 animate-spin mr-2" />
-                      <span className="text-muted-foreground">Lade…</span>
-                    </div>
-                  ) : filteredWerkBerichte.length === 0 ? (
-                    <div className="text-center py-12 text-muted-foreground">
-                      <ClipboardList className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                      <p>Keine Leistungsberichte Werk vorhanden</p>
-                    </div>
-                  ) : (
-                    <div className="overflow-x-auto border rounded-lg">
-                      <table className="w-full text-sm">
-                        <thead>
-                          <tr className="bg-muted/60">
-                            <th className="border-b px-3 py-2 text-left font-semibold">Datum</th>
-                            <th className="border-b px-3 py-2 text-left font-semibold">Ersteller</th>
-                            <th className="border-b px-3 py-2 text-center font-semibold">Mitarbeiter</th>
-                            <th className="border-b px-3 py-2 text-right font-semibold">Stunden</th>
-                            <th className="border-b px-3 py-2 text-center font-semibold w-10"></th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {filteredWerkBerichte.map((b) => (
-                            <tr key={b.id} className="hover:bg-muted/30">
-                              <td className="border-b px-3 py-2 whitespace-nowrap">
-                                {format(parseISO(b.datum), "dd.MM.yyyy", { locale: de })}
-                              </td>
-                              <td className="border-b px-3 py-2">{b.ersteller_name}</td>
-                              <td className="border-b px-3 py-2 text-center">
-                                <Badge variant="secondary">{b.mitarbeiter_count}</Badge>
-                              </td>
-                              <td className="border-b px-3 py-2 text-right font-medium">
-                                {b.total_stunden.toFixed(1)} h
-                              </td>
-                              <td className="border-b px-3 py-2 text-center">
-                                <div className="flex gap-1 justify-center flex-wrap">
-                                  <Button variant="outline" size="sm" onClick={() => handleViewBerichtPDF(b.id, true)}>
-                                    <Download className="w-3.5 h-3.5 mr-1" /> PDF
-                                  </Button>
-                                  <Button variant="outline" size="sm" onClick={() => navigate(`/werk-bericht?edit=${b.id}`)}>
-                                    <Pencil className="w-3.5 h-3.5 mr-1" /> Bearbeiten
-                                  </Button>
-                                </div>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                        <tfoot>
-                          <tr className="bg-muted/30">
-                            <td colSpan={2} className="px-3 py-2 font-bold text-right">Gesamt:</td>
-                            <td className="px-3 py-2 text-center font-bold">
-                              {filteredWerkBerichte.reduce((s, b) => s + b.mitarbeiter_count, 0)}
-                            </td>
-                            <td className="px-3 py-2 text-right font-bold">
-                              {filteredWerkBerichte.reduce((s, b) => s + b.total_stunden, 0).toFixed(1)} h
-                            </td>
-                            <td></td>
-                          </tr>
-                        </tfoot>
-                      </table>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            </TabsContent>
-          )}
-
-          {/* ============================================================= */}
-          {/* TAB: LKW-Berichte                                              */}
-          {/* ============================================================= */}
-          {isAdmin && (
-            <TabsContent value="lkw">
-              <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-lg">Leistungsberichte LKW</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {berichteLoading ? (
-                    <div className="flex items-center justify-center py-12">
-                      <Loader2 className="w-6 h-6 animate-spin mr-2" />
-                      <span className="text-muted-foreground">Lade…</span>
-                    </div>
-                  ) : filteredLkwBerichte.length === 0 ? (
-                    <div className="text-center py-12 text-muted-foreground">
-                      <ClipboardList className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                      <p>Keine Leistungsberichte LKW vorhanden</p>
-                    </div>
-                  ) : (
-                    <div className="overflow-x-auto border rounded-lg">
-                      <table className="w-full text-sm">
-                        <thead>
-                          <tr className="bg-muted/60">
-                            <th className="border-b px-3 py-2 text-left font-semibold">Datum</th>
-                            <th className="border-b px-3 py-2 text-left font-semibold">Ersteller</th>
-                            <th className="border-b px-3 py-2 text-center font-semibold">Mitarbeiter</th>
-                            <th className="border-b px-3 py-2 text-right font-semibold">Stunden</th>
-                            <th className="border-b px-3 py-2 text-center font-semibold w-10"></th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {filteredLkwBerichte.map((b) => (
-                            <tr key={b.id} className="hover:bg-muted/30">
-                              <td className="border-b px-3 py-2 whitespace-nowrap">
-                                {format(parseISO(b.datum), "dd.MM.yyyy", { locale: de })}
-                              </td>
-                              <td className="border-b px-3 py-2">{b.ersteller_name}</td>
-                              <td className="border-b px-3 py-2 text-center">
-                                <Badge variant="secondary">{b.mitarbeiter_count}</Badge>
-                              </td>
-                              <td className="border-b px-3 py-2 text-right font-medium">
-                                {b.total_stunden.toFixed(1)} h
-                              </td>
-                              <td className="border-b px-3 py-2 text-center">
-                                <div className="flex gap-1 justify-center flex-wrap">
-                                  <Button variant="outline" size="sm" onClick={() => handleViewBerichtPDF(b.id, true)}>
-                                    <Download className="w-3.5 h-3.5 mr-1" /> PDF
-                                  </Button>
-                                  <Button variant="outline" size="sm" onClick={() => navigate(`/lkw-bericht?edit=${b.id}`)}>
-                                    <Pencil className="w-3.5 h-3.5 mr-1" /> Bearbeiten
-                                  </Button>
-                                </div>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                        <tfoot>
-                          <tr className="bg-muted/30">
-                            <td colSpan={2} className="px-3 py-2 font-bold text-right">Gesamt:</td>
-                            <td className="px-3 py-2 text-center font-bold">
-                              {filteredLkwBerichte.reduce((s, b) => s + b.mitarbeiter_count, 0)}
-                            </td>
-                            <td className="px-3 py-2 text-right font-bold">
-                              {filteredLkwBerichte.reduce((s, b) => s + b.total_stunden, 0).toFixed(1)} h
-                            </td>
-                            <td></td>
-                          </tr>
-                        </tfoot>
-                      </table>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            </TabsContent>
-          )}
 
           {/* ============================================================= */}
           {/* TAB: Projektleiter-Auswertung                                  */}

@@ -476,7 +476,7 @@ export default function Index() {
                 <div className="h-12 w-12 rounded-lg bg-amber-500/10 flex items-center justify-center">
                   <Clock className="h-6 w-6 text-amber-600" />
                 </div>
-                <CardTitle className="text-lg sm:text-xl">Leistungsbericht Werk</CardTitle>
+                <CardTitle className="text-lg sm:text-xl">Leistungsbericht Werkstatt</CardTitle>
                 <CardDescription className="text-sm">
                   Mehrere Projekte pro Tag, Mitarbeiter-Matrix wie der Leistungsbericht
                 </CardDescription>
