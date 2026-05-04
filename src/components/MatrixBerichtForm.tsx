@@ -31,6 +31,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Switch } from "@/components/ui/switch";
 import {
   Accordion,
   AccordionContent,
@@ -155,6 +156,7 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
   const [availableMitarbeiter, setAvailableMitarbeiter] = useState<MitarbeiterOption[]>([]);
   const [maPickerOpen, setMaPickerOpen] = useState(false);
   const [maSearch, setMaSearch] = useState("");
+  const [gleicheStundenFuerAlle, setGleicheStundenFuerAlle] = useState(false);
 
   // ----- Geräte / Material / Anmerkungen -----
   const [geraete, setGeraete] = useState<GeraetItem[]>([]);
@@ -493,16 +495,28 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
   };
 
   const updateMaStunden = (rowLocalId: string, zeileLocalId: string, value: string) => {
-    setMitarbeiterRows((prev) => prev.map((r) =>
-      r.localId === rowLocalId
-        ? { ...r, stunden: { ...r.stunden, [zeileLocalId]: value } }
-        : r
-    ));
+    if (gleicheStundenFuerAlle) {
+      // Broadcast: alle MAs für diese Projekt-Zeile auf den Wert setzen
+      setMitarbeiterRows((prev) => prev.map((r) => ({
+        ...r,
+        stunden: { ...r.stunden, [zeileLocalId]: value },
+      })));
+    } else {
+      setMitarbeiterRows((prev) => prev.map((r) =>
+        r.localId === rowLocalId
+          ? { ...r, stunden: { ...r.stunden, [zeileLocalId]: value } }
+          : r
+      ));
+    }
   };
 
   const addMitarbeiter = (id: string) => {
     if (mitarbeiterRows.some((r) => r.mitarbeiterId === id)) return;
-    setMitarbeiterRows((prev) => [...prev, { localId: randomId(), mitarbeiterId: id, stunden: {} }]);
+    // Wenn Toggle ON: Stunden des ersten existierenden MAs übernehmen
+    const initialStunden: Record<string, string> = gleicheStundenFuerAlle && mitarbeiterRows.length > 0
+      ? { ...mitarbeiterRows[0].stunden }
+      : {};
+    setMitarbeiterRows((prev) => [...prev, { localId: randomId(), mitarbeiterId: id, stunden: initialStunden }]);
   };
 
   const removeMitarbeiter = (rowLocalId: string) => {
@@ -1039,12 +1053,80 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
           <CardHeader className="pb-3">
             <CardTitle className="text-lg">Mitarbeiter & Stunden</CardTitle>
           </CardHeader>
-          <CardContent>
-            <div className="overflow-x-auto">
+          <CardContent className="space-y-3">
+            {/* "Stunden für alle übernehmen"-Toggle */}
+            <div className="flex items-center gap-2 pb-2 border-b">
+              <Switch
+                id="gleiche-stunden"
+                checked={gleicheStundenFuerAlle}
+                onCheckedChange={setGleicheStundenFuerAlle}
+              />
+              <Label htmlFor="gleiche-stunden" className="text-sm cursor-pointer">
+                Stunden für alle Mitarbeiter übernehmen
+              </Label>
+            </div>
+
+            {/* MOBILE — eine Card pro Mitarbeiter */}
+            <div className="sm:hidden space-y-3">
+              {mitarbeiterRows.map((r) => {
+                const ma = availableMitarbeiter.find((m) => m.id === r.mitarbeiterId);
+                const summeGross = projektZeilen.reduce((s, z) => s + parseStunden(r.stunden[z.localId] || ""), 0);
+                const summe = Math.max(0, summeGross - pauseHours);
+                const isSelf = r.mitarbeiterId === currentUserId;
+                const name = ma?.name || (isSelf ? "Ich" : "?");
+                return (
+                  <div key={r.localId} className="border-2 rounded-xl p-4 bg-card space-y-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-semibold truncate">{name}{isSelf && <span className="ml-1 text-xs text-muted-foreground font-normal">(ich)</span>}</span>
+                      {!isSelf && canBookForOthers && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => removeMitarbeiter(r.localId)}
+                          className="text-destructive hover:text-destructive h-8 w-8 shrink-0"
+                          type="button"
+                          aria-label={`${name} entfernen`}
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      )}
+                    </div>
+                    <div className="space-y-2">
+                      {projektZeilen.map((z, idx) => {
+                        const projName = z.projektId ? (projektMap[z.projektId] || "?") : `Zeile ${idx + 1}`;
+                        return (
+                          <div key={z.localId} className="flex items-center gap-2">
+                            <span className="w-5 text-right text-xs text-muted-foreground shrink-0">{idx + 1}.</span>
+                            <span className="flex-1 truncate text-sm">{projName}</span>
+                            <Input
+                              type="text"
+                              inputMode="decimal"
+                              value={r.stunden[z.localId] || ""}
+                              onChange={(e) => updateMaStunden(r.localId, z.localId, e.target.value)}
+                              placeholder="0"
+                              className="w-20 text-center h-9 shrink-0"
+                            />
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div className="flex items-center justify-between pt-2 border-t">
+                      <span className="text-sm">Summe (netto)</span>
+                      <Badge variant={summe > 0 ? "default" : "outline"} className="tabular-nums">
+                        Σ {summe.toFixed(2).replace(".", ",")} h
+                      </Badge>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* DESKTOP — Tabelle mit sticky Name-Spalte */}
+            <div className="hidden sm:block overflow-x-auto">
               <table className="w-full text-sm border-collapse">
                 <thead>
                   <tr className="border-b">
-                    <th className="text-left p-2 font-semibold">Mitarbeiter</th>
+                    <th className="text-left p-2 font-semibold sticky left-0 z-10 bg-card min-w-[140px]">Mitarbeiter</th>
                     {projektZeilen.map((z, idx) => {
                       const projName = z.projektId ? (projektMap[z.projektId] || "?") : `Zeile ${idx + 1}`;
                       return (
@@ -1065,7 +1147,7 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
                     const isSelf = r.mitarbeiterId === currentUserId;
                     return (
                       <tr key={r.localId} className="border-b">
-                        <td className="p-2 truncate max-w-[180px]">{ma?.name || (isSelf ? "Ich" : "?")}</td>
+                        <td className="p-2 truncate max-w-[180px] sticky left-0 z-10 bg-card">{ma?.name || (isSelf ? "Ich" : "?")}</td>
                         {projektZeilen.map((z) => (
                           <td key={z.localId} className="p-1 text-center">
                             <Input
