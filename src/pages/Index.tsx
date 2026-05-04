@@ -478,7 +478,7 @@ export default function Index() {
                 </div>
                 <CardTitle className="text-lg sm:text-xl">Leistungsbericht Werkstatt</CardTitle>
                 <CardDescription className="text-sm">
-                  Mehrere Projekte pro Tag, Mitarbeiter-Matrix wie der Leistungsbericht
+                  Mehrere Projekte pro Tag
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -499,7 +499,7 @@ export default function Index() {
                 </div>
                 <CardTitle className="text-lg sm:text-xl">Leistungsbericht LKW</CardTitle>
                 <CardDescription className="text-sm">
-                  Stunden-Matrix für LKW-Fahrer mit mehreren Baustellen
+                  LKW-Fahrer mit mehreren Baustellen
                 </CardDescription>
               </CardHeader>
               <CardContent>
