@@ -388,6 +388,29 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
     return () => { cancelled = true; };
   }, [editingBerichtId, currentUserId, berichtTyp, navigate, toast, isAdmin, isVorarbeiter, isProjektleiter]);
 
+  // ----------------------------- Auto-Edit-Mode bei existierendem Bericht -----------------------------
+  // Wenn der User für (currentUserId, datum, berichtTyp) schon einen Bericht hat,
+  // automatisch in Edit-Mode wechseln. Verhindert UNIQUE-Constraint-Violation.
+  useEffect(() => {
+    if (!currentUserId || !datum || editingBerichtId) return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from("leistungsberichte" as any)
+        .select("id")
+        .eq("erstellt_von", currentUserId)
+        .eq("datum", datum)
+        .eq("bericht_typ", berichtTyp)
+        .maybeSingle();
+      if (cancelled) return;
+      if (data) {
+        // Existiert → in Edit-Mode wechseln (URL-Param updaten)
+        setSearchParams({ edit: (data as any).id }, { replace: true });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [currentUserId, datum, berichtTyp, editingBerichtId, setSearchParams]);
+
   // ----------------------------- Cross-Type-Warnung laden -----------------------------
   useEffect(() => {
     if (!currentUserId || !datum) return;
@@ -519,6 +542,9 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
       }
 
       // 2. INSERT leistungsberichte
+      // ankunft_zeit + abfahrt_zeit sind in der DB NOT NULL → niemals null senden.
+      const safeAnkunft = ankunftZeit || "07:00";
+      const safeAbfahrt = computedAbfahrt || safeAnkunft;
       const { data: berichtData, error: berichtErr } = await supabase
         .from("leistungsberichte" as any)
         .insert({
@@ -527,8 +553,8 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
           bericht_typ: berichtTyp,
           datum,
           arbeitsbeginn: arbeitsbeginn || null,
-          ankunft_zeit: ankunftZeit || null,
-          abfahrt_zeit: computedAbfahrt || null,
+          ankunft_zeit: safeAnkunft,
+          abfahrt_zeit: safeAbfahrt,
           pause_von: pauseVon || null,
           pause_bis: pauseBis || null,
           pause_minuten: pauseMinuten,
@@ -539,6 +565,16 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
         .single();
       if (berichtErr) throw berichtErr;
       const berichtId = (berichtData as any).id as string;
+
+      // Hilfs-Funktion: bei Fehlern in Folge-Steps Orphan-Bericht aufräumen,
+      // damit der nächste Save-Versuch nicht am UNIQUE-Constraint scheitert.
+      const cleanupOrphan = async () => {
+        try {
+          await supabase.from("leistungsberichte" as any).delete().eq("id", berichtId);
+        } catch {
+          // best-effort
+        }
+      };
 
       // 3. INSERT leistungsbericht_taetigkeiten — eine Zeile pro projektZeile
       const taetInserts = validZeilen.map((z, idx) => ({
@@ -551,7 +587,7 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
         .from("leistungsbericht_taetigkeiten" as any)
         .insert(taetInserts as any)
         .select("id, position");
-      if (taetErr) throw taetErr;
+      if (taetErr) { await cleanupOrphan(); throw taetErr; }
 
       // Map: position → taetigkeit_id (DB)
       // Map: zeile.localId → taetigkeit_id (DB) — über Reihenfolge der validZeilen
@@ -576,7 +612,7 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
       const { error: maErr } = await supabase
         .from("leistungsbericht_mitarbeiter" as any)
         .insert(maInserts as any);
-      if (maErr) throw maErr;
+      if (maErr) { await cleanupOrphan(); throw maErr; }
 
       // 5. INSERT leistungsbericht_stunden — Matrix
       const stundenInserts: any[] = [];
@@ -597,7 +633,7 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
         const { error: sErr } = await supabase
           .from("leistungsbericht_stunden" as any)
           .insert(stundenInserts);
-        if (sErr) throw sErr;
+        if (sErr) { await cleanupOrphan(); throw sErr; }
       }
 
       // 6. INSERT time_entries — pro (MA × Projekt-Zelle mit Stunden)
@@ -625,7 +661,7 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
         const { error: teErr } = await supabase
           .from("time_entries")
           .insert(timeEntryInserts);
-        if (teErr) throw teErr;
+        if (teErr) { await cleanupOrphan(); throw teErr; }
       }
 
       // 7. Geräte
@@ -720,8 +756,8 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
                 const labelByTyp: Record<string, string> = {
                   leistungsbericht: "Leistungsbericht",
                   projektleiter: "Projektleiter",
-                  werk: "Werk-Bericht",
-                  lkw: "LKW-Bericht",
+                  werk: "Leistungsbericht Werk",
+                  lkw: "Leistungsbericht LKW",
                   vorfertigung: "Werkstätte/LKW (alt)",
                 };
                 const label = labelByTyp[e.type] || e.type;

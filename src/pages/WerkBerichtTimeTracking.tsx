@@ -4,7 +4,7 @@ export default function WerkBerichtTimeTracking() {
   return (
     <MatrixBerichtForm
       berichtTyp="werk"
-      pageTitle="Werk-Bericht"
+      pageTitle="Leistungsbericht Werk"
       taetigkeitPrefix="Werk"
     />
   );

@@ -1787,8 +1787,8 @@ const TimeTracking = () => {
                 const labelMap: Record<string, string> = {
                   vorfertigung: "Werkstätte/LKW (alt)",
                   projektleiter: "Projektleiter",
-                  werk: "Werk-Bericht",
-                  lkw: "LKW-Bericht",
+                  werk: "Leistungsbericht Werk",
+                  lkw: "Leistungsbericht LKW",
                 };
                 const label = labelMap[e.type] || e.type;
                 const projOrWerk = e.projectName || (e.type === "vorfertigung" || e.type === "werk" ? "Werk" : e.type === "lkw" ? "LKW" : "Büro");

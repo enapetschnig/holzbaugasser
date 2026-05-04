@@ -4,7 +4,7 @@ export default function LkwBerichtTimeTracking() {
   return (
     <MatrixBerichtForm
       berichtTyp="lkw"
-      pageTitle="LKW-Bericht"
+      pageTitle="Leistungsbericht LKW"
       taetigkeitPrefix="LKW"
     />
   );
