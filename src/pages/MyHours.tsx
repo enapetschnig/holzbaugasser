@@ -409,9 +409,13 @@ const MyHours = () => {
                           <Button
                             size="sm"
                             variant="ghost"
-                            onClick={() => navigate(`/time-tracking?date=${entry.datum}`)}
+                            onClick={() => {
+                              setEditingEntry(entry);
+                              setShowEditDialog(true);
+                            }}
                             disabled={!isEditable(entry.datum)}
                             className="h-8"
+                            title="Eintrag bearbeiten"
                           >
                             <Pencil className="h-4 w-4" />
                           </Button>
@@ -435,34 +439,44 @@ const MyHours = () => {
           </CardContent>
         </Card>
 
-        {/* Urlaubskonto */}
+        {/* Zeitausgleich + Urlaubskonto in EINER Card */}
         {vacationBalance && (
           <Card className="mt-6">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Palmtree className="h-5 w-5" />
-                Urlaubskonto {new Date().getFullYear()}
+                Mein Zeitausgleich & Urlaubskonto {new Date().getFullYear()}
               </CardTitle>
             </CardHeader>
-            <CardContent>
-              <div className="flex flex-wrap gap-4 mb-4">
-                <div className="bg-muted/50 rounded-lg p-3 flex-1 min-w-[120px]">
-                  <p className="text-sm text-muted-foreground">Gesamt</p>
+            <CardContent className="space-y-6">
+
+              {/* Saldo-Übersicht: Urlaub + ZA als Boxen */}
+              <div className="flex flex-wrap gap-4">
+                <div className="bg-muted/50 rounded-lg p-3 flex-1 min-w-[110px]">
+                  <p className="text-xs text-muted-foreground">Urlaub gesamt</p>
                   <p className="text-2xl font-bold">{vacationBalance.total}</p>
                   <p className="text-xs text-muted-foreground">Tage</p>
                 </div>
-                <div className="bg-muted/50 rounded-lg p-3 flex-1 min-w-[120px]">
-                  <p className="text-sm text-muted-foreground">Verbraucht</p>
+                <div className="bg-muted/50 rounded-lg p-3 flex-1 min-w-[110px]">
+                  <p className="text-xs text-muted-foreground">Verbraucht</p>
                   <p className="text-2xl font-bold">{vacationBalance.used}</p>
                   <p className="text-xs text-muted-foreground">Tage</p>
                 </div>
-                <div className="bg-primary/10 rounded-lg p-3 flex-1 min-w-[120px]">
-                  <p className="text-sm text-muted-foreground">Verbleibend</p>
+                <div className="bg-primary/10 rounded-lg p-3 flex-1 min-w-[110px]">
+                  <p className="text-xs text-muted-foreground">Urlaub verbleibend</p>
                   <p className="text-2xl font-bold text-primary">{vacationBalance.total - vacationBalance.used}</p>
                   <p className="text-xs text-muted-foreground">Tage</p>
                 </div>
+                <div className={`rounded-lg p-3 flex-1 min-w-[110px] ${zeitkontoBalance > 0 ? "bg-green-50 dark:bg-green-950/30" : zeitkontoBalance < 0 ? "bg-orange-50 dark:bg-orange-950/30" : "bg-muted/50"}`}>
+                  <p className="text-xs text-muted-foreground">Zeitausgleich</p>
+                  <p className={`text-2xl font-bold tabular-nums ${zeitkontoBalance > 0 ? "text-green-700 dark:text-green-300" : zeitkontoBalance < 0 ? "text-orange-700 dark:text-orange-300" : ""}`}>
+                    {zeitkontoBalance > 0 ? "+" : ""}{zeitkontoBalance.toFixed(2).replace(".", ",")}
+                  </p>
+                  <p className="text-xs text-muted-foreground">Stunden</p>
+                </div>
               </div>
 
+              {/* Urlaubsverlauf */}
               {vacationHistory.length > 0 && (
                 <div>
                   <h4 className="text-sm font-medium mb-2">Urlaubsverlauf</h4>
@@ -477,13 +491,10 @@ const MyHours = () => {
                 </div>
               )}
 
-              {vacationHistory.length === 0 && (
-                <p className="text-sm text-muted-foreground text-center py-2">Noch kein Urlaub genommen in {new Date().getFullYear()}</p>
-              )}
-
+              {/* Urlaub Buchungs-Verlauf (Admin-Korrekturen / Monats-Credits) */}
               {leaveLog.length > 0 && (
-                <div className="mt-4">
-                  <h4 className="text-sm font-medium mb-2">Buchungs-Verlauf (Korrekturen / Credits)</h4>
+                <div>
+                  <h4 className="text-sm font-medium mb-2">Urlaubs-Buchungen (Korrekturen / Credits)</h4>
                   <div className="space-y-1.5 max-h-64 overflow-y-auto">
                     {leaveLog.map((l) => {
                       const isPositive = l.action === "credit" || l.action === "manual_add" || (l.days > 0 && l.action !== "use");
@@ -518,76 +529,56 @@ const MyHours = () => {
                   </div>
                 </div>
               )}
+
+              {/* Zeitausgleich Buchungs-Verlauf */}
+              {zeitkontoTransactions.length > 0 && (
+                <div>
+                  <h4 className="text-sm font-medium mb-2">Zeitausgleich-Buchungen</h4>
+                  <div className="space-y-1.5 max-h-96 overflow-y-auto">
+                    {zeitkontoTransactions.map((t) => {
+                      const sign = t.hours > 0 ? "+" : "";
+                      const isPositive = t.hours > 0;
+                      const typLabel: Record<string, string> = {
+                        add: "Gutschrift (Überstunden)",
+                        subtract: "Abzug (ZA genommen)",
+                        manual_add: "Manuelle Gutschrift",
+                        manual_subtract: "Manueller Abzug",
+                        auto_overtime: "Auto-Überstunden",
+                        auto_undertime: "Auto-Minusstunden",
+                        za_taken: "Zeitausgleich genommen",
+                        correction: "Korrektur",
+                        reset: "Reset",
+                      };
+                      return (
+                        <div key={t.id} className="flex items-start justify-between gap-2 py-2 px-3 rounded bg-muted/30 text-sm">
+                          <div className="flex-1 min-w-0">
+                            <div className="font-medium text-xs">
+                              {typLabel[t.change_type] || t.change_type}
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                              {new Date(t.created_at).toLocaleDateString("de-DE", { day: "2-digit", month: "long", year: "numeric" })}
+                              {" · "}Saldo nach: {t.balance_after.toFixed(2).replace(".", ",")} h
+                            </div>
+                            {t.reason && (
+                              <div className="text-xs mt-0.5 italic text-muted-foreground">{t.reason}</div>
+                            )}
+                          </div>
+                          <Badge variant={isPositive ? "default" : "secondary"} className="tabular-nums shrink-0">
+                            {sign}{t.hours.toFixed(2).replace(".", ",")} h
+                          </Badge>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {vacationHistory.length === 0 && leaveLog.length === 0 && zeitkontoTransactions.length === 0 && (
+                <p className="text-sm text-muted-foreground text-center py-2">Noch keine Buchungen in {new Date().getFullYear()}.</p>
+              )}
             </CardContent>
           </Card>
         )}
-
-        {/* Zeitkonto (Zeitausgleich) */}
-        <Card className="mt-6">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Clock className="h-5 w-5" />
-              Mein Zeitkonto (Zeitausgleich)
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="bg-primary/5 rounded-lg p-4 mb-4 flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Aktueller Saldo</p>
-                <p className={`text-3xl font-bold tabular-nums ${zeitkontoBalance > 0 ? "text-green-600 dark:text-green-400" : zeitkontoBalance < 0 ? "text-orange-600 dark:text-orange-400" : ""}`}>
-                  {zeitkontoBalance > 0 ? "+" : ""}{zeitkontoBalance.toFixed(2).replace(".", ",")} h
-                </p>
-              </div>
-              <div className="text-xs text-muted-foreground text-right">
-                {zeitkontoBalance > 0 ? "Überstunden / ZA-Guthaben" : zeitkontoBalance < 0 ? "Minusstunden" : "Ausgeglichen"}
-              </div>
-            </div>
-
-            {zeitkontoTransactions.length > 0 ? (
-              <div>
-                <h4 className="text-sm font-medium mb-2">Buchungs-Verlauf</h4>
-                <div className="space-y-1.5 max-h-96 overflow-y-auto">
-                  {zeitkontoTransactions.map((t) => {
-                    const sign = t.hours > 0 ? "+" : "";
-                    const isPositive = t.hours > 0;
-                    const typLabel: Record<string, string> = {
-                      add: "Gutschrift (Überstunden)",
-                      subtract: "Abzug (ZA genommen)",
-                      manual_add: "Manuelle Gutschrift",
-                      manual_subtract: "Manueller Abzug",
-                      auto_overtime: "Auto-Überstunden",
-                      auto_undertime: "Auto-Minusstunden",
-                      za_taken: "Zeitausgleich genommen",
-                      correction: "Korrektur",
-                      reset: "Reset",
-                    };
-                    return (
-                      <div key={t.id} className="flex items-start justify-between gap-2 py-2 px-3 rounded bg-muted/30 text-sm">
-                        <div className="flex-1 min-w-0">
-                          <div className="font-medium text-xs">
-                            {typLabel[t.change_type] || t.change_type}
-                          </div>
-                          <div className="text-xs text-muted-foreground">
-                            {new Date(t.created_at).toLocaleDateString("de-DE", { day: "2-digit", month: "long", year: "numeric" })}
-                            {" · "}Saldo nach: {t.balance_after.toFixed(2).replace(".", ",")} h
-                          </div>
-                          {t.reason && (
-                            <div className="text-xs mt-0.5 italic text-muted-foreground">{t.reason}</div>
-                          )}
-                        </div>
-                        <Badge variant={isPositive ? "default" : "secondary"} className="tabular-nums shrink-0">
-                          {sign}{t.hours.toFixed(2).replace(".", ",")} h
-                        </Badge>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            ) : (
-              <p className="text-sm text-muted-foreground text-center py-4">Noch keine Zeitkonto-Buchungen vorhanden.</p>
-            )}
-          </CardContent>
-        </Card>
       </main>
 
       {/* Edit Dialog */}
