@@ -259,6 +259,9 @@ const TimeTracking = () => {
 
   // Editing existing report
   const [editingBerichtId, setEditingBerichtId] = useState<string | null>(null);
+  // Brutto-Eingabe-Flag: true = User trägt Brutto-Stunden ein, System zieht Pause ab.
+  // Default: true für neue Berichte. Beim Edit wird der Wert aus dem geladenen Bericht übernommen.
+  const [matrixBrutto, setMatrixBrutto] = useState<boolean>(true);
 
   // Existing reports list
   const [existingBerichte, setExistingBerichte] = useState<ExistingBericht[]>([]);
@@ -1109,9 +1112,16 @@ const TimeTracking = () => {
 
       // 1. Create Leistungsbericht
       // Abfahrt direkt berechnen aus echten Werten (nicht aus State, der ggf. veraltet ist)
+      // Maximale Mitarbeiter-Stunden (für abfahrt-Berechnung).
+      // Bei matrix_brutto=true: Eingabe ist brutto; Netto = max(0, gross - pause).
+      // Bei matrix_brutto=false (legacy): Eingabe ist netto; max = sum direkt.
+      const pauseHoursForSave = pauseMinuten / 60;
       const maxStundenForSave = Math.max(
         0,
-        ...mitarbeiterRows.filter((r) => r.mitarbeiterId).map((r) => sumStunden(r))
+        ...mitarbeiterRows.filter((r) => r.mitarbeiterId).map((r) => {
+          const gross = sumStunden(r);
+          return matrixBrutto ? Math.max(0, gross - pauseHoursForSave) : gross;
+        })
       );
       const computedAbfahrt = arbeitsbeginn && maxStundenForSave > 0
         ? computeAbfahrt(arbeitsbeginn, maxStundenForSave, pauseMinuten)
@@ -1134,6 +1144,7 @@ const TimeTracking = () => {
           fertiggestellt,
           schmutzzulage_alle: schmutzzulageAlle,
           regen_schicht_alle: regenSchichtAlle,
+          matrix_brutto: matrixBrutto,
         })
         .select("id")
         .single();
@@ -1202,6 +1213,9 @@ const TimeTracking = () => {
           }
         }
 
+        // summe_stunden = NETTO. Bei matrix_brutto=true: gross - pause; sonst direkt.
+        const gross = sumStunden(r, zulagePositions);
+        const summeNet = matrixBrutto ? Math.max(0, gross - pauseHoursForSave) : gross;
         return {
           bericht_id: berichtId,
           mitarbeiter_id: r.mitarbeiterId,
@@ -1213,7 +1227,7 @@ const TimeTracking = () => {
           werkstatt_stunden: werkstattH > 0 ? werkstattH : null,
           schmutzzulage_stunden: schmutzH > 0 ? schmutzH : null,
           regen_stunden: regenH > 0 ? regenH : null,
-          summe_stunden: sumStunden(r, zulagePositions),
+          summe_stunden: Math.round(summeNet * 100) / 100,
         };
       });
 
@@ -1267,11 +1281,15 @@ const TimeTracking = () => {
           }
         }
 
+        // time_entries.stunden = NETTO. Bei matrix_brutto=true: gross - pause; sonst direkt.
+        const grossEntry = sumStunden(r, zulagePositions);
+        const stundenNet = matrixBrutto ? Math.max(0, grossEntry - pauseHoursForSave) : grossEntry;
+
         return {
           user_id: r.mitarbeiterId,
           project_id: projektId,
           datum,
-          stunden: sumStunden(r, zulagePositions),
+          stunden: Math.round(stundenNet * 100) / 100,
           taetigkeit: parts.join(", ") || taetigkeitLabels.join(", "),
           // Arbeitsbeginn ist der echte Start der Arbeitszeit (z.B. zuhause / Werkstatt).
           // Nur Fallback auf ankunftZeit wenn arbeitsbeginn leer.
@@ -1378,6 +1396,7 @@ const TimeTracking = () => {
     ]);
     setMitarbeiterRows([{ ...createEmptyMitarbeiterRow(), mitarbeiterId: currentUserId || "" }]);
     setGleicheStundenFuerAlle(false);
+    setMatrixBrutto(true); // neue Berichte: Brutto-Eingabe + Auto-Pause-Abzug
     setDatum(format(new Date(), "yyyy-MM-dd"));
   };
 
@@ -1408,6 +1427,8 @@ const TimeTracking = () => {
       setRegenSchichtAlle(b.regen_schicht_alle || false);
       setAnmerkungen(b.anmerkungen || "");
       setFertiggestellt(b.fertiggestellt || false);
+      // Matrix-Konvention aus DB: alte Berichte = false (Netto), neue = true (Brutto).
+      setMatrixBrutto(!!b.matrix_brutto);
 
       // Load taetigkeiten
       const { data: tData } = await supabase
@@ -2063,6 +2084,13 @@ const TimeTracking = () => {
             </div>
           </CardHeader>
           <CardContent>
+            {/* Hinweis: Brutto-Eingabe + Auto-Pause-Abzug (nur bei neuen Berichten) */}
+            {matrixBrutto && (
+              <div className="mb-3 rounded-md border border-blue-200 bg-blue-50 dark:bg-blue-950/30 dark:border-blue-800 px-3 py-2 text-xs text-blue-900 dark:text-blue-200">
+                Stunden inkl. Pause eintragen — die Pause wird automatisch abgezogen.
+              </div>
+            )}
+
             {/* Gleiche Stunden toggle - nicht für Mitarbeiter/Extern (eintraegt sich nur selbst) */}
             {!isSelfOnly && (
               <div className="flex items-center gap-3 mb-4">
@@ -2080,7 +2108,8 @@ const TimeTracking = () => {
             {/* ===== MOBILE: Card-Layout (< sm) ===== */}
             <div className="sm:hidden space-y-3">
               {mitarbeiterRows.map((row) => {
-                const total = sumStunden(row, zulagePositions);
+                const totalGross = sumStunden(row, zulagePositions);
+                const total = matrixBrutto ? Math.max(0, totalGross - pauseMinuten / 60) : totalGross;
                 const selectedProfile = profiles.find(p => p.id === row.mitarbeiterId);
                 return (
                   <div key={row.id} className="border-2 rounded-xl p-4 bg-card space-y-3">
@@ -2202,7 +2231,8 @@ const TimeTracking = () => {
                 </thead>
                 <tbody>
                   {mitarbeiterRows.map((row) => {
-                    const total = sumStunden(row, zulagePositions);
+                    const totalGross = sumStunden(row, zulagePositions);
+                const total = matrixBrutto ? Math.max(0, totalGross - pauseMinuten / 60) : totalGross;
                     return (
                       <tr key={row.id} className="border-b hover:bg-muted/30">
                         {/* Name select */}
