@@ -239,10 +239,12 @@ const TimeTracking = () => {
   // Replaced by existingTodayBerichte card with project details
   const [maExistingHours, setMaExistingHours] = useState<Record<string, number>>({});
 
-  // Multi-Bericht: User's eigene Berichte für das aktuelle Datum (außer dem ggf. editierten)
+  // Alle eigenen Berichte (LB + Werkstatt + LKW) für das aktuelle Datum
+  // — unified Liste für die "Bereits heute gebucht"-Card.
   const [existingTodayBerichte, setExistingTodayBerichte] = useState<{
     id: string;
-    projekt_id: string;
+    bericht_typ: "leistungsbericht" | "werk" | "lkw";
+    projekt_id: string | null;
     projekt_name: string;
     arbeitsbeginn: string | null;
     ankunft_zeit: string | null;
@@ -252,15 +254,8 @@ const TimeTracking = () => {
     total_stunden: number;
   }[]>([]);
 
-  // Cross-Type: Vorfertigung-/Werk-/LKW-/Projektleiter-Einträge des Users für das aktuelle Datum
-  const [existingTodayOtherEntries, setExistingTodayOtherEntries] = useState<{
-    type: "vorfertigung" | "projektleiter" | "werk" | "lkw";
-    stunden: number;
-    taetigkeit: string;
-    projectName: string | null;
-    startTime: string | null;
-    endTime: string | null;
-  }[]>([]);
+  // Aggregierte Projektleiter-Stunden des Users für das aktuelle Datum (separate Anzeige)
+  const [existingTodayPLStunden, setExistingTodayPLStunden] = useState<number>(0);
 
   // Editing existing report
   const [editingBerichtId, setEditingBerichtId] = useState<string | null>(null);
@@ -371,100 +366,70 @@ const TimeTracking = () => {
     }
     let cancelled = false;
     (async () => {
+      // Alle eigenen Berichte für den Tag holen — ALLE Typen (LB, Werkstatt, LKW)
       let q = supabase
         .from("leistungsberichte" as any)
-        .select("id, projekt_id, arbeitsbeginn, ankunft_zeit, abfahrt_zeit, pause_von, pause_bis")
+        .select("id, projekt_id, bericht_typ, arbeitsbeginn, ankunft_zeit, abfahrt_zeit, pause_von, pause_bis")
         .eq("erstellt_von", currentUserId)
         .eq("datum", datum);
       if (editingBerichtId) q = q.neq("id", editingBerichtId);
       const { data: berichte } = await q;
-      if (cancelled || !berichte || (berichte as any[]).length === 0) {
+      if (cancelled) return;
+
+      if (!berichte || (berichte as any[]).length === 0) {
         if (!cancelled) setExistingTodayBerichte([]);
-        return;
+      } else {
+        // Projekt-Namen laden (nur LB-Berichte haben projekt_id; Werkstatt/LKW haben NULL)
+        const projIds = [...new Set((berichte as any[]).map((b: any) => b.projekt_id).filter(Boolean))];
+        const projNameMap: Record<string, string> = {};
+        if (projIds.length > 0) {
+          const { data: projData } = await supabase
+            .from("projects")
+            .select("id, name")
+            .in("id", projIds);
+          (projData || []).forEach((p: any) => { projNameMap[p.id] = p.name; });
+        }
+
+        // Stundensummen pro Bericht (für aktuellen User)
+        const berichtIds = (berichte as any[]).map((b: any) => b.id);
+        const { data: maData } = await supabase
+          .from("leistungsbericht_mitarbeiter" as any)
+          .select("bericht_id, mitarbeiter_id, summe_stunden")
+          .in("bericht_id", berichtIds)
+          .eq("mitarbeiter_id", currentUserId);
+        const stundenPerBericht: Record<string, number> = {};
+        (maData as any[] || []).forEach((m: any) => {
+          stundenPerBericht[m.bericht_id] = parseFloat(m.summe_stunden) || 0;
+        });
+
+        const result = (berichte as any[]).map((b: any) => ({
+          id: b.id as string,
+          bericht_typ: ((b.bericht_typ as string) || "leistungsbericht") as "leistungsbericht" | "werk" | "lkw",
+          projekt_id: (b.projekt_id as string | null) || null,
+          projekt_name: b.projekt_id ? (projNameMap[b.projekt_id] || "-") : "",
+          arbeitsbeginn: b.arbeitsbeginn,
+          ankunft_zeit: b.ankunft_zeit,
+          abfahrt_zeit: b.abfahrt_zeit,
+          pause_von: b.pause_von,
+          pause_bis: b.pause_bis,
+          total_stunden: stundenPerBericht[b.id] || 0,
+        }));
+        if (!cancelled) setExistingTodayBerichte(result);
       }
 
-      // Lade Projekt-Namen
-      const projIds = [...new Set((berichte as any[]).map((b: any) => b.projekt_id).filter(Boolean))];
-      const projNameMap: Record<string, string> = {};
-      if (projIds.length > 0) {
-        const { data: projData } = await supabase
-          .from("projects")
-          .select("id, name")
-          .in("id", projIds);
-        (projData || []).forEach((p: any) => { projNameMap[p.id] = p.name; });
-      }
-
-      // Lade Stundensummen pro Bericht (für aktuellen User)
-      const berichtIds = (berichte as any[]).map((b: any) => b.id);
-      const { data: maData } = await supabase
-        .from("leistungsbericht_mitarbeiter" as any)
-        .select("bericht_id, mitarbeiter_id, summe_stunden")
-        .in("bericht_id", berichtIds)
-        .eq("mitarbeiter_id", currentUserId);
-      const stundenPerBericht: Record<string, number> = {};
-      (maData as any[] || []).forEach((m: any) => {
-        stundenPerBericht[m.bericht_id] = parseFloat(m.summe_stunden) || 0;
-      });
-
-      const result = (berichte as any[]).map((b: any) => ({
-        id: b.id as string,
-        projekt_id: b.projekt_id as string,
-        projekt_name: projNameMap[b.projekt_id] || "-",
-        arbeitsbeginn: b.arbeitsbeginn,
-        ankunft_zeit: b.ankunft_zeit,
-        abfahrt_zeit: b.abfahrt_zeit,
-        pause_von: b.pause_von,
-        pause_bis: b.pause_bis,
-        total_stunden: stundenPerBericht[b.id] || 0,
-      }));
-      if (!cancelled) setExistingTodayBerichte(result);
+      // Aggregierte PL-Stunden des Users für den Tag (zusätzliche Info-Zeile)
+      const plQuery: any = supabase
+        .from("time_entries")
+        .select("stunden")
+        .eq("user_id", currentUserId)
+        .eq("datum", datum);
+      const { data: plEntries } = await plQuery.eq("entry_typ", "projektleiter");
+      if (cancelled) return;
+      const plSum = ((plEntries as any[]) || []).reduce((s, e) => s + (parseFloat(e.stunden) || 0), 0);
+      if (!cancelled) setExistingTodayPLStunden(Math.round(plSum * 100) / 100);
     })();
     return () => { cancelled = true; };
   }, [datum, currentUserId, editingBerichtId]);
-
-  // Cross-Type: Lade Vorfertigung- und Projektleiter-Einträge für das aktuelle Datum
-  useEffect(() => {
-    if (!currentUserId || !datum) {
-      setExistingTodayOtherEntries([]);
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      const { data: entries } = await supabase
-        .from("time_entries")
-        .select("project_id, entry_typ, taetigkeit, stunden, start_time, end_time")
-        .eq("user_id", currentUserId)
-        .eq("datum", datum)
-        .in("entry_typ", ["vorfertigung", "projektleiter", "werk", "lkw"]);
-
-      if (cancelled || !entries || entries.length === 0) {
-        if (!cancelled) setExistingTodayOtherEntries([]);
-        return;
-      }
-
-      // Projekt-Namen für referenzierte project_ids laden
-      const projIds = [...new Set((entries as any[]).map((e) => e.project_id).filter(Boolean))] as string[];
-      const projNameMap: Record<string, string> = {};
-      if (projIds.length > 0) {
-        const { data: projData } = await supabase
-          .from("projects")
-          .select("id, name")
-          .in("id", projIds);
-        (projData || []).forEach((p: any) => { projNameMap[p.id] = p.name; });
-      }
-
-      const result = (entries as any[]).map((e) => ({
-        type: e.entry_typ as "vorfertigung" | "projektleiter" | "werk" | "lkw",
-        stunden: parseFloat(e.stunden) || 0,
-        taetigkeit: (e.taetigkeit as string) || "",
-        projectName: e.project_id ? projNameMap[e.project_id] || null : null,
-        startTime: e.start_time ? (e.start_time as string).substring(0, 5) : null,
-        endTime: e.end_time ? (e.end_time as string).substring(0, 5) : null,
-      }));
-      if (!cancelled) setExistingTodayOtherEntries(result);
-    })();
-    return () => { cancelled = true; };
-  }, [datum, currentUserId]);
 
   // Auto-Fill Arbeitsbeginn/Ankunft bei Datum-Wechsel:
   // - Tag OHNE Buchungen → Defaults (06:30 / 07:00)
@@ -1681,7 +1646,7 @@ const TimeTracking = () => {
         )}
 
         {/* "Buchungen heute"-Karte (Multi-Bericht-Übersicht) */}
-        {existingTodayBerichte.length > 0 && (
+        {(existingTodayBerichte.length > 0 || existingTodayPLStunden > 0) && (
           <Card className="border-blue-200 bg-blue-50/30 dark:bg-blue-950/10 dark:border-blue-800">
             <CardHeader className="pb-2">
               <CardTitle className="text-base flex items-center gap-2">
@@ -1696,7 +1661,6 @@ const TimeTracking = () => {
                 const start = startRaw || "?";
 
                 // Abfahrt: aus arbeitsbeginn + total_stunden + pause berechnen
-                // (statt der gespeicherten abfahrt_zeit, die ggf. ein veralteter Default-Wert ist)
                 let pauseMin = 0;
                 if (b.pause_von && b.pause_bis) {
                   const [pvh, pvm] = b.pause_von.split(":").map(Number);
@@ -1707,26 +1671,50 @@ const TimeTracking = () => {
                   ? computeAbfahrt(startRaw, b.total_stunden, pauseMin)
                   : "";
                 const abfahrt = computed || (b.abfahrt_zeit ? b.abfahrt_zeit.substring(0, 5) : "?");
+
+                // Typ-aware Display + Edit-Routing
+                const isLB = b.bericht_typ === "leistungsbericht";
+                const isWerk = b.bericht_typ === "werk";
+                const isLkw = b.bericht_typ === "lkw";
+                const titleLabel = isWerk
+                  ? "Leistungsbericht Werkstatt"
+                  : isLkw
+                    ? "Leistungsbericht LKW"
+                    : (b.projekt_name || "Leistungsbericht");
+                const editPath = isWerk
+                  ? "/werk-bericht"
+                  : isLkw
+                    ? "/lkw-bericht"
+                    : null; // LB: stay on same page
                 return (
                   <div
                     key={b.id}
                     className="flex items-center justify-between gap-2 p-2 rounded border bg-card"
                   >
                     <div className="flex-1 min-w-0">
-                      <div className="font-medium text-sm truncate">
-                        {b.projekt_name}
+                      <div className="font-medium text-sm truncate flex items-center gap-2">
+                        {!isLB && (
+                          <Badge variant="outline" className={isWerk ? "border-amber-300 text-amber-700 bg-amber-50" : "border-orange-300 text-orange-700 bg-orange-50"}>
+                            {isWerk ? "Werkstatt" : "LKW"}
+                          </Badge>
+                        )}
+                        <span className="truncate">{titleLabel}</span>
                       </div>
                       <div className="text-xs text-muted-foreground flex items-center gap-2 flex-wrap">
                         <span>{start}–{abfahrt}</span>
                         <span>·</span>
-                        <span>{b.total_stunden}h</span>
+                        <span>{b.total_stunden.toFixed(2).replace(".", ",")}h</span>
                       </div>
                     </div>
                     <Button
                       variant="outline"
                       size="sm"
                       onClick={() => {
-                        setSearchParams({ edit: b.id });
+                        if (editPath) {
+                          navigate(`${editPath}?edit=${b.id}`);
+                        } else {
+                          setSearchParams({ edit: b.id });
+                        }
                       }}
                     >
                       <FileText className="h-3.5 w-3.5 mr-1" />
@@ -1735,6 +1723,19 @@ const TimeTracking = () => {
                   </div>
                 );
               })}
+              {existingTodayPLStunden > 0 && (
+                <div className="flex items-center justify-between gap-2 p-2 rounded border bg-card">
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium text-sm flex items-center gap-2">
+                      <Badge variant="outline" className="border-purple-300 text-purple-700 bg-purple-50">PL</Badge>
+                      <span>Projektleiter-Stunden</span>
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      {existingTodayPLStunden.toFixed(2).replace(".", ",")}h gesamt
+                    </div>
+                  </div>
+                </div>
+              )}
               <div className="text-xs text-muted-foreground pt-2 border-t space-y-1">
                 <div className="flex items-center justify-between flex-wrap gap-1">
                   <span>
@@ -1768,52 +1769,6 @@ const TimeTracking = () => {
                   }
                   return null;
                 })()}
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Cross-Type: Vorfertigung / Projektleiter-Einträge desselben Tages */}
-        {existingTodayOtherEntries.length > 0 && (
-          <Card className="border-amber-200 bg-amber-50/30 dark:bg-amber-950/10 dark:border-amber-800">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base flex items-center gap-2">
-                <FileText className="h-4 w-4 text-amber-600" />
-                Außerdem heute gebucht (Werk / LKW / Projektleiter)
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              {existingTodayOtherEntries.map((e, idx) => {
-                const labelMap: Record<string, string> = {
-                  vorfertigung: "Werkstätte/LKW (alt)",
-                  projektleiter: "Projektleiter",
-                  werk: "Leistungsbericht Werkstatt",
-                  lkw: "Leistungsbericht LKW",
-                };
-                const label = labelMap[e.type] || e.type;
-                const projOrWerk = e.projectName || (e.type === "vorfertigung" || e.type === "werk" ? "Werk" : e.type === "lkw" ? "LKW" : "Büro");
-                const timeRange = e.startTime && e.endTime ? `${e.startTime}–${e.endTime}` : "";
-                return (
-                  <div
-                    key={idx}
-                    className="flex items-center justify-between gap-2 p-2 rounded border bg-card"
-                  >
-                    <div className="flex-1 min-w-0">
-                      <div className="font-medium text-sm truncate">
-                        {label}: {projOrWerk}
-                      </div>
-                      <div className="text-xs text-muted-foreground flex items-center gap-2 flex-wrap">
-                        {timeRange && <><span>{timeRange}</span><span>·</span></>}
-                        <span>{e.stunden.toFixed(2).replace(".", ",")}h</span>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-              <div className="text-xs text-muted-foreground pt-2 border-t">
-                Gesamt zusätzlich: <strong className="text-foreground">
-                  {existingTodayOtherEntries.reduce((s, e) => s + e.stunden, 0).toFixed(2).replace(".", ",")}h
-                </strong> — Leistungsbericht-Stunden kommen oben drauf, bitte Doppelbuchung vermeiden.
               </div>
             </CardContent>
           </Card>
