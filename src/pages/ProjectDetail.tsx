@@ -58,6 +58,7 @@ const ProjectDetail = () => {
   const [uploading, setUploading] = useState(false);
   const [projectName, setProjectName] = useState("");
   const [isAdmin, setIsAdmin] = useState(false);
+  const [isProjektleiter, setIsProjektleiter] = useState(false);
   const [viewerState, setViewerState] = useState<{
     open: boolean;
     fileName: string;
@@ -124,6 +125,7 @@ const ProjectDetail = () => {
       .single();
 
     setIsAdmin(data?.role === "administrator");
+    setIsProjektleiter(data?.role === "projektleiter");
   };
 
   const fetchProjectName = async () => {
@@ -442,7 +444,7 @@ const ProjectDetail = () => {
                             <Download className="w-4 h-4 sm:mr-2" />
                             <span className="hidden sm:inline">{downloadingId === lb.id ? "..." : "PDF"}</span>
                           </Button>
-                          {isAdmin && (
+                          {(isAdmin || isProjektleiter) && (
                             <Button
                               variant="outline"
                               size="sm"

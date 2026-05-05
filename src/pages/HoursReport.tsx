@@ -295,6 +295,7 @@ export default function HoursReport() {
 
   // Admin check
   const [isAdmin, setIsAdmin] = useState(false);
+  const [isProjektleiter, setIsProjektleiter] = useState(false);
   const [canAccessPage, setCanAccessPage] = useState(false);
   const [checkingAdmin, setCheckingAdmin] = useState(true);
 
@@ -383,6 +384,7 @@ export default function HoursReport() {
       return;
     }
     setIsAdmin(role === "administrator");
+    setIsProjektleiter(role === "projektleiter");
     setCanAccessPage(true);
     setCheckingAdmin(false);
   };
@@ -2002,7 +2004,7 @@ export default function HoursReport() {
                                   <Download className="w-3.5 h-3.5 mr-1" />
                                   ohne ZA
                                 </Button>
-                                {isAdmin && (
+                                {(isAdmin || isProjektleiter) && (
                                   <Button
                                     variant="outline"
                                     size="sm"
