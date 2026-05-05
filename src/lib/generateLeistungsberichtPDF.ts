@@ -157,7 +157,9 @@ export async function generateLeistungsberichtPDF(
   const logo = await loadLogoAsBase64();
   if (logo) {
     try {
-      doc.addImage(logo, "PNG", contentRight - 42, 5, 42, 15);
+      // Logo ist quadratisch (224×225 px) — quadratisch rendern, nicht verzerren.
+      const logoSize = 18;
+      doc.addImage(logo, "PNG", contentRight - logoSize, 5, logoSize, logoSize);
     } catch {
       // logo load failed
     }
