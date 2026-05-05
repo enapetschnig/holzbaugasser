@@ -279,22 +279,65 @@ export default function ProjectHoursReport() {
     };
   };
 
-  const exportToExcel = () => {
+  const exportToExcel = async (withOvertime: boolean) => {
     const selectedProject = projects.find((p) => p.id === selectedProjectId);
     if (!selectedProject) return;
 
+    // Stunden-Liste, ggf. ohne ZA pro-rata gekürzt
+    let entries = projectData.map((e) => ({ ...e }));
+    let exportTotal = totalHours;
+
+    if (!withOvertime && entries.length > 0) {
+      // Tagessummen pro (Mitarbeiter × Datum) über ALLE Projekte des Date-Range laden,
+      // damit wir die Tagesgrenze (8h Mo-Do, 7h Fr) korrekt erkennen können.
+      const userIds = [...new Set(entries.map((e) => e.userId))];
+      const { data: allDay } = await supabase
+        .from("time_entries")
+        .select("user_id, datum, stunden")
+        .in("user_id", userIds)
+        .gte("datum", startDate)
+        .lte("datum", endDate)
+        .not("project_id", "is", null);
+
+      const dayTotals: Record<string, number> = {};
+      (allDay || []).forEach((e: any) => {
+        const key = `${e.user_id}|${e.datum}`;
+        dayTotals[key] = (dayTotals[key] || 0) + (parseFloat(e.stunden) || 0);
+      });
+
+      exportTotal = 0;
+      entries = entries.map((e) => {
+        const key = `${e.userId}|${e.datum}`;
+        const tagSum = dayTotals[key] || e.hours;
+        const dow = new Date(e.datum + "T00:00:00").getDay();
+        const tagesMax = dow === 5 ? 7 : 8; // Fr=7, sonst=8
+        let h = e.hours;
+        if (tagSum > tagesMax) {
+          const faktor = tagesMax / tagSum;
+          h = Math.round(e.hours * faktor * 2) / 2; // auf 0.5 runden (analog LB-PDF)
+        }
+        exportTotal += h;
+        return { ...e, hours: h };
+      });
+      exportTotal = Math.round(exportTotal * 100) / 100;
+    }
+
+    const titel = withOvertime
+      ? "Projektzeiterfassung (mit ZA)"
+      : "Projektzeiterfassung (ohne ZA)";
+
     const worksheetData: any[][] = [
-      ["Projektzeiterfassung", selectedProject.name],
+      [titel, selectedProject.name],
       ["PLZ:", selectedProject.plz || "k.A."],
       ["Zeitraum:", `${startDate} bis ${endDate}`],
       [],
       ["Datum", "Start", "Ende", "Pause", "Stunden", "Mitarbeiter", "Tätigkeit", "Ort"],
     ];
 
-    projectData.forEach((entry) => {
+    entries.forEach((entry) => {
       const dateFormatted = format(parseISO(entry.datum), "dd.MM.yyyy", { locale: de });
       const ortText = entry.locationType === "werkstatt" ? "Lager" : "Baustelle";
-      
+
       worksheetData.push([
         dateFormatted,
         formatTime(entry.startTime),
@@ -308,7 +351,7 @@ export default function ProjectHoursReport() {
     });
 
     worksheetData.push([]);
-    worksheetData.push(["GESAMT", "", "", "", totalHours.toFixed(2), "", "", ""]);
+    worksheetData.push(["GESAMT", "", "", "", exportTotal.toFixed(2), "", "", ""]);
 
     const ws = XLSX.utils.aoa_to_sheet(worksheetData);
     
@@ -350,7 +393,8 @@ export default function ProjectHoursReport() {
 
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, selectedProject.name.substring(0, 31));
-    XLSX.writeFile(wb, `Projektzeiterfassung_${selectedProject.name}.xlsx`);
+    const suffix = withOvertime ? "mit_ZA" : "ohne_ZA";
+    XLSX.writeFile(wb, `Projektzeiterfassung_${selectedProject.name}_${suffix}.xlsx`);
 
     toast({
       title: "Export erfolgreich",
@@ -374,14 +418,25 @@ export default function ProjectHoursReport() {
               Detaillierte Stunden nach Projekt mit Arbeitszeiten
             </CardDescription>
           </div>
-          <Button 
-            onClick={exportToExcel} 
-            disabled={!selectedProjectId || projectData.length === 0}
-            className="gap-2"
-          >
-            <Download className="w-4 h-4" />
-            Excel exportieren
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              onClick={() => exportToExcel(true)}
+              disabled={!selectedProjectId || projectData.length === 0}
+              className="gap-2"
+            >
+              <Download className="w-4 h-4" />
+              Excel mit ZA
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => exportToExcel(false)}
+              disabled={!selectedProjectId || projectData.length === 0}
+              className="gap-2"
+            >
+              <Download className="w-4 h-4" />
+              Excel ohne ZA
+            </Button>
+          </div>
         </div>
       </CardHeader>
       
