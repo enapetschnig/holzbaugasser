@@ -134,6 +134,9 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
   // Fallback für DB-Felder, die NOT NULL sind.
   const [pauseVon, setPauseVon] = useState("12:00");
   const [pauseBis, setPauseBis] = useState("12:30");
+  // Wenn true: Pause wird in diesem Bericht NICHT abgezogen (z.B. weil sie schon in
+  // einem anderen Bericht des Tages gebucht wurde). Auto-Detect oder manueller Override.
+  const [keinePause, setKeinePause] = useState(false);
 
   // ----- Projekt-Zeilen -----
   const [projektZeilen, setProjektZeilen] = useState<ProjektZeile[]>([
@@ -183,8 +186,8 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
   const canBookForOthers = isAdmin || isVorarbeiter || isProjektleiter;
 
   const pauseMinuten = useMemo(
-    () => calcPauseMinutes(pauseVon, pauseBis),
-    [pauseVon, pauseBis]
+    () => keinePause ? 0 : calcPauseMinutes(pauseVon, pauseBis),
+    [pauseVon, pauseBis, keinePause]
   );
 
   const projektMap = useMemo(() => {
@@ -351,6 +354,8 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
       setArbeitsbeginn(b.arbeitsbeginn?.substring(0, 5) || "06:30");
       setPauseVon(b.pause_von?.substring(0, 5) || "12:00");
       setPauseBis(b.pause_bis?.substring(0, 5) || "12:30");
+      // Bericht wurde mit "Keine Pause" gespeichert (pause_von/bis = null) → Toggle aktivieren
+      setKeinePause(!b.pause_von && !b.pause_bis);
       setAnmerkungen(b.anmerkungen || "");
       setFertiggestellt(b.fertiggestellt || false);
 
@@ -484,6 +489,23 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
     })();
     return () => { cancelled = true; };
   }, [currentUserId, datum, berichtTyp, editingBerichtId]);
+
+  // ----------------------------- Auto-Detect: "Keine Pause" wenn schon in anderem Bericht gebucht -----------------------------
+  // Nur für neue Berichte (nicht im Edit-Mode). Wenn der User bereits einen Bericht
+  // mit Pause für den Tag hat (egal welcher Typ), wird hier "Keine Pause" pre-checked,
+  // damit die Pause nicht doppelt abgezogen wird.
+  useEffect(() => {
+    if (editingBerichtId) return;
+    if (existingTodayBerichte.length === 0) {
+      setKeinePause(false);
+      return;
+    }
+    const anyHasPause = existingTodayBerichte.some(
+      (b) => !!b.pause_von && !!b.pause_bis
+    );
+    setKeinePause(anyHasPause);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [existingTodayBerichte.length, editingBerichtId]);
 
   // ----------------------------- Helpers UI -----------------------------
   const addProjektZeile = () => {
@@ -638,8 +660,8 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
           arbeitsbeginn: arbeitsbeginn || null,
           ankunft_zeit: safeAnkunft,
           abfahrt_zeit: safeAbfahrt,
-          pause_von: pauseVon || null,
-          pause_bis: pauseBis || null,
+          pause_von: keinePause ? null : (pauseVon || null),
+          pause_bis: keinePause ? null : (pauseBis || null),
           pause_minuten: pauseMinuten,
           anmerkungen: anmerkungen || null,
           fertiggestellt,
@@ -934,13 +956,45 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
               </div>
               <div className="space-y-2">
                 <Label>Pause von</Label>
-                <Input type="time" step={900} value={pauseVon} onChange={(e) => setPauseVon(e.target.value)} />
+                <Input
+                  type="time"
+                  step={900}
+                  value={pauseVon}
+                  onChange={(e) => setPauseVon(e.target.value)}
+                  disabled={keinePause}
+                  className={keinePause ? "opacity-50" : ""}
+                />
               </div>
               <div className="space-y-2">
                 <Label>Pause bis</Label>
-                <Input type="time" step={900} value={pauseBis} onChange={(e) => setPauseBis(e.target.value)} />
+                <Input
+                  type="time"
+                  step={900}
+                  value={pauseBis}
+                  onChange={(e) => setPauseBis(e.target.value)}
+                  disabled={keinePause}
+                  className={keinePause ? "opacity-50" : ""}
+                />
               </div>
             </div>
+
+            <div className="flex items-center gap-3 pt-1">
+              <Switch
+                id="keine-pause-matrix"
+                checked={keinePause}
+                onCheckedChange={setKeinePause}
+              />
+              <Label htmlFor="keine-pause-matrix" className="cursor-pointer">
+                Keine Pause (kein Abzug)
+              </Label>
+            </div>
+
+            {keinePause && (
+              <div className="rounded-md border border-blue-200 bg-blue-50 dark:bg-blue-950/30 dark:border-blue-800 px-3 py-2 text-xs text-blue-900 dark:text-blue-200">
+                Diese Buchung enthält keine Pause. Falls du heute schon eine andere Buchung mit Pause angelegt hast, wird die Pause nur einmal abgezogen.
+              </div>
+            )}
+
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
               <div className="space-y-2">
                 <Label>Pause</Label>

@@ -190,6 +190,9 @@ const TimeTracking = () => {
   // Wird automatisch entfernt wenn die Buchung diese Zeit nicht überschneidet.
   const [pauseVon, setPauseVon] = useState("12:00");
   const [pauseBis, setPauseBis] = useState("12:30");
+  // Wenn true: Pause wird in diesem Bericht NICHT abgezogen (z.B. weil sie schon in
+  // einem anderen Bericht des Tages gebucht wurde). Auto-Detect oder manueller Override.
+  const [keinePause, setKeinePause] = useState(false);
   const [schmutzzulageAlle, setSchmutzzulageAlle] = useState(false);
   const [regenSchichtAlle, setRegenSchichtAlle] = useState(false);
 
@@ -274,8 +277,8 @@ const TimeTracking = () => {
   );
 
   const pauseMinuten = useMemo(
-    () => calcPauseMinutes(pauseVon, pauseBis),
-    [pauseVon, pauseBis]
+    () => keinePause ? 0 : calcPauseMinutes(pauseVon, pauseBis),
+    [pauseVon, pauseBis, keinePause]
   );
 
   // Positions tagged as schmutz (only Zulagen - don't count as work hours)
@@ -447,6 +450,7 @@ const TimeTracking = () => {
       setAnkunftZeit("07:00");
       setPauseVon("12:00");
       setPauseBis("12:30");
+      setKeinePause(false);
       return;
     }
 
@@ -474,9 +478,19 @@ const TimeTracking = () => {
     if (lastEnd) {
       setArbeitsbeginn(lastEnd);
       setAnkunftZeit(lastEnd);
-      // Pause leer (Halbtags-Bericht, User kann manuell setzen)
-      setPauseVon("");
-      setPauseBis("");
+    }
+
+    // Auto-Detect: wurde in einem anderen Bericht des Tages bereits eine Pause gebucht?
+    // Dann diesen Bericht ohne Pause-Abzug speichern (Pause wird nur einmal pro Tag gezogen).
+    const anyHasPause = existingTodayBerichte.some(
+      (b) => !!b.pause_von && !!b.pause_bis
+    );
+    if (anyHasPause) {
+      setKeinePause(true);
+      setPauseVon("12:00");
+      setPauseBis("12:30");
+    } else {
+      setKeinePause(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [existingTodayBerichte.length, editingBerichtId]);
@@ -1137,8 +1151,8 @@ const TimeTracking = () => {
           arbeitsbeginn: arbeitsbeginn || null,
           ankunft_zeit: ankunftZeit,
           abfahrt_zeit: computedAbfahrt || abfahrtZeit,
-          pause_von: pauseVon || null,
-          pause_bis: pauseBis || null,
+          pause_von: keinePause ? null : (pauseVon || null),
+          pause_bis: keinePause ? null : (pauseBis || null),
           pause_minuten: pauseMinuten,
           anmerkungen: anmerkungen || null,
           fertiggestellt,
@@ -1382,6 +1396,7 @@ const TimeTracking = () => {
     setAbfahrtZeit("16:00");
     setPauseVon("12:00");
     setPauseBis("12:30");
+    setKeinePause(false);
     setSchmutzzulageAlle(false);
     setRegenSchichtAlle(false);
     setGeraete([]);
@@ -1423,6 +1438,8 @@ const TimeTracking = () => {
       setAbfahrtZeit(b.abfahrt_zeit || "16:00");
       setPauseVon(b.pause_von || "12:00");
       setPauseBis(b.pause_bis || "12:30");
+      // Bericht wurde mit "Keine Pause" gespeichert (pause_von/bis = null) → Toggle aktivieren
+      setKeinePause(!b.pause_von && !b.pause_bis);
       setSchmutzzulageAlle(b.schmutzzulage_alle || false);
       setRegenSchichtAlle(b.regen_schicht_alle || false);
       setAnmerkungen(b.anmerkungen || "");
@@ -1920,6 +1937,8 @@ const TimeTracking = () => {
                   type="time"
                   value={pauseVon}
                   onChange={(e) => setPauseVon(e.target.value)}
+                  disabled={keinePause}
+                  className={keinePause ? "opacity-50" : ""}
                 />
               </div>
               <div className="space-y-2">
@@ -1928,9 +1947,28 @@ const TimeTracking = () => {
                   type="time"
                   value={pauseBis}
                   onChange={(e) => setPauseBis(e.target.value)}
+                  disabled={keinePause}
+                  className={keinePause ? "opacity-50" : ""}
                 />
               </div>
             </div>
+
+            <div className="flex items-center gap-3 pt-1">
+              <Switch
+                id="keine-pause"
+                checked={keinePause}
+                onCheckedChange={setKeinePause}
+              />
+              <Label htmlFor="keine-pause" className="cursor-pointer">
+                Keine Pause (kein Abzug)
+              </Label>
+            </div>
+
+            {keinePause && (
+              <div className="rounded-md border border-blue-200 bg-blue-50 dark:bg-blue-950/30 dark:border-blue-800 px-3 py-2 text-xs text-blue-900 dark:text-blue-200">
+                Diese Buchung enthält keine Pause. Falls du heute schon eine andere Buchung mit Pause angelegt hast, wird die Pause nur einmal abgezogen.
+              </div>
+            )}
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 items-end">
               <div className="space-y-2">
