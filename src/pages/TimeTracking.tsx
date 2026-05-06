@@ -363,6 +363,54 @@ const TimeTracking = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ruestzeitStunden]);
 
+  // Tages-Summen für die Zusammenfassungs-Card unten am Form
+  const aktiveMaCount = useMemo(
+    () => mitarbeiterRows.filter((r) => r.mitarbeiterId).length,
+    [mitarbeiterRows]
+  );
+
+  const taetigkeitenCount = useMemo(
+    () => taetigkeiten.filter((t) => t.bezeichnung.trim().length > 0).length,
+    [taetigkeiten]
+  );
+
+  // Brutto-Eingabe pro MA (Zulagen wie Schmutz ausgeschlossen, da diese keine Arbeitsstunden sind).
+  const tagGrossStunden = useMemo(() => {
+    let sum = 0;
+    for (const row of mitarbeiterRows) {
+      if (!row.mitarbeiterId) continue;
+      sum += sumStunden(row, zulagePositions);
+    }
+    return Math.round(sum * 100) / 100;
+  }, [mitarbeiterRows, zulagePositions]);
+
+  // Netto-Stunden = was am Ende in DB summe_stunden landet (mit/ohne Pause-Abzug je matrixBrutto).
+  const tagTotalStunden = useMemo(() => {
+    const pauseHours = pauseMinuten / 60;
+    let sum = 0;
+    for (const row of mitarbeiterRows) {
+      if (!row.mitarbeiterId) continue;
+      const gross = sumStunden(row, zulagePositions);
+      const net = matrixBrutto ? Math.max(0, gross - pauseHours) : gross;
+      sum += net;
+    }
+    return Math.round(sum * 100) / 100;
+  }, [mitarbeiterRows, zulagePositions, pauseMinuten, matrixBrutto]);
+
+  // Pause-Abzug-Anzeige: nur wenn Brutto-Eingabe + Pause aktiv + mind. 1 MA mit gross > 0.
+  const pauseAbzugTotal = useMemo(() => {
+    if (!matrixBrutto || pauseMinuten <= 0) return 0;
+    const pauseHours = pauseMinuten / 60;
+    let abz = 0;
+    for (const row of mitarbeiterRows) {
+      if (!row.mitarbeiterId) continue;
+      const gross = sumStunden(row, zulagePositions);
+      // Nur Pause abziehen wenn der MA überhaupt Stunden hat (sonst wäre das negativ und nicht sichtbar im Save)
+      if (gross > 0) abz += Math.min(pauseHours, gross);
+    }
+    return Math.round(abz * 100) / 100;
+  }, [mitarbeiterRows, zulagePositions, pauseMinuten, matrixBrutto]);
+
   // Auto-fill pause text for last position
   const pauseText = useMemo(() => {
     if (!pauseVon || !pauseBis) return "Pause";
@@ -2354,23 +2402,6 @@ const TimeTracking = () => {
           </CardContent>
         </Card>
 
-        {/* ---------- ABFAHRT BAUSTELLE (read-only, automatisch berechnet) ---------- */}
-        <Card>
-          <CardContent className="pt-4 pb-4">
-            <div className="flex items-center justify-between gap-3 flex-wrap">
-              <div>
-                <Label className="text-base font-semibold">Abfahrt Baustelle</Label>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  Berechnet aus Arbeitsbeginn + Stunden + Pause
-                </p>
-              </div>
-              <div className="text-2xl font-bold tabular-nums px-4 py-2 rounded-md border bg-muted">
-                {abfahrtZeit || "—"}
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
         {/* ---------- ZUSÄTZLICHE ANGABEN (einklappbar) ---------- */}
         <Card>
           <CardHeader className="pb-3">
@@ -2492,6 +2523,50 @@ const TimeTracking = () => {
                 </AccordionContent>
               </AccordionItem>
             </Accordion>
+          </CardContent>
+        </Card>
+
+        {/* ---------- TAGESGESAMT-ZUSAMMENFASSUNG ---------- */}
+        <Card className="border-primary/30 bg-primary/5">
+          <CardContent className="pt-4 pb-4 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-muted-foreground">Mitarbeiter</span>
+              <span className="font-medium">{aktiveMaCount}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-muted-foreground">Tätigkeiten</span>
+              <span className="font-medium">{taetigkeitenCount}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-muted-foreground">
+                {matrixBrutto ? "Stunden eingegeben (brutto)" : "Stunden eingegeben"}
+              </span>
+              <span className="font-medium tabular-nums">{tagGrossStunden.toFixed(2).replace(".", ",")}h</span>
+            </div>
+            {pauseAbzugTotal > 0 && (
+              <div className="flex items-center justify-between text-orange-700 dark:text-orange-400">
+                <span className="text-sm">
+                  Pause-Abzug ({pauseMinuten} Min × {aktiveMaCount} MA)
+                </span>
+                <span className="font-medium tabular-nums">
+                  −{pauseAbzugTotal.toFixed(2).replace(".", ",")}h
+                </span>
+              </div>
+            )}
+            <div className="flex items-center justify-between pt-2 border-t">
+              <span className="text-base font-semibold">
+                {matrixBrutto ? "Stunden gebucht (netto)" : "Stunden gebucht"}
+              </span>
+              <span className="text-xl font-bold tabular-nums">
+                {tagTotalStunden.toFixed(2).replace(".", ",")}h
+              </span>
+            </div>
+            {abfahrtZeit && (
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">Abfahrt Baustelle (berechnet)</span>
+                <span className="font-medium tabular-nums">{abfahrtZeit}</span>
+              </div>
+            )}
           </CardContent>
         </Card>
 
