@@ -297,17 +297,23 @@ const TimeTracking = () => {
     [ankunftZeit]
   );
 
-  // Abfahrt Baustelle dynamisch berechnen: Arbeitsbeginn + max(Mitarbeiter-Stunden) + Pause-Dauer
-  // Wenn keine Stunden eingetragen: Default je Wochentag (Fr 15:00, sonst 16:00)
+  // Abfahrt Baustelle dynamisch berechnen: Arbeitsbeginn + Netto-Arbeit + Pause-Dauer
+  // = die echte Endzeit auf der Baustelle (Pause-Zeit ist da drin enthalten).
+  // Wenn keine Stunden eingetragen: Default je Wochentag (Fr 15:00, sonst 16:00).
   useEffect(() => {
     if (!datum || !arbeitsbeginn) return;
 
-    // Höchste Stundensumme aller MA (wer am längsten gearbeitet hat)
+    const pauseHours = pauseMinuten / 60;
+    // Höchste Stundensumme aller MA — bei matrixBrutto=true ist sumStunden brutto
+    // (inkl. Pause), wir müssen auf netto reduzieren, sonst wird Pause doppelt addiert.
     const maxStunden = Math.max(
       0,
       ...mitarbeiterRows
         .filter((r) => r.mitarbeiterId)
-        .map((r) => sumStunden(r))
+        .map((r) => {
+          const gross = sumStunden(r);
+          return matrixBrutto ? Math.max(0, gross - pauseHours) : gross;
+        })
     );
 
     if (maxStunden <= 0) {
@@ -317,7 +323,7 @@ const TimeTracking = () => {
       return;
     }
 
-    // Berechnet: arbeitsbeginn + maxStunden (Netto-Arbeit) + pauseMinuten
+    // arbeitsbeginn + Netto-Arbeit + Pause = echte Abfahrt von der Baustelle
     const [bh, bm] = arbeitsbeginn.split(":").map(Number);
     if (isNaN(bh) || isNaN(bm)) return;
     const startMin = bh * 60 + bm;
@@ -328,7 +334,7 @@ const TimeTracking = () => {
     const eh = Math.floor(totalMin / 60);
     const em = totalMin % 60;
     setAbfahrtZeit(`${String(eh).padStart(2, "0")}:${String(em).padStart(2, "0")}`);
-  }, [datum, arbeitsbeginn, mitarbeiterRows, pauseMinuten]);
+  }, [datum, arbeitsbeginn, mitarbeiterRows, pauseMinuten, matrixBrutto]);
 
   // Rüstzeit/Anfahrt = (Ankunft − Arbeitsbeginn) in Stunden, gerundet auf 0.25
   const ruestzeitStunden = useMemo(() => {
@@ -529,7 +535,7 @@ const TimeTracking = () => {
   // Load projects & profiles
   // -------------------------------------------------------------------------
   const loadData = useCallback(async () => {
-    const [projectsRes, profilesRes, rolesRes, templatesRes] = await Promise.all([
+    const [projectsRes, profilesRes, templatesRes] = await Promise.all([
       supabase
         .from("projects")
         .select("id, name, plz, adresse, status")
@@ -540,9 +546,6 @@ const TimeTracking = () => {
         .select("id, vorname, nachname, is_hidden")
         .eq("is_active", true)
         .order("nachname"),
-      supabase
-        .from("user_roles")
-        .select("user_id, role"),
       supabase
         .from("taetigkeit_templates" as any)
         .select("bezeichnung, sort_order")
@@ -557,13 +560,6 @@ const TimeTracking = () => {
       );
     }
 
-    // Build set of extern user IDs to exclude from Mitarbeiter selection
-    const externIds = new Set(
-      (rolesRes.data || [])
-        .filter((r: any) => r.role === "extern")
-        .map((r: any) => r.user_id)
-    );
-
     if (projectsRes.data) setProjects(projectsRes.data);
     if (profilesRes.data) {
       let filtered: any[];
@@ -573,9 +569,9 @@ const TimeTracking = () => {
           (p: any) => !p.is_hidden && p.id === currentUserId
         );
       } else {
-        // Admin/VA/PL: hidden profiles + externe ausblenden
+        // Admin/VA/PL: hidden profiles ausblenden, externe MA SIND auswählbar.
         filtered = (profilesRes.data as any[]).filter(
-          (p: any) => !p.is_hidden && !externIds.has(p.id)
+          (p: any) => !p.is_hidden
         );
       }
       setProfiles(filtered as Profile[]);

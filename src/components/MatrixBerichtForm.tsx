@@ -285,7 +285,8 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
         .order("name");
       if (projData) setProjects(projData);
 
-      // Mitarbeiter-Liste (alle aktiven, nicht extern, nicht hidden)
+      // Mitarbeiter-Liste (alle aktiven, nicht hidden — externe MA SIND auswählbar,
+      // damit Admin/Vorarbeiter/Projektleiter sie zu Leistungsberichten hinzufügen können).
       const [profilesRes, rolesRes] = await Promise.all([
         supabase
           .from("profiles")
@@ -294,15 +295,10 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
           .order("nachname"),
         supabase.from("user_roles").select("user_id, role"),
       ]);
-      const externIds = new Set(
-        (rolesRes.data || [])
-          .filter((r: any) => r.role === "extern")
-          .map((r: any) => r.user_id)
-      );
       const roleMap: Record<string, string> = {};
       (rolesRes.data || []).forEach((r: any) => { roleMap[r.user_id] = r.role; });
       const list: MitarbeiterOption[] = ((profilesRes.data || []) as any[])
-        .filter((p) => !p.is_hidden && !externIds.has(p.id))
+        .filter((p) => !p.is_hidden)
         .map((p) => ({
           id: p.id,
           name: `${p.vorname || ""} ${p.nachname || ""}`.trim() || "(ohne Name)",
