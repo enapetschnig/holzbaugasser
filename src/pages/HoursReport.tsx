@@ -689,8 +689,9 @@ export default function HoursReport() {
   }, [berichteStartDate, berichteEndDate, profileMap]);
 
   useEffect(() => {
-    if (isAdmin && Object.keys(profileMap).length > 0) fetchBerichte();
-  }, [isAdmin, fetchBerichte, profileMap]);
+    // Leistungsberichte-Tab ist für Admin UND Projektleiter sichtbar — beide laden.
+    if ((isAdmin || isProjektleiter) && Object.keys(profileMap).length > 0) fetchBerichte();
+  }, [isAdmin, isProjektleiter, fetchBerichte, profileMap]);
 
   // Filter berichte (Tab "Leistungsberichte" — alle Typen: leistungsbericht, werk, lkw)
   const filteredBerichte = useMemo(() => {
