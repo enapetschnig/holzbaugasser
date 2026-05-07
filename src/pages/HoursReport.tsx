@@ -341,7 +341,10 @@ export default function HoursReport() {
 
   // Tab 2: Leistungsberichte state
   const [berichte, setBerichte] = useState<ExistingBericht[]>([]);
-  const [berichteLoading, setBerichteLoading] = useState(false);
+  // Initial true: bis zur ersten Lade-Iteration zeigt der Tab den Spinner statt
+  // "Keine Berichte gefunden" — sonst sieht man irreführend einen leeren Zustand.
+  const [berichteLoading, setBerichteLoading] = useState(true);
+  const [berichteError, setBerichteError] = useState<string | null>(null);
   // Filter sind optional — leer = neueste Berichte (limitiert auf 100)
   const [berichteStartDate, setBerichteStartDate] = useState("");
   const [berichteEndDate, setBerichteEndDate] = useState("");
@@ -617,6 +620,7 @@ export default function HoursReport() {
 
   const fetchBerichte = useCallback(async () => {
     setBerichteLoading(true);
+    setBerichteError(null);
 
     // Load projects for filter
     const { data: projectsData } = await supabase
@@ -640,6 +644,8 @@ export default function HoursReport() {
 
     if (error || !data) {
       console.error("Error loading berichte:", error);
+      setBerichteError(error?.message || "Berichte konnten nicht geladen werden");
+      setBerichte([]);
       setBerichteLoading(false);
       return;
     }
@@ -1915,6 +1921,16 @@ export default function HoursReport() {
                     <span className="text-muted-foreground">
                       Lade Berichte...
                     </span>
+                  </div>
+                ) : berichteError ? (
+                  <div className="text-center py-12 space-y-3">
+                    <p className="text-destructive font-medium">
+                      Berichte konnten nicht geladen werden
+                    </p>
+                    <p className="text-xs text-muted-foreground">{berichteError}</p>
+                    <Button variant="outline" size="sm" onClick={() => fetchBerichte()}>
+                      Erneut versuchen
+                    </Button>
                   </div>
                 ) : filteredBerichte.length === 0 ? (
                   <div className="text-center py-12 text-muted-foreground">
