@@ -663,17 +663,28 @@ export default function HoursReport() {
       mitarbeiterDataAll = md || [];
     }
 
+    // Ersteller-Profile separat laden — nicht über profileMap, weil dort Admins/PL
+    // herausgefiltert sind. Sonst hätten Berichte von Admins/PL "—" als Ersteller.
+    const erstellerIds = [...new Set(data.map((b: any) => b.erstellt_von).filter(Boolean))];
+    const erstellerNameMap: Record<string, string> = {};
+    if (erstellerIds.length > 0) {
+      const { data: ep } = await supabase
+        .from("profiles")
+        .select("id, vorname, nachname")
+        .in("id", erstellerIds);
+      (ep || []).forEach((p: any) => {
+        erstellerNameMap[p.id] = `${p.vorname || ""} ${p.nachname || ""}`.trim() || "—";
+      });
+    }
+
     const result: ExistingBericht[] = data.map((b: any) => {
       const maRows = mitarbeiterDataAll.filter((m: any) => m.bericht_id === b.id);
-      const erstellerProfile = profileMap[b.erstellt_von];
       return {
         id: b.id,
         datum: b.datum,
         objekt: b.objekt || null,
         projekt_name: b.projekt_id ? (projektNameMap[b.projekt_id] || "-") : "-",
-        ersteller_name: erstellerProfile
-          ? `${erstellerProfile.vorname} ${erstellerProfile.nachname}`
-          : "-",
+        ersteller_name: erstellerNameMap[b.erstellt_von] || "—",
         mitarbeiter_count: maRows.length,
         total_stunden: maRows.reduce(
           (s: number, m: any) => s + (m.summe_stunden || 0),
@@ -686,12 +697,13 @@ export default function HoursReport() {
 
     setBerichte(result);
     setBerichteLoading(false);
-  }, [berichteStartDate, berichteEndDate, profileMap]);
+  }, [berichteStartDate, berichteEndDate]);
 
   useEffect(() => {
     // Leistungsberichte-Tab ist für Admin UND Projektleiter sichtbar — beide laden.
-    if ((isAdmin || isProjektleiter) && Object.keys(profileMap).length > 0) fetchBerichte();
-  }, [isAdmin, isProjektleiter, fetchBerichte, profileMap]);
+    // Keine Abhängigkeit auf profileMap mehr — fetchBerichte lädt Ersteller-Namen selbst.
+    if (isAdmin || isProjektleiter) fetchBerichte();
+  }, [isAdmin, isProjektleiter, fetchBerichte]);
 
   // Filter berichte (Tab "Leistungsberichte" — alle Typen: leistungsbericht, werk, lkw)
   const filteredBerichte = useMemo(() => {
