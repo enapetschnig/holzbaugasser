@@ -66,10 +66,20 @@ export default function Auth() {
     });
 
     if (error) {
+      // Bekannte Fehler ins Deutsche übersetzen + hilfreich machen
+      const msg = (error.message || "").toLowerCase();
+      let description = error.message;
+      if (msg.includes("already") && msg.includes("registered")) {
+        description = `Die E-Mail-Adresse "${email}" ist bereits registriert. Falls du dein Passwort vergessen hast, klicke unten auf "Passwort vergessen?" — sonst auf "Anmelden".`;
+      } else if (msg.includes("password") && (msg.includes("weak") || msg.includes("short"))) {
+        description = "Das Passwort ist zu schwach oder zu kurz (mindestens 6 Zeichen).";
+      } else if (msg.includes("invalid") && msg.includes("email")) {
+        description = "Ungültige E-Mail-Adresse.";
+      }
       toast({
         variant: "destructive",
         title: "Fehler bei der Registrierung",
-        description: error.message,
+        description,
       });
       setLoading(false);
       return;
