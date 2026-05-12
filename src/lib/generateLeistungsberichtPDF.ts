@@ -367,12 +367,13 @@ export async function generateLeistungsberichtPDF(
 
   y = actGridBottom + 2;
 
-  // Abfahrtszeit below grid
+  // Abfahrtszeit below grid — beim Werkstatt-Bericht "Arbeitsende" (man ist nicht auf der Baustelle)
   doc.setTextColor(...BLACK);
   doc.setFontSize(7.5);
   doc.setFont("helvetica", "normal");
+  const abfahrtLabel = data.typ === "werk" ? "Arbeitsende:" : "Abfahrtszeit Baustelle:";
   doc.text(
-    `Abfahrtszeit Baustelle:  ${data.abfahrtZeit}`,
+    `${abfahrtLabel}  ${data.abfahrtZeit}`,
     contentRight - 2,
     y,
     { align: "right" }

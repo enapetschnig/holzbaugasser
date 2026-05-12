@@ -1352,7 +1352,9 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
             </div>
             {computedAbfahrt && (
               <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">Abfahrt Baustelle (berechnet)</span>
+                <span className="text-muted-foreground">
+                  {berichtTyp === "werk" ? "Arbeitsende" : "Abfahrt Baustelle"} (berechnet)
+                </span>
                 <span className="font-medium tabular-nums">{computedAbfahrt}</span>
               </div>
             )}
