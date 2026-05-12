@@ -129,14 +129,17 @@ export default function Absence() {
     const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
     const endStr = `${endOfMonth.getFullYear()}-${String(endOfMonth.getMonth() + 1).padStart(2, "0")}-${String(endOfMonth.getDate()).padStart(2, "0")}`;
 
+    // Whitelist: nur Strings die capitalizeType() beim Anlegen einer Absenz schreibt.
+    // Verhindert dass Arbeitseinträge wie "Werk: …", "PL: …", "Vorfertigung: …"
+    // oder Multi-Bericht-LB-Zeilen ("Dampfsperre …") fälschlich als Absenz erscheinen.
+    const ABSENCE_TAETIGKEITEN = ["Urlaub", "Krankenstand", "ZA", "Fortbildung", "Feiertag", "Schule", "Sonstiges"];
     const { data } = await supabase
       .from("time_entries")
       .select("id, datum, taetigkeit, stunden")
       .eq("user_id", userId)
       .gte("datum", startOfMonth)
       .lte("datum", endStr)
-      .not("taetigkeit", "like", "Rüstzeit%")
-      .not("taetigkeit", "eq", "Arbeit")
+      .in("taetigkeit", ABSENCE_TAETIGKEITEN)
       .order("datum", { ascending: false });
 
     if (data) {
