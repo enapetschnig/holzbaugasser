@@ -640,6 +640,20 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
         await supabase.from("leistungsberichte" as any).delete().eq("id", cleanupBerichtId);
       }
 
+      // Schutz-Schicht gegen Orphan-time_entries: vor jedem INSERT alle bestehenden
+      // time_entries für (user, datum, typ) löschen — auch wenn kein Bericht-Match
+      // gefunden wurde. Verhindert Doppelbuchungen falls aus früheren Delete-Bugs
+      // ein time_entry ohne zugehörigen Bericht in der DB liegt.
+      const activeMaIdsForOrphanCleanup = activeMaRows.map((r) => r.mitarbeiterId).filter(Boolean);
+      if (activeMaIdsForOrphanCleanup.length > 0) {
+        await supabase
+          .from("time_entries")
+          .delete()
+          .eq("datum", datum)
+          .eq("entry_typ", berichtTyp)
+          .in("user_id", activeMaIdsForOrphanCleanup);
+      }
+
       // 2. INSERT leistungsberichte
       // ankunft_zeit + abfahrt_zeit sind in der DB NOT NULL → niemals null senden.
       // ankunft_zeit + abfahrt_zeit sind in der DB NOT NULL. Wir verwenden arbeitsbeginn

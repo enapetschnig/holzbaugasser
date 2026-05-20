@@ -1168,6 +1168,23 @@ const TimeTracking = () => {
         }
       }
 
+      // Schutz-Schicht gegen Orphan-time_entries: vor jedem INSERT alle bestehenden
+      // time_entries für (user, datum, projekt, entry_typ='leistungsbericht') löschen
+      // — auch wenn kein Bericht-Match war. Verhindert Doppelbuchungen, falls aus
+      // früheren Delete-Bugs ein time_entry ohne zugehörigen Bericht in der DB liegt.
+      // project_id muss rein wegen Multi-Bericht-Tagen (gleicher User, anderer LB
+      // für anderes Projekt am gleichen Tag bleibt unangetastet).
+      const orphanCleanupMaIds = mitarbeiterRows.filter((r) => r.mitarbeiterId).map((r) => r.mitarbeiterId);
+      if (orphanCleanupMaIds.length > 0 && projektId) {
+        await supabase
+          .from("time_entries")
+          .delete()
+          .eq("datum", datum)
+          .eq("entry_typ", "leistungsbericht")
+          .eq("project_id", projektId)
+          .in("user_id", orphanCleanupMaIds);
+      }
+
       // 1. Create Leistungsbericht
       // Abfahrt direkt berechnen aus echten Werten (nicht aus State, der ggf. veraltet ist)
       // Maximale Mitarbeiter-Stunden (für abfahrt-Berechnung).

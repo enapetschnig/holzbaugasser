@@ -937,21 +937,33 @@ export default function HoursReport() {
           .in("bericht_id", ids),
       ]);
 
-      // 2. Lösche time_entries für jeden Bericht (datum + project_id + mitarbeiter)
-      // — hat kein FK, muss manuell aufgeräumt werden, sonst Datenschrott in der Stundenauswertung
+      // 2. Lösche time_entries für jeden Bericht — hat kein FK, muss manuell
+      // aufgeräumt werden, sonst Datenschrott in der Stundenauswertung.
+      // Standard-LB: project_id im Header gesetzt → auf Projekt filtern damit
+      // andere LBs am gleichen Tag (Multi-Bericht) unangetastet bleiben.
+      // Werk/LKW: projekt_id=NULL im Header; UNIQUE-Constraint sichert max. 1
+      // Bericht pro (User, Datum, Typ) → Cleanup ohne project_id ist sicher.
+      // entry_typ-Filter immer: schützt PL/Vorfertigung/Absenz-Einträge.
+      const berichtIdToTyp: Record<string, string> = {};
+      ((berichte as any[]) || []).forEach((b: any) => {
+        berichtIdToTyp[b.id] = b.bericht_typ || "leistungsbericht";
+      });
       for (const b of (berichte as any[]) || []) {
         const userIds = ((maData as any[]) || [])
           .filter((m: any) => m.bericht_id === b.id)
           .map((m: any) => m.mitarbeiter_id)
           .filter(Boolean);
-        if (userIds.length > 0 && b.projekt_id) {
-          await supabase
-            .from("time_entries")
-            .delete()
-            .eq("datum", b.datum)
-            .eq("project_id", b.projekt_id)
-            .in("user_id", userIds);
-        }
+        if (userIds.length === 0) continue;
+
+        const typ = berichtIdToTyp[b.id];
+        let teQuery: any = supabase
+          .from("time_entries")
+          .delete()
+          .eq("datum", b.datum)
+          .eq("entry_typ", typ)
+          .in("user_id", userIds);
+        if (b.projekt_id) teQuery = teQuery.eq("project_id", b.projekt_id);
+        await teQuery;
       }
 
       // 3. Lösche Berichte (cascade löscht automatisch leistungsbericht_taetigkeiten,
