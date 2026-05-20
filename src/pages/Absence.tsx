@@ -12,6 +12,7 @@ import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { Calendar, Upload, Trash2, Sun, Thermometer, BookOpen, Clock, GraduationCap, PartyPopper, PenLine } from "lucide-react";
 import { getTargetHoursForDate } from "@/lib/workingHours";
+import { getBuroSchedule, getSchedulePauseMinutes } from "@/lib/buroSchedules";
 
 const ABSENCE_TYPES = [
   { value: "urlaub", label: "Urlaub", icon: Sun, color: "text-green-600" },
@@ -237,12 +238,31 @@ export default function Absence() {
       while (d <= endD) {
         const day = d.getDay();
         if (day !== 0 && day !== 6) {
-          const standardTarget = getTargetHoursForDate(d); // 8h Mo-Do, 7h Fr
-          const targetHours = weeklyHours != null
-            ? Math.round((weeklyHours / 39) * standardTarget * 10) / 10
-            : standardTarget;
-          const isFriday = day === 5;
           const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+          // Büro-Schedule (Barbara/Isabel): Tagessoll, Start/Ende, Pause aus Wochenplan.
+          // Sonst Standard-Logik (39h-Vollzeit-Skalierung).
+          const sched = getBuroSchedule(currentUserId, dateStr);
+
+          let targetHours: number;
+          let startTime: string;
+          let endTime: string;
+          let pauseMin = 0;
+
+          if (sched) {
+            targetHours = sched.stunden;
+            startTime = sched.start;
+            endTime = sched.end;
+            pauseMin = getSchedulePauseMinutes(sched);
+          } else {
+            const standardTarget = getTargetHoursForDate(d); // 8h Mo-Do, 7h Fr
+            targetHours = weeklyHours != null
+              ? Math.round((weeklyHours / 39) * standardTarget * 10) / 10
+              : standardTarget;
+            const isFriday = day === 5;
+            startTime = "07:00";
+            endTime = isFriday ? "14:00" : "15:00";
+          }
 
           // ZA Teilzeit: Manuelle Stunden, nur 1 Tag
           let hoursForDay = targetHours;
@@ -259,9 +279,9 @@ export default function Absence() {
             datum: dateStr,
             taetigkeit: capitalizeType(absenceType, customAbsenceReason),
             stunden: hoursForDay,
-            start_time: "07:00",
-            end_time: isFriday ? "14:00" : "15:00",
-            pause_minutes: 0,
+            start_time: startTime,
+            end_time: endTime,
+            pause_minutes: pauseMin,
             project_id: null,
             location_type: null,
           });

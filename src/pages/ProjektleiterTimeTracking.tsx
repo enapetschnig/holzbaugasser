@@ -42,6 +42,12 @@ import {
   aggregateByProject,
   type ProjectLine,
 } from "@/lib/projektleiterDayTimes";
+import {
+  getBuroSchedule,
+  hasBuroSchedule,
+  getSchedulePauseMinutes,
+  type DaySchedule,
+} from "@/lib/buroSchedules";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -214,7 +220,15 @@ export default function ProjektleiterTimeTracking() {
 
   const dow = new Date(date + "T00:00:00").getDay();
   const fullTimeSoll = userRole ? getTagesSoll(userRole as any, dow) : 0;
-  const tagesSoll = Math.round((weeklyHours / 40) * fullTimeSoll * 100) / 100;
+  // Büro-Mitarbeiterinnen (Barbara/Isabel) haben fest definierten Tages-Soll-Plan.
+  // Bei ihnen aus dem Wochenplan ableiten, sonst aus weeklyHours / 40 * Vollzeit-Tagessoll.
+  const buroSchedule: DaySchedule | null = useMemo(
+    () => getBuroSchedule(userId, date),
+    [userId, date]
+  );
+  const tagesSoll = buroSchedule
+    ? buroSchedule.stunden
+    : Math.round((weeklyHours / 40) * fullTimeSoll * 100) / 100;
   const istStunden = useMemo(
     () => Math.round(lines.reduce((s, l) => s + parseHours(l.hours), 0) * 100) / 100,
     [lines]
@@ -281,19 +295,25 @@ export default function ProjektleiterTimeTracking() {
   };
 
   const applyRegelarbeitszeit = () => {
-    const preservedProject = lines[0]?.projectId || "";
+    // Büro-Schedule (Barbara/Isabel): Tagessoll aus Wochenplan, Projekt = Büro (leer).
+    // Sonst: klassischer 8h-Standardtag.
+    const sollH = buroSchedule ? buroSchedule.stunden : 8;
+    const preservedProject = buroSchedule ? "" : (lines[0]?.projectId || "");
+    const sollStr = String(sollH).replace(".", ",");
     if (lines.length > 0 && istStunden > 0) {
       setConfirmState({
         title: "Standardtag eintragen?",
-        message: "Alle aktuellen Einträge für diesen Tag werden ersetzt durch einen 8h-Standardtag.",
+        message: buroSchedule
+          ? `Alle aktuellen Einträge werden ersetzt durch deinen Wochenplan-Tag (${sollStr}h Büro).`
+          : "Alle aktuellen Einträge für diesen Tag werden ersetzt durch einen 8h-Standardtag.",
         onConfirm: () => {
           setConfirmState(null);
-          setLines([{ localId: randomId(), projectId: preservedProject, hours: "8" }]);
+          setLines([{ localId: randomId(), projectId: preservedProject, hours: sollStr }]);
         },
       });
       return;
     }
-    setLines([{ localId: randomId(), projectId: "", hours: "8" }]);
+    setLines([{ localId: randomId(), projectId: preservedProject, hours: sollStr }]);
   };
 
   // -----------------------------------------------------------------
@@ -383,14 +403,22 @@ export default function ProjektleiterTimeTracking() {
       const assembled = assembleDayTimes(aggregated);
       const rows = assembled.map((r) => {
         const projName = r.projectId ? projects.find((p) => p.id === r.projectId)?.name : null;
+        // Büro-Schedule (Barbara/Isabel) hat feste Tageszeiten: synthetische Zeiten
+        // aus assembleDayTimes mit den echten Wochenplan-Zeiten ersetzen.
+        const useSched = buroSchedule && !r.projectId; // nur für Büro-Zeilen
+        const startTime = useSched ? buroSchedule!.start : r.startTime;
+        const endTime = useSched ? buroSchedule!.end : r.endTime;
+        const pauseStart = useSched ? (buroSchedule!.pauseVon ?? null) : r.pauseStart;
+        const pauseEnd = useSched ? (buroSchedule!.pauseBis ?? null) : r.pauseEnd;
+        const pauseMin = useSched ? getSchedulePauseMinutes(buroSchedule!) : r.pauseMinutes;
         return {
           user_id: userId,
           datum: date,
-          start_time: r.startTime,
-          end_time: r.endTime,
-          pause_start: r.pauseStart,
-          pause_end: r.pauseEnd,
-          pause_minutes: r.pauseMinutes,
+          start_time: startTime,
+          end_time: endTime,
+          pause_start: pauseStart,
+          pause_end: pauseEnd,
+          pause_minutes: pauseMin,
           stunden: r.hours,
           project_id: r.projectId,
           taetigkeit: r.projectId ? `PL: ${projName}` : "PL: Büro",
@@ -461,6 +489,26 @@ export default function ProjektleiterTimeTracking() {
           </CardContent>
         </Card>
 
+        {/* Büro-Wochenplan-Banner (nur für User mit festem Schedule) */}
+        {buroSchedule && (
+          <Card className="border-primary/30 bg-primary/5">
+            <CardContent className="pt-4 pb-4 space-y-2">
+              <div className="flex items-center gap-2 text-sm font-medium">
+                <Building2 className="h-4 w-4 text-primary" />
+                <span>Dein Wochenplan</span>
+              </div>
+              <div className="text-sm text-muted-foreground">
+                {buroSchedule.start} – {buroSchedule.end}
+                {buroSchedule.pauseVon && buroSchedule.pauseBis && (
+                  <> (Pause {buroSchedule.pauseVon} – {buroSchedule.pauseBis})</>
+                )}
+                {" "}
+                = <span className="font-semibold text-foreground">{formatH(buroSchedule.stunden)}</span> Soll
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Soll/Ist — LIVE */}
         <Card>
           <CardContent className="pt-4 pb-4">
@@ -512,7 +560,9 @@ export default function ProjektleiterTimeTracking() {
           {!isWeekend && (
             <Button variant="outline" onClick={applyRegelarbeitszeit}>
               <Wand2 className="h-4 w-4 mr-2" />
-              Standardtag eintragen (8h)
+              {buroSchedule
+                ? `Aus Wochenplan eintragen (${formatH(buroSchedule.stunden)})`
+                : "Standardtag eintragen (8h)"}
             </Button>
           )}
           <Button

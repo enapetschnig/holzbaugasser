@@ -39,6 +39,7 @@ import { generateLeistungsberichtPDF, LeistungsberichtPDFData } from "@/lib/gene
 import { generateArbeitszeitExcel } from "@/lib/generateArbeitszeitExcel";
 import { format, parseISO } from "date-fns";
 import { de } from "date-fns/locale";
+import { getBuroMonatsSoll } from "@/lib/buroSchedules";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -202,8 +203,13 @@ function countWorkingDays(year: number, month: number): number {
   return count;
 }
 
-/** Convert weekly hours to monthly target. weeklyHours=null means standard 39h */
-function weeklyToMonthlyTarget(weeklyHours: number | null, year: number, month: number): number {
+/** Convert weekly hours to monthly target. weeklyHours=null means standard 39h.
+ * Wenn der User einen festen Büro-Wochenplan hat (Barbara/Isabel), wird das
+ * Monats-Soll daraus exakt summiert (jeder Werktag laut Schedule).
+ */
+function weeklyToMonthlyTarget(userId: string, weeklyHours: number | null, year: number, month: number): number {
+  const buroSoll = getBuroMonatsSoll(userId, year, month);
+  if (buroSoll != null) return buroSoll;
   const standardMonthly = getMonthlyTargetHours(year, month);
   if (weeklyHours == null) return standardMonthly;
   return Math.round((weeklyHours / 39) * standardMonthly * 10) / 10;
@@ -1277,7 +1283,7 @@ export default function HoursReport() {
           };
         });
 
-        const employeeSoll = weeklyToMonthlyTarget(employeeSollMap[p.id] ?? null, gridYear, gridMonth);
+        const employeeSoll = weeklyToMonthlyTarget(p.id, employeeSollMap[p.id] ?? null, gridYear, gridMonth);
         const displayTotal = withOvertime ? totalHours : cappedTotalHours;
 
         return {
@@ -1585,7 +1591,7 @@ export default function HoursReport() {
                             let schmutzStd = 0;
                             let regenStd = 0;
                             let montageStd = 0;
-                            const monthlyTarget = weeklyToMonthlyTarget(employeeSollMap[employee.id] ?? null, gridYear, gridMonth);
+                            const monthlyTarget = weeklyToMonthlyTarget(employee.id, employeeSollMap[employee.id] ?? null, gridYear, gridMonth);
                             for (let d = 1; d <= daysInMonth; d++) {
                               const dd = employeeDays[d];
                               if (dd) {
