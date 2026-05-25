@@ -77,6 +77,7 @@ interface BerichtMitarbeiterRow {
   summe_stunden: number;
   bericht_id: string;
   bericht_datum: string;
+  bericht_typ: string;
 }
 
 interface DayData {
@@ -504,11 +505,12 @@ export default function HoursReport() {
     const { data: entries } = await entriesQuery;
     setGridEntries(entries || []);
 
-    // Fetch leistungsbericht_mitarbeiter flags via join
+    // Fetch leistungsbericht_mitarbeiter flags via join (inkl. bericht_typ —
+    // wird gebraucht damit Werk-Berichte korrekt als Werkstatt-Tag erkannt werden).
     let bmQuery = supabase
       .from("leistungsbericht_mitarbeiter" as any)
       .select(
-        "mitarbeiter_id, ist_fahrer, ist_werkstatt, schmutzzulage, regen_schicht, fahrer_stunden, werkstatt_stunden, schmutzzulage_stunden, regen_stunden, summe_stunden, bericht_id, leistungsberichte!inner(datum)"
+        "mitarbeiter_id, ist_fahrer, ist_werkstatt, schmutzzulage, regen_schicht, fahrer_stunden, werkstatt_stunden, schmutzzulage_stunden, regen_stunden, summe_stunden, bericht_id, leistungsberichte!inner(datum, bericht_typ)"
       )
       .gte("leistungsberichte.datum" as any, startOfMonth)
       .lte("leistungsberichte.datum" as any, endOfMonth);
@@ -532,6 +534,7 @@ export default function HoursReport() {
       summe_stunden: row.summe_stunden || 0,
       bericht_id: row.bericht_id,
       bericht_datum: row.leistungsberichte?.datum || "",
+      bericht_typ: row.leistungsberichte?.bericht_typ || "leistungsbericht",
     }));
 
     setGridBerichtData(transformed);
@@ -596,28 +599,31 @@ export default function HoursReport() {
     }
 
     // Second pass: overlay leistungsbericht_mitarbeiter flags
+    // istWerkstatt = explizites W-Flag aus Standard-LB ODER Werk-Bericht-Typ.
+    // (LKW-Berichte zaehlen als "draußen/unterwegs", nicht als Werkstatt.)
     for (const bm of gridBerichtData) {
       const uid = bm.mitarbeiter_id;
       const day = parseInt(bm.bericht_datum.split("-")[2], 10);
       if (!map[uid]) map[uid] = {};
+      const isWerkBericht = bm.bericht_typ === "werk";
 
       if (map[uid][day] && !map[uid][day].isAbsence) {
-        // Set flags from bericht (replace, don't OR - so edits take effect)
+        // Set flags from bericht. istWerkstatt: OR (mehrere Berichte am Tag moeglich).
         const d = map[uid][day];
-        d.istFahrer = bm.ist_fahrer;
-        d.istWerkstatt = bm.ist_werkstatt;
-        d.schmutzzulage = bm.schmutzzulage;
-        d.regenSchicht = bm.regen_schicht;
-        d.fahrerStunden = bm.fahrer_stunden;
-        d.werkstattStunden = bm.werkstatt_stunden;
-        d.schmutzzulageStunden = bm.schmutzzulage_stunden;
-        d.regenStunden = bm.regen_stunden;
+        d.istFahrer = d.istFahrer || bm.ist_fahrer;
+        d.istWerkstatt = d.istWerkstatt || bm.ist_werkstatt || isWerkBericht;
+        d.schmutzzulage = d.schmutzzulage || bm.schmutzzulage;
+        d.regenSchicht = d.regenSchicht || bm.regen_schicht;
+        if (bm.fahrer_stunden != null) d.fahrerStunden = bm.fahrer_stunden;
+        if (bm.werkstatt_stunden != null) d.werkstattStunden = bm.werkstatt_stunden;
+        if (bm.schmutzzulage_stunden != null) d.schmutzzulageStunden = bm.schmutzzulage_stunden;
+        if (bm.regen_stunden != null) d.regenStunden = bm.regen_stunden;
       } else if (!map[uid][day]) {
         // Bericht exists but no time_entry - use bericht summe_stunden
         map[uid][day] = {
           stunden: bm.summe_stunden,
           istFahrer: bm.ist_fahrer,
-          istWerkstatt: bm.ist_werkstatt,
+          istWerkstatt: bm.ist_werkstatt || isWerkBericht,
           schmutzzulage: bm.schmutzzulage,
           regenSchicht: bm.regen_schicht,
           fahrerStunden: bm.fahrer_stunden,
@@ -1568,6 +1574,9 @@ export default function HoursReport() {
                           <th className="border border-border px-1 py-1 text-center font-semibold bg-green-50 min-w-[50px] text-[10px]" title="Montagestunden (Gesamt minus Werkstatt)">
                             Montage
                           </th>
+                          <th className="border border-border px-1 py-1 text-center font-semibold bg-amber-50 min-w-[50px] text-[10px]" title="Baustelle-Tage (Arbeitstage ohne W-Flag/Werk-Bericht, ohne Voll-Absenz)">
+                            Baustelle
+                          </th>
                         </tr>
                         {/* Row 2: Weekday abbreviations */}
                         <tr className="bg-muted/40">
@@ -1599,13 +1608,14 @@ export default function HoursReport() {
                           <th className="border border-border px-1 py-0.5 text-center text-[8px] bg-blue-50 text-muted-foreground">Std</th>
                           <th className="border border-border px-1 py-0.5 text-center text-[8px] bg-blue-50 text-muted-foreground">Std</th>
                           <th className="border border-border px-1 py-0.5 text-center text-[8px] bg-green-50 text-muted-foreground">Std</th>
+                          <th className="border border-border px-1 py-0.5 text-center text-[8px] bg-amber-50 text-muted-foreground">Tage</th>
                         </tr>
                       </thead>
                       <tbody>
                         {gridEmployees.length === 0 ? (
                           <tr>
                             <td
-                              colSpan={daysInMonth + 10}
+                              colSpan={daysInMonth + 11}
                               className="text-center py-8 text-muted-foreground"
                             >
                               Keine Mitarbeiter gefunden
@@ -1617,6 +1627,7 @@ export default function HoursReport() {
                             let totalHours = 0;
                             let fahrerTage = 0;
                             let werkstattTage = 0;
+                            let baustelleTage = 0;
                             let werkstattStd = 0;
                             let schmutzStd = 0;
                             let regenStd = 0;
@@ -1637,6 +1648,11 @@ export default function HoursReport() {
                                 }
                                 if (dd.regenSchicht) {
                                   regenStd += dd.regenStunden != null ? dd.regenStunden : dd.stunden;
+                                }
+                                // Baustelle/draussen = Arbeitstag ohne W-Flag und ohne Voll-Absenz.
+                                // Teil-Absenz allein (nur Arzt 2h) zaehlt NICHT als Baustelle-Tag.
+                                if (dd.stunden > 0 && !dd.isAbsence && !dd.istWerkstatt) {
+                                  baustelleTage++;
                                 }
                               }
                             }
@@ -1738,6 +1754,9 @@ export default function HoursReport() {
                                 <td className="border border-border px-1 py-1 text-center text-xs font-semibold bg-green-50 whitespace-nowrap">
                                   {montageStd > 0 ? formatNumber(montageStd) : ""}
                                 </td>
+                                <td className="border border-border px-1 py-1 text-center text-xs font-semibold bg-amber-50 whitespace-nowrap">
+                                  {baustelleTage > 0 ? baustelleTage : ""}
+                                </td>
                               </tr>
                             );
                           })
@@ -1761,6 +1780,15 @@ export default function HoursReport() {
                   </span>
                   <span>
                     <strong>R</strong> = Regen
+                  </span>
+                  <span>
+                    <strong>Baustelle</strong> = Tage draußen (ohne W/Werk-Bericht)
+                  </span>
+                  <span className="text-pink-600">
+                    <strong>A</strong> = Arzt
+                  </span>
+                  <span className="text-purple-600">
+                    <strong>ZA</strong> = Zeitausgleich
                   </span>
                   <span className="text-green-600">
                     <strong>U</strong> = Urlaub
