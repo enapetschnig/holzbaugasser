@@ -603,8 +603,9 @@ const TimeTracking = () => {
       const role = data?.role as string | undefined;
       setIsAdmin(role === "administrator");
       setIsExtern(role === "extern");
-      // Mitarbeiter + Extern: dürfen nur sich selbst eintragen
-      setIsSelfOnly(role === "mitarbeiter" || role === "extern");
+      // Nur Mitarbeiter ist self-only. Extern darf jetzt auch Mitarbeiter im
+      // Leistungsbericht hinzufügen (User-Wunsch).
+      setIsSelfOnly(role === "mitarbeiter");
       setLoading(false);
     };
     checkRole();
