@@ -529,16 +529,16 @@ export default function Absence() {
                     <div className="grid grid-cols-3 gap-2 text-sm">
                       <div>
                         <p className="text-muted-foreground">Gesamt</p>
-                        <p className="font-bold">{leaveBalance.total_days} Tage</p>
+                        <p className="font-bold">{Math.round(leaveBalance.total_days)} Tage</p>
                       </div>
                       <div>
                         <p className="text-muted-foreground">Verbraucht</p>
-                        <p className="font-bold">{leaveBalance.used_days} Tage</p>
+                        <p className="font-bold">{Math.round(leaveBalance.used_days)} Tage</p>
                       </div>
                       <div>
                         <p className="text-muted-foreground">Verfuegbar</p>
                         <p className="font-bold text-green-700">
-                          {leaveBalance.total_days - leaveBalance.used_days - (workingDays || 0)} Tage
+                          {Math.round(leaveBalance.total_days - leaveBalance.used_days - (workingDays || 0))} Tage
                         </p>
                       </div>
                     </div>

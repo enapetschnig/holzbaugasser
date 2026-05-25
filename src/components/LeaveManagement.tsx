@@ -234,10 +234,12 @@ export default function LeaveManagement({ profiles }: LeaveManagementProps) {
           <div className="space-y-3">
             {profiles.filter((p) => p.vorname && p.nachname).map((profile) => {
               const balance = balances.find((b) => b.user_id === profile.id && b.year === selectedYear);
-              const totalDays = balance?.total_days || 0;
+              // Anzeige: immer ganze Tage. DB-Wert bleibt präzise.
+              const totalDaysRaw = balance?.total_days || 0;
+              const totalDays = Math.round(totalDaysRaw);
               const userVacEntries = vacationEntries.filter((v) => v.user_id === profile.id);
               const usedDays = userVacEntries.length;
-              const remaining = totalDays - usedDays;
+              const remaining = Math.round(totalDaysRaw - usedDays);
               const userLog = leaveLog.filter(l => l.user_id === profile.id);
               const isExpanded = expandedProfiles.has(profile.id);
               const daysPerMonth = balance?.days_per_month ?? 2.08;
@@ -252,7 +254,7 @@ export default function LeaveManagement({ profiles }: LeaveManagementProps) {
                       {balance ? (
                         <div className="text-sm text-muted-foreground">
                           <span className="font-medium">{usedDays}</span> von {totalDays} Tagen verbraucht · <span className={remaining <= 3 ? "text-red-600 font-medium" : "font-medium"}>{remaining} übrig</span>
-                          <span className="ml-2 text-xs">({daysPerMonth} Tage/Monat{nextCredit ? `, nächste Gutschrift: ${format(new Date(nextCredit), "dd.MM.yyyy")}` : ""})</span>
+                          <span className="ml-2 text-xs">({daysPerMonth.toFixed(1).replace(".", ",")} Tage/Monat{nextCredit ? `, nächste Gutschrift: ${format(new Date(nextCredit), "dd.MM.yyyy")}` : ""})</span>
                         </div>
                       ) : (
                         <p className="text-sm text-muted-foreground">Noch kein Kontingent angelegt</p>
@@ -266,7 +268,7 @@ export default function LeaveManagement({ profiles }: LeaveManagementProps) {
                         </div>
                       ) : balance ? (
                         <>
-                          <Button variant="outline" size="sm" onClick={() => { setEditingBalance(balance.id); setEditDays(String(balance.total_days)); }}>
+                          <Button variant="outline" size="sm" onClick={() => { setEditingBalance(balance.id); setEditDays(String(Math.round(balance.total_days))); }}>
                             Tage ändern
                           </Button>
                           <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => {
@@ -324,7 +326,7 @@ export default function LeaveManagement({ profiles }: LeaveManagementProps) {
                             <span className="text-muted-foreground shrink-0">{format(new Date(log.created_at), "dd.MM.yyyy HH:mm")}</span>
                             <span className={log.action === "gutschrift" ? "text-green-600" : ""}>
                               {log.description}
-                              {log.days != null && log.action === "gutschrift" && <Badge variant="secondary" className="ml-1 text-[10px]">+{log.days}</Badge>}
+                              {log.days != null && log.action === "gutschrift" && <Badge variant="secondary" className="ml-1 text-[10px]">+{Math.round(log.days)}</Badge>}
                             </span>
                           </div>
                         ))}

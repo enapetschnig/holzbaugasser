@@ -455,17 +455,17 @@ const MyHours = () => {
                   <>
                     <div className="bg-muted/50 rounded-lg p-3 flex-1 min-w-[110px]">
                       <p className="text-xs text-muted-foreground">Urlaub gesamt</p>
-                      <p className="text-2xl font-bold">{vacationBalance.total}</p>
+                      <p className="text-2xl font-bold">{Math.round(vacationBalance.total)}</p>
                       <p className="text-xs text-muted-foreground">Tage</p>
                     </div>
                     <div className="bg-muted/50 rounded-lg p-3 flex-1 min-w-[110px]">
                       <p className="text-xs text-muted-foreground">Verbraucht</p>
-                      <p className="text-2xl font-bold">{vacationBalance.used}</p>
+                      <p className="text-2xl font-bold">{Math.round(vacationBalance.used)}</p>
                       <p className="text-xs text-muted-foreground">Tage</p>
                     </div>
                     <div className="bg-primary/10 rounded-lg p-3 flex-1 min-w-[110px]">
                       <p className="text-xs text-muted-foreground">Urlaub verbleibend</p>
-                      <p className="text-2xl font-bold text-primary">{vacationBalance.total - vacationBalance.used}</p>
+                      <p className="text-2xl font-bold text-primary">{Math.round(vacationBalance.total - vacationBalance.used)}</p>
                       <p className="text-xs text-muted-foreground">Tage</p>
                     </div>
                   </>
@@ -524,7 +524,7 @@ const MyHours = () => {
                             )}
                           </div>
                           <Badge variant={isPositive ? "default" : "secondary"} className="tabular-nums shrink-0">
-                            {sign}{l.days} Tage
+                            {sign}{Math.round(l.days)} Tage
                           </Badge>
                         </div>
                       );
