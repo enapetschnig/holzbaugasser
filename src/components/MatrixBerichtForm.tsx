@@ -40,6 +40,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { localDateString } from "@/lib/workingHours";
+import { findAbsenceTypeByTaetigkeit } from "@/lib/absenceTypes";
 
 // ----------------------------- Types -----------------------------
 type BerichtTyp = "werk" | "lkw";
@@ -485,6 +486,32 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
     })();
     return () => { cancelled = true; };
   }, [currentUserId, datum, berichtTyp, editingBerichtId]);
+
+  // ----------------------------- Auto-Fill arbeitsbeginn aus Teil-Absenz -----------------------------
+  // Wenn der User am Tag schon eine Teil-Absenz hat (Arzt 07:00-09:00),
+  // setzt sich arbeitsbeginn automatisch auf 09:00. Nur im NEW-Modus.
+  useEffect(() => {
+    if (editingBerichtId || !currentUserId || !datum) return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from("time_entries")
+        .select("end_time, taetigkeit")
+        .eq("user_id", currentUserId)
+        .eq("datum", datum);
+      if (cancelled || !data) return;
+      let latestEnd: string | null = null;
+      for (const e of data as any[]) {
+        const typ = findAbsenceTypeByTaetigkeit(e.taetigkeit);
+        if (typ?.hourlyEditable && e.end_time) {
+          const t = (e.end_time as string).substring(0, 5);
+          if (!latestEnd || t > latestEnd) latestEnd = t;
+        }
+      }
+      if (latestEnd) setArbeitsbeginn(latestEnd);
+    })();
+    return () => { cancelled = true; };
+  }, [currentUserId, datum, editingBerichtId]);
 
   // ----------------------------- Auto-Detect: "Keine Pause" wenn schon in anderem Bericht gebucht -----------------------------
   // Nur für neue Berichte (nicht im Edit-Mode). Wenn der User bereits einen Bericht

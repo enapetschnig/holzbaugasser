@@ -40,7 +40,7 @@ import { Switch } from "@/components/ui/switch";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
-import { ABSENCE_TAETIGKEITEN_INKL_FEIERTAG } from "@/lib/absenceTypes";
+import { ABSENCE_TAETIGKEITEN_INKL_FEIERTAG, VOLL_ABSENZ_TAETIGKEITEN, findAbsenceTypeByTaetigkeit } from "@/lib/absenceTypes";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -492,14 +492,41 @@ const TimeTracking = () => {
     return () => { cancelled = true; };
   }, [datum, currentUserId, editingBerichtId]);
 
+  // Teil-Absenz-Endzeiten des Tages (Arzt, ZA-Teilzeit, Sonstiges) — werden beim
+  // Auto-Fill als möglicher Arbeitsbeginn berücksichtigt, damit LB nach dem Arzt
+  // beginnt (z.B. Arzt 07:00 – 09:00 → LB ab 09:00).
+  const [partialAbsenceEnds, setPartialAbsenceEnds] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (!datum || !currentUserId) { setPartialAbsenceEnds([]); return; }
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from("time_entries")
+        .select("end_time, stunden, taetigkeit")
+        .eq("user_id", currentUserId)
+        .eq("datum", datum);
+      if (cancelled) return;
+      const ends: string[] = [];
+      for (const e of (data || []) as any[]) {
+        const typ = findAbsenceTypeByTaetigkeit(e.taetigkeit);
+        if (typ?.hourlyEditable && e.end_time) {
+          ends.push((e.end_time as string).substring(0, 5));
+        }
+      }
+      setPartialAbsenceEnds(ends);
+    })();
+    return () => { cancelled = true; };
+  }, [datum, currentUserId]);
+
   // Auto-Fill Arbeitsbeginn/Ankunft bei Datum-Wechsel:
   // - Tag OHNE Buchungen → Defaults (06:30 / 07:00)
-  // - Tag MIT Buchungen → Endzeit der letzten Buchung als Arbeitsbeginn/Ankunft
+  // - Tag MIT Buchungen oder Teil-Absenz → Endzeit der spätesten als Start nehmen
   // Im Edit-Modus wird nichts überschrieben.
   useEffect(() => {
     if (editingBerichtId) return;
 
-    if (existingTodayBerichte.length === 0) {
+    if (existingTodayBerichte.length === 0 && partialAbsenceEnds.length === 0) {
       // Tag ist leer → Defaults wieder herstellen
       setArbeitsbeginn("06:30");
       setAnkunftZeit("07:00");
@@ -524,9 +551,12 @@ const TimeTracking = () => {
       return { computed };
     });
 
-    // Letzter Bericht (sortiert nach computed DESC)
-    const lastEnd = withComputed
-      .map((x) => x.computed)
+    // Späteste Endzeit aus Berichten ODER Teil-Absenzen (z.B. Arzt 07:00-09:00).
+    // LB soll danach beginnen.
+    const lastEnd = [
+      ...withComputed.map((x) => x.computed),
+      ...partialAbsenceEnds,
+    ]
       .filter((x) => x)
       .sort((a, b) => b.localeCompare(a))[0];
 
@@ -548,7 +578,7 @@ const TimeTracking = () => {
       setKeinePause(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [existingTodayBerichte.length, editingBerichtId]);
+  }, [existingTodayBerichte.length, editingBerichtId, partialAbsenceEnds.length]);
 
   // -------------------------------------------------------------------------
   // Role check
@@ -1686,9 +1716,10 @@ const TimeTracking = () => {
       if (!datum) { setMaExistingHours({}); return; }
       const selectedIds = mitarbeiterRows.filter(r => r.mitarbeiterId && r.mitarbeiterId !== currentUserId).map(r => r.mitarbeiterId);
       if (selectedIds.length === 0) { setMaExistingHours({}); return; }
-      // Aus zentraler Lib — inkl. Feiertag, Arzt, ZA, Sonstiges. "Weiterbildung"
-      // bleibt aus Legacy-Gründen drin (falls alte Einträge existieren).
-      const absTypes = [...ABSENCE_TAETIGKEITEN_INKL_FEIERTAG, "Weiterbildung"];
+      // Voll-Absenzen (Urlaub/Krank/Feiertag/etc.) ausschliessen — fuehren zu
+      // separater Block-Warnung im LB-Form. Teil-Absenzen (Arzt 2h, ZA-Teilzeit)
+      // werden mitgezaehlt, damit der Spielraum-Check korrekt funktioniert
+      // (z.B. 2h Arzt + 8h LB = 10h Konflikt).
       const { data } = await supabase
         .from("time_entries")
         .select("user_id, stunden, taetigkeit")
@@ -1696,9 +1727,8 @@ const TimeTracking = () => {
         .in("user_id", selectedIds);
       const hours: Record<string, number> = {};
       for (const e of (data || [])) {
-        if (!absTypes.includes(e.taetigkeit)) {
-          hours[e.user_id] = (hours[e.user_id] || 0) + (parseFloat(e.stunden as any) || 0);
-        }
+        if (VOLL_ABSENZ_TAETIGKEITEN.includes(e.taetigkeit)) continue;
+        hours[e.user_id] = (hours[e.user_id] || 0) + (parseFloat(e.stunden as any) || 0);
       }
       setMaExistingHours(hours);
     };

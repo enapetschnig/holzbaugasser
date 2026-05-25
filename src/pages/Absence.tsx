@@ -268,14 +268,29 @@ export default function Absence() {
             totalZaHours += hoursForDay;
           }
 
+          // Teil-Absenz (z.B. Arzt 2h): end_time = start_time + hoursForDay.
+          // Damit LB-Forms erkennen können, ab wann der MA wieder arbeiten kann.
+          // Pause entfällt bei Teil-Absenz (zu kurz).
+          let actualEndTime = endTime;
+          let actualPauseMin = pauseMin;
+          const isPartial = hoursForDay < targetHours;
+          if (isPartial) {
+            const [sh, sm] = startTime.split(":").map(Number);
+            const totalMin = sh * 60 + sm + Math.round(hoursForDay * 60);
+            const eh = Math.floor(totalMin / 60);
+            const em = totalMin % 60;
+            actualEndTime = `${String(eh).padStart(2, "0")}:${String(em).padStart(2, "0")}`;
+            actualPauseMin = 0;
+          }
+
           entries.push({
             user_id: currentUserId,
             datum: dateStr,
             taetigkeit: capitalizeType(absenceType, customAbsenceReason),
             stunden: hoursForDay,
             start_time: startTime,
-            end_time: endTime,
-            pause_minutes: pauseMin,
+            end_time: actualEndTime,
+            pause_minutes: actualPauseMin,
             project_id: null,
             location_type: null,
           });

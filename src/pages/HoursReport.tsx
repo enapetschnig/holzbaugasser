@@ -89,8 +89,11 @@ interface DayData {
   werkstattStunden: number | null;
   schmutzzulageStunden: number | null;
   regenStunden: number | null;
-  isAbsence: boolean;
+  isAbsence: boolean;        // true = Voll-Absenz (Urlaub/Krank/Feiertag/...) — Tag komplett blockiert
   absenceType: string;
+  // Teil-Absenz (Arzt 2h, ZA-Teilzeit 4h, Sonstiges-mit-Stunden) zusätzlich zur Arbeit.
+  partialAbsenceHours: number;       // 0 = keine
+  partialAbsenceShort: string | null; // "A", "ZA", "S"
 }
 
 interface ExistingBericht {
@@ -241,6 +244,22 @@ function formatCell(dayData: DayData | null): CellData {
       ? `${typ.color} font-semibold`
       : "text-gray-600 font-semibold";
     return { hours: short, badges: [], className, isAbsence: true };
+  }
+
+  // Teil-Absenz (z.B. Arzt 2h) + Arbeit kombiniert:
+  // - mit Arbeit: "6+2A"
+  // - ohne Arbeit: "2A"
+  if (dayData.partialAbsenceHours > 0 && dayData.partialAbsenceShort) {
+    const absLabel = `${formatNumber(dayData.partialAbsenceHours)}${dayData.partialAbsenceShort}`;
+    if (dayData.stunden > 0) {
+      return {
+        hours: `${formatNumber(dayData.stunden)}+${absLabel}`,
+        badges: [],
+        className: "text-xs",
+        isAbsence: false,
+      };
+    }
+    return { hours: absLabel, badges: [], className: "text-pink-600 font-semibold", isAbsence: false };
   }
 
   const h = dayData.stunden;
@@ -528,47 +547,51 @@ export default function HoursReport() {
   const gridDataMap = useMemo(() => {
     const map: Record<string, Record<number, DayData>> = {};
 
-    // First pass: time_entries (for hours and absence types)
+    // First pass: time_entries (for hours and absence types).
+    // Voll-Absenzen (Urlaub/Krankenstand/Feiertag/...) ueberschreiben den Tag komplett.
+    // Teil-Absenzen (Arzt 2h, ZA-Teilzeit 4h, Sonstiges-mit-Stunden) sind nur ein
+    // partialAbsence-Marker ZUSAETZLICH zur Arbeit am gleichen Tag.
+    const emptyDay = (uid: string, day: number): DayData => {
+      if (!map[uid][day]) {
+        map[uid][day] = {
+          stunden: 0, istFahrer: false, istWerkstatt: false, schmutzzulage: false,
+          regenSchicht: false, fahrerStunden: null, werkstattStunden: null,
+          schmutzzulageStunden: null, regenStunden: null,
+          isAbsence: false, absenceType: "",
+          partialAbsenceHours: 0, partialAbsenceShort: null,
+        };
+      }
+      return map[uid][day];
+    };
+
     for (const entry of gridEntries) {
       if (!map[entry.user_id]) map[entry.user_id] = {};
       const day = parseInt(entry.datum.split("-")[2], 10);
+      const typ = findAbsenceTypeByTaetigkeit(entry.taetigkeit);
+      const isPartial = !!typ?.hourlyEditable;
+      const isFullAbsence = ABSENCE_TYPES.includes(entry.taetigkeit) && !isPartial;
 
-      const isAbsence = ABSENCE_TYPES.includes(entry.taetigkeit);
-
-      if (isAbsence) {
+      if (isFullAbsence) {
+        // Voll-Absenz hat Vorrang - ueberschreibt alles (auch evtl. schon eingetragene Arbeit)
+        const partialBefore = map[entry.user_id][day]?.partialAbsenceHours ?? 0;
+        const partialShortBefore = map[entry.user_id][day]?.partialAbsenceShort ?? null;
         map[entry.user_id][day] = {
           stunden: entry.stunden,
-          istFahrer: false,
-          istWerkstatt: false,
-          schmutzzulage: false,
-          regenSchicht: false,
-          fahrerStunden: null,
-          werkstattStunden: null,
-          schmutzzulageStunden: null,
-          regenStunden: null,
-          isAbsence: true,
-          absenceType: entry.taetigkeit,
+          istFahrer: false, istWerkstatt: false, schmutzzulage: false, regenSchicht: false,
+          fahrerStunden: null, werkstattStunden: null, schmutzzulageStunden: null, regenStunden: null,
+          isAbsence: true, absenceType: entry.taetigkeit,
+          partialAbsenceHours: partialBefore, partialAbsenceShort: partialShortBefore,
         };
+      } else if (isPartial) {
+        // Teil-Absenz: nicht als Tag-Override, sondern als zusaetzlicher Marker
+        const d = emptyDay(entry.user_id, day);
+        d.partialAbsenceHours = (d.partialAbsenceHours || 0) + entry.stunden;
+        d.partialAbsenceShort = typ!.short;
       } else {
-        const existing = map[entry.user_id][day];
-        if (existing && !existing.isAbsence) {
-          // Aggregate hours for the same day
-          existing.stunden += entry.stunden;
-        } else if (!existing) {
-          map[entry.user_id][day] = {
-            stunden: entry.stunden,
-            istFahrer: false,
-            istWerkstatt: false,
-            schmutzzulage: false,
-            regenSchicht: false,
-            fahrerStunden: null,
-            werkstattStunden: null,
-            schmutzzulageStunden: null,
-            regenStunden: null,
-            isAbsence: false,
-            absenceType: "",
-          };
-        }
+        // Regulaere Arbeit
+        const d = emptyDay(entry.user_id, day);
+        if (!d.isAbsence) d.stunden += entry.stunden;
+        // Wenn Voll-Absenz schon gesetzt: nicht ueberschreiben (Voll-Absenz blockiert Tag)
       }
     }
 
@@ -603,6 +626,8 @@ export default function HoursReport() {
           regenStunden: bm.regen_stunden,
           isAbsence: false,
           absenceType: "",
+          partialAbsenceHours: 0,
+          partialAbsenceShort: null,
         };
       }
     }
@@ -1256,14 +1281,16 @@ export default function HoursReport() {
           const cell = formatCell(dd);
 
           if (dd) {
-            totalHours += dd.stunden;
-            // For "ohne Überstunden": cap work hours to daily target
+            // Teil-Absenz-Stunden (Arzt 2h, ZA-Teilzeit) zaehlen zum Tag dazu.
+            const dayHoursRaw = dd.stunden + (dd.partialAbsenceHours || 0);
+            totalHours += dayHoursRaw;
+            // "ohne UEberstunden": cap auf Tagessoll
             if (!withOvertime && !dd.isAbsence) {
               const standardDaily = dayOfWeek === 5 ? 7 : 8; // Fr=7, else=8
               const dailyTarget = empWeekly != null ? Math.round((empWeekly / 39) * standardDaily * 10) / 10 : standardDaily;
-              cappedTotalHours += Math.min(dd.stunden, dailyTarget);
+              cappedTotalHours += Math.min(dayHoursRaw, dailyTarget);
             } else {
-              cappedTotalHours += dd.stunden;
+              cappedTotalHours += dayHoursRaw;
             }
           }
 
@@ -1598,7 +1625,8 @@ export default function HoursReport() {
                             for (let d = 1; d <= daysInMonth; d++) {
                               const dd = employeeDays[d];
                               if (dd) {
-                                totalHours += dd.stunden;
+                                // Teil-Absenz-Stunden zaehlen zum Tag dazu (Arzt 2h + Arbeit 6h = 8h Total)
+                                totalHours += dd.stunden + (dd.partialAbsenceHours || 0);
                                 if (dd.istFahrer) fahrerTage++;
                                 if (dd.istWerkstatt) {
                                   werkstattTage++;

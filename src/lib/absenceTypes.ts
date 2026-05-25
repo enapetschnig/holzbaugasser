@@ -58,6 +58,15 @@ export const FEIERTAG_TYPE: AbsenceType = {
   hourlyEditable: false,
 };
 
+// Voll-Absenzen: blockieren den ganzen Tag — kein gleichzeitiges Arbeiten möglich.
+// (z.B. Urlaub/Krankenstand-Tag → keine zusätzliche LB-Buchung möglich)
+// Teil-Absenzen (hourlyEditable=true) wie Arzt/ZA/Sonstiges können mit Arbeit
+// kombiniert werden.
+export const VOLL_ABSENZ_TAETIGKEITEN: string[] = ABSENCE_TYPES
+  .filter((t) => !t.hourlyEditable)
+  .map((t) => t.taetigkeit)
+  .concat(["Feiertag", "Berufsschule", "Weiterbildung"]); // Legacy-Strings
+
 // Helper für DB-Filter und Detect-Logik
 export const ABSENCE_TAETIGKEITEN: string[] = ABSENCE_TYPES.map((t) => t.taetigkeit);
 
