@@ -43,9 +43,11 @@ export type StundenauswertungPDFData = {
 // ---------------------------------------------------------------------------
 
 function formatNum(n: number): string {
-  if (n === Math.floor(n)) return n.toString();
-  const s = n.toFixed(1);
-  return s.endsWith("0") ? n.toString() : s;
+  // Auf 1 Nachkommastelle runden — entfernt Floating-Point-Artefakte
+  // (z.B. 8.000000000000001 → "8").
+  const rounded = Math.round(n * 10) / 10;
+  if (rounded === Math.floor(rounded)) return rounded.toFixed(0);
+  return rounded.toFixed(1).replace(".", ",");
 }
 
 // ---------------------------------------------------------------------------

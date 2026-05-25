@@ -220,10 +220,11 @@ function weeklyToMonthlyTarget(userId: string, weeklyHours: number | null, year:
 }
 
 function formatNumber(n: number): string {
-  if (n === Math.floor(n)) return n.toString();
-  // Show one decimal, remove trailing zero
-  const s = n.toFixed(1);
-  return s.endsWith("0") ? n.toString() : s;
+  // Auf 1 Nachkommastelle runden — entfernt Floating-Point-Artefakte
+  // (z.B. 2.82 + 4.71 + 0.47 = 8.000000000000001 → 8.0 → "8").
+  const rounded = Math.round(n * 10) / 10;
+  if (rounded === Math.floor(rounded)) return rounded.toFixed(0);
+  return rounded.toFixed(1).replace(".", ",");
 }
 
 type CellData = {
