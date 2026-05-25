@@ -224,14 +224,22 @@ export async function generateStundenauswertungPDF(
         } else if (content === "K") {
           doc.setTextColor(220, 38, 38);
           doc.setFont("helvetica", "bold");
+        } else if (content === "A") {
+          // Arzt — pink
+          doc.setTextColor(219, 39, 119);
+          doc.setFont("helvetica", "bold");
         } else if (content === "ZA") {
           doc.setTextColor(37, 99, 235);
           doc.setFont("helvetica", "bold");
+        } else if (content === "FB") {
+          // Fortbildung — blau
+          doc.setTextColor(37, 99, 235);
+          doc.setFont("helvetica", "normal");
         } else if (content === "Feiertag") {
-          doc.setTextColor(100, 100, 100);
+          doc.setTextColor(234, 88, 12);
           doc.setFont("helvetica", "bold");
         } else if (content === "Schule") {
-          doc.setTextColor(100, 100, 100);
+          doc.setTextColor(8, 145, 178);
           doc.setFont("helvetica", "normal");
         } else {
           doc.setTextColor(0, 0, 0);
@@ -354,7 +362,7 @@ export async function generateStundenauswertungPDF(
   doc.setFont("helvetica", "normal");
   doc.setTextColor(100, 100, 100);
   doc.text(
-    pdfText("F = Fahrer  |  W = Werkstatt  |  SCH = Schmutzzulage  |  R = Regen  |  U = Urlaub  |  K = Krankenstand  |  ZA = Zeitausgleich  |  Schule = Berufsschule"),
+    pdfText("F = Fahrer  |  W = Werkstatt  |  SCH = Schmutzzulage  |  R = Regen  |  U = Urlaub  |  K = Krankenstand  |  A = Arzt  |  ZA = Zeitausgleich  |  FB = Fortbildung  |  Schule = Berufsschule"),
     startX,
     footerY
   );

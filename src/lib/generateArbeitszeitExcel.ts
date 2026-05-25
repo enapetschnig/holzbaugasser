@@ -107,7 +107,7 @@ export async function generateArbeitszeitExcel(options: ExportOptions) {
 
   // Aggregiere alle Einträge pro Tag (LB + PL + Vorfertigung + Absenz)
   // Bei Multi-Entry-Tagen: Stunden summieren, Absenz hat Vorrang vor Arbeit
-  const ABSENCE_KEYWORDS = ["urlaub", "krank", "fortbildung", "weiterbildung", "feiertag", "schule", "berufsschule", "zeitausgleich", "za "];
+  const ABSENCE_KEYWORDS = ["urlaub", "krank", "arzt", "fortbildung", "weiterbildung", "feiertag", "schule", "berufsschule", "zeitausgleich", "za "];
   const isAbsenceTaetigkeit = (t: string) => {
     const lower = (t || "").toLowerCase();
     return ABSENCE_KEYWORDS.some((kw) => lower.includes(kw));
@@ -187,20 +187,24 @@ export async function generateArbeitszeitExcel(options: ExportOptions) {
     const taetigkeit = (entry.taetigkeit || "").toLowerCase();
     const isUrlaub = taetigkeit.includes("urlaub");
     const isKrank = taetigkeit.includes("krank");
+    const isArzt = taetigkeit === "arzt" || taetigkeit.startsWith("arzt ");
     const isSchule = taetigkeit.includes("schule") || taetigkeit.includes("berufsschule");
     const isFortbildung = taetigkeit.includes("fortbildung") || taetigkeit.includes("weiterbildung");
-    const isZA = taetigkeit.includes("zeitausgleich") || taetigkeit.includes("za ");
+    const isZA = taetigkeit.includes("zeitausgleich") || taetigkeit.includes("za ") || taetigkeit === "za";
     const isFeiertag = taetigkeit.includes("feiertag");
-    const isAbsence = isUrlaub || isKrank || isSchule || isFortbildung || isZA || isFeiertag;
+    const isAbsence = isUrlaub || isKrank || isArzt || isSchule || isFortbildung || isZA || isFeiertag;
 
-    // Cap hours at daily target (ohne Überstunden)
+    // Cap hours at daily target (ohne Überstunden) — Arzt/ZA können stundenweise sein
     const rawHours = parseFloat(entry.stunden) || 0;
-    const hours = isAbsence ? dailyTarget : Math.min(rawHours, dailyTarget);
+    const hoursIfAbsenceFull = isAbsence ? Math.min(rawHours, dailyTarget) : Math.min(rawHours, dailyTarget);
+    // Arzt + ZA: User trägt manchmal weniger als Tagessoll ein → respektieren statt aufrunden
+    const hours = (isArzt || isZA) ? Math.min(rawHours, dailyTarget) : (isAbsence ? dailyTarget : hoursIfAbsenceFull);
 
     // Determine display
     let label = "";
     if (isUrlaub) { label = "Urlaub"; sumUrlaub += hours; }
     else if (isKrank) { label = "Krankenstand"; sumKrankenstand += hours; }
+    else if (isArzt) { label = "Arzt"; sumKrankenstand += hours; }
     else if (isSchule) { label = "Berufsschule"; sumWeiterbildung += hours; }
     else if (isFortbildung) { label = "Fortbildung"; sumWeiterbildung += hours; }
     else if (isZA) { label = "Zeitausgleich"; sumZA += hours; }

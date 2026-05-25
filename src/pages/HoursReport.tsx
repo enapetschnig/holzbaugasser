@@ -40,6 +40,11 @@ import { generateArbeitszeitExcel } from "@/lib/generateArbeitszeitExcel";
 import { format, parseISO } from "date-fns";
 import { de } from "date-fns/locale";
 import { getBuroMonatsSoll } from "@/lib/buroSchedules";
+import {
+  ABSENCE_TYPES as ABSENCE_TYPES_LIB,
+  ABSENCE_TAETIGKEITEN_INKL_FEIERTAG,
+  findAbsenceTypeByTaetigkeit,
+} from "@/lib/absenceTypes";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -121,21 +126,16 @@ const monthNames = [
 
 const weekdayAbbr = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"];
 
-const ABSENCE_TYPES = [
-  "Urlaub",
-  "Krankenstand",
-  "Berufsschule",
-  "Feiertag",
-  "Fortbildung",
-];
+// Absenz-Detect aus zentraler Lib — inkl. Feiertag (auto-gebucht), Arzt, ZA, Sonstiges
+const ABSENCE_TYPES = ABSENCE_TAETIGKEITEN_INKL_FEIERTAG;
 
-const ABSENCE_SHORT: Record<string, string> = {
-  Urlaub: "U",
-  Krankenstand: "K",
-  Berufsschule: "Schule",
-  Feiertag: "Feiertag",
-  Fortbildung: "FB",
-};
+const ABSENCE_SHORT: Record<string, string> = (() => {
+  const map: Record<string, string> = {};
+  ABSENCE_TYPES_LIB.forEach((t) => { map[t.taetigkeit] = t.short; });
+  // Feiertag separat (kein User-pickbarer Typ)
+  map["Feiertag"] = "Feiertag";
+  return map;
+})();
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -234,10 +234,13 @@ function formatCell(dayData: DayData | null): CellData {
 
   if (dayData.isAbsence) {
     const short = ABSENCE_SHORT[dayData.absenceType] || dayData.absenceType;
-    if (dayData.absenceType === "Urlaub") return { hours: short, badges: [], className: "text-green-600 font-semibold", isAbsence: true };
-    if (dayData.absenceType === "Krankenstand") return { hours: short, badges: [], className: "text-red-600 font-semibold", isAbsence: true };
-    if (dayData.absenceType === "Fortbildung") return { hours: short, badges: [], className: "text-blue-600 font-semibold", isAbsence: true };
-    return { hours: short, badges: [], className: "text-gray-600", isAbsence: true };
+    // Farbcode aus zentraler Lib — färbt Urlaub grün, Krankenstand rot, Arzt pink,
+    // ZA lila, Fortbildung blau, Schule cyan, Sonstiges grau, Feiertag orange.
+    const typ = findAbsenceTypeByTaetigkeit(dayData.absenceType);
+    const className = typ
+      ? `${typ.color} font-semibold`
+      : "text-gray-600 font-semibold";
+    return { hours: short, badges: [], className, isAbsence: true };
   }
 
   const h = dayData.stunden;
@@ -2208,11 +2211,15 @@ export default function HoursReport() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="Urlaub">Urlaub (U)</SelectItem>
-                    <SelectItem value="Krankenstand">Krankenstand (K)</SelectItem>
-                    <SelectItem value="Fortbildung">Fortbildung</SelectItem>
+                    {/* Aus zentraler Lib — alle User-pickbaren Typen */}
+                    {ABSENCE_TYPES_LIB.map((t) => (
+                      <SelectItem key={t.taetigkeit} value={t.taetigkeit}>
+                        {t.label} ({t.short})
+                      </SelectItem>
+                    ))}
+                    {/* Feiertag separat — wird normalerweise auto-gebucht, Admin
+                        kann hier manuell setzen (z.B. Backfill) */}
                     <SelectItem value="Feiertag">Feiertag</SelectItem>
-                    <SelectItem value="Schule">Berufsschule</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

@@ -40,6 +40,7 @@ import { Switch } from "@/components/ui/switch";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import { ABSENCE_TAETIGKEITEN_INKL_FEIERTAG } from "@/lib/absenceTypes";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -1685,7 +1686,9 @@ const TimeTracking = () => {
       if (!datum) { setMaExistingHours({}); return; }
       const selectedIds = mitarbeiterRows.filter(r => r.mitarbeiterId && r.mitarbeiterId !== currentUserId).map(r => r.mitarbeiterId);
       if (selectedIds.length === 0) { setMaExistingHours({}); return; }
-      const absTypes = ["Urlaub", "Krankenstand", "Fortbildung", "Feiertag", "Schule", "Weiterbildung"];
+      // Aus zentraler Lib — inkl. Feiertag, Arzt, ZA, Sonstiges. "Weiterbildung"
+      // bleibt aus Legacy-Gründen drin (falls alte Einträge existieren).
+      const absTypes = [...ABSENCE_TAETIGKEITEN_INKL_FEIERTAG, "Weiterbildung"];
       const { data } = await supabase
         .from("time_entries")
         .select("user_id, stunden, taetigkeit")

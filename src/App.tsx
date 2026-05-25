@@ -10,6 +10,7 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { useOnboarding } from "./contexts/OnboardingContext";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
+import { autoBookFeiertage } from "@/lib/feiertagAutoBook";
 import Index from "./pages/Index";
 import Auth from "./pages/Auth";
 import TimeTracking from "./pages/TimeTracking";
@@ -40,15 +41,38 @@ function AppContent() {
     handleInstallDialogClose,
   } = useOnboarding();
 
-  // Ensure user profile exists (for users created via Cloud dashboard)
+  // Ensure user profile exists (for users created via Cloud dashboard) + Auto-Feiertage
   useEffect(() => {
-    const ensureProfile = async () => {
+    const ensureProfileAndBookHolidays = async () => {
       const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        await supabase.rpc('ensure_user_profile');
+      if (!user) return;
+      await supabase.rpc('ensure_user_profile');
+
+      // Auto-Feiertage: max. 1x pro Tag pro Browser (throttle via localStorage),
+      // nur Admin/PL/Vorarbeiter (RLS-Rechte für fremde User).
+      const today = new Date().toISOString().slice(0, 10);
+      const lastRun = localStorage.getItem("feiertag_auto_book_last");
+      if (lastRun === today) return;
+      try {
+        const { data: r } = await supabase
+          .from("user_roles")
+          .select("role")
+          .eq("user_id", user.id)
+          .maybeSingle();
+        const role = ((r as any)?.role as string) || "";
+        const { added } = await autoBookFeiertage(role);
+        localStorage.setItem("feiertag_auto_book_last", today);
+        if (added > 0) {
+          toast({
+            title: `${added} Feiertag-Buchungen automatisch ergänzt`,
+            description: "Für die nächsten 60 Tage.",
+          });
+        }
+      } catch (err) {
+        console.error("Feiertag-Auto-Book failed:", err);
       }
     };
-    ensureProfile();
+    ensureProfileAndBookHolidays();
   }, []);
 
   // Check if user still exists (handles deleted users)

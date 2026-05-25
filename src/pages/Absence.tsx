@@ -10,21 +10,18 @@ import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
-import { Calendar, Upload, Trash2, Sun, Thermometer, BookOpen, Clock, GraduationCap, PartyPopper, PenLine } from "lucide-react";
+import { Calendar, Upload, Trash2, Sun, Clock } from "lucide-react";
 import { getTargetHoursForDate } from "@/lib/workingHours";
 import { getBuroSchedule, getSchedulePauseMinutes } from "@/lib/buroSchedules";
+import {
+  ABSENCE_TYPES,
+  ABSENCE_TAETIGKEITEN_INKL_FEIERTAG,
+  findAbsenceTypeById,
+  findAbsenceTypeByTaetigkeit,
+  type AbsenceTypeId,
+} from "@/lib/absenceTypes";
 
-const ABSENCE_TYPES = [
-  { value: "urlaub", label: "Urlaub", icon: Sun, color: "text-green-600" },
-  { value: "krankenstand", label: "Krankenstand", icon: Thermometer, color: "text-red-600" },
-  { value: "zeitausgleich", label: "Zeitausgleich", icon: Clock, color: "text-purple-600" },
-  { value: "fortbildung", label: "Fortbildung", icon: BookOpen, color: "text-blue-600" },
-  { value: "feiertag", label: "Feiertag", icon: PartyPopper, color: "text-orange-600" },
-  { value: "schule", label: "Berufsschule", icon: GraduationCap, color: "text-cyan-600" },
-  { value: "sonstiges", label: "Eigener Grund", icon: PenLine, color: "text-gray-600" },
-] as const;
-
-type AbsenceType = (typeof ABSENCE_TYPES)[number]["value"];
+type AbsenceType = AbsenceTypeId;
 
 type ExistingAbsence = {
   id: string;
@@ -46,16 +43,9 @@ function countWorkingDays(start: string, end: string): number {
 }
 
 function capitalizeType(type: AbsenceType, customReason?: string): string {
-  switch (type) {
-    case "urlaub": return "Urlaub";
-    case "krankenstand": return "Krankenstand";
-    case "zeitausgleich": return "ZA";
-    case "fortbildung": return "Fortbildung";
-    case "feiertag": return "Feiertag";
-    case "schule": return "Schule";
-    case "sonstiges": return customReason || "Sonstiges";
-    default: return type;
-  }
+  if (type === "sonstiges" && customReason && customReason.trim()) return customReason;
+  const t = findAbsenceTypeById(type);
+  return t?.taetigkeit || "Sonstiges";
 }
 
 export default function Absence() {
@@ -76,6 +66,8 @@ export default function Absence() {
   const [zaStunden, setZaStunden] = useState("");
   const [zeitkontoBalance, setZeitkontoBalance] = useState(0);
   const [customAbsenceReason, setCustomAbsenceReason] = useState("");
+  // Manueller Stunden-Override für Arzt / Sonstiges (leer = Tagessoll)
+  const [arztSonstigesStunden, setArztSonstigesStunden] = useState("");
 
   useEffect(() => {
     const init = async () => {
@@ -130,17 +122,15 @@ export default function Absence() {
     const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
     const endStr = `${endOfMonth.getFullYear()}-${String(endOfMonth.getMonth() + 1).padStart(2, "0")}-${String(endOfMonth.getDate()).padStart(2, "0")}`;
 
-    // Whitelist: nur Strings die capitalizeType() beim Anlegen einer Absenz schreibt.
-    // Verhindert dass Arbeitseinträge wie "Werk: …", "PL: …", "Vorfertigung: …"
-    // oder Multi-Bericht-LB-Zeilen ("Dampfsperre …") fälschlich als Absenz erscheinen.
-    const ABSENCE_TAETIGKEITEN = ["Urlaub", "Krankenstand", "ZA", "Fortbildung", "Feiertag", "Schule", "Sonstiges"];
+    // Whitelist aus zentraler absenceTypes-Lib (inkl. Feiertag, damit auto-gebuchte
+    // Feiertage in "Meine Abwesenheiten" sichtbar sind).
     const { data } = await supabase
       .from("time_entries")
       .select("id, datum, taetigkeit, stunden")
       .eq("user_id", userId)
       .gte("datum", startOfMonth)
       .lte("datum", endStr)
-      .in("taetigkeit", ABSENCE_TAETIGKEITEN)
+      .in("taetigkeit", ABSENCE_TAETIGKEITEN_INKL_FEIERTAG)
       .order("datum", { ascending: false });
 
     if (data) {
@@ -264,10 +254,14 @@ export default function Absence() {
             endTime = isFriday ? "14:00" : "15:00";
           }
 
-          // ZA Teilzeit: Manuelle Stunden, nur 1 Tag
+          // ZA Teilzeit / Arzt / Sonstiges: manueller Stunden-Override
           let hoursForDay = targetHours;
           if (absenceType === "zeitausgleich" && zaMode === "teilzeit" && zaStunden) {
             hoursForDay = parseFloat(zaStunden.replace(",", ".")) || targetHours;
+          }
+          if ((absenceType === "arzt" || absenceType === "sonstiges") && arztSonstigesStunden) {
+            const parsed = parseFloat(arztSonstigesStunden.replace(",", "."));
+            if (!isNaN(parsed) && parsed > 0) hoursForDay = parsed;
           }
 
           if (absenceType === "zeitausgleich") {
@@ -453,15 +447,15 @@ export default function Absence() {
                   const Icon = type.icon;
                   return (
                     <Label
-                      key={type.value}
-                      htmlFor={`type-${type.value}`}
+                      key={type.id}
+                      htmlFor={`type-${type.id}`}
                       className={`flex items-center gap-2 rounded-lg border p-3 cursor-pointer transition-all ${
-                        absenceType === type.value
+                        absenceType === type.id
                           ? "border-primary bg-primary/5 ring-2 ring-primary/20"
                           : "border-border hover:border-primary/30"
                       }`}
                     >
-                      <RadioGroupItem value={type.value} id={`type-${type.value}`} className="sr-only" />
+                      <RadioGroupItem value={type.id} id={`type-${type.id}`} className="sr-only" />
                       <Icon className={`h-5 w-5 ${type.color} shrink-0`} />
                       <span className="text-sm font-medium">{type.label}</span>
                     </Label>
@@ -609,6 +603,31 @@ export default function Absence() {
               </div>
             )}
 
+            {/* Stundenanzahl manuell (Arzt / Sonstiges) — leer = volles Tagessoll */}
+            {(absenceType === "arzt" || absenceType === "sonstiges") && (
+              <div className="space-y-2">
+                <Label htmlFor="manual-hours">
+                  Stunden pro Tag (optional — leer = volles Tagessoll)
+                </Label>
+                <Input
+                  id="manual-hours"
+                  type="number"
+                  step="0.25"
+                  min="0"
+                  max="12"
+                  inputMode="decimal"
+                  value={arztSonstigesStunden}
+                  onChange={(e) => setArztSonstigesStunden(e.target.value)}
+                  placeholder="z.B. 2 (Stunden)"
+                />
+                <p className="text-xs text-muted-foreground">
+                  {arztSonstigesStunden
+                    ? `${parseFloat(arztSonstigesStunden.replace(",", ".")) || 0}h pro Tag`
+                    : "Leer = ganzer Arbeitstag laut Soll"}
+                </p>
+              </div>
+            )}
+
             {/* Krankmeldung Upload (krankenstand only) */}
             {absenceType === "krankenstand" && (
               <div className="space-y-2">
@@ -664,9 +683,9 @@ export default function Absence() {
               <div className="space-y-2">
                 {existingAbsences.map((absence) => {
                   const isFuture = absence.datum >= today;
-                  const typeInfo = ABSENCE_TYPES.find(
-                    (t) => capitalizeType(t.value) === absence.taetigkeit
-                  );
+                  // findAbsenceTypeByTaetigkeit erkennt auch "Feiertag" (auto-gebucht)
+                  // und custom "Sonstiges"-Strings (fallback).
+                  const typeInfo = findAbsenceTypeByTaetigkeit(absence.taetigkeit);
                   return (
                     <div
                       key={absence.id}
