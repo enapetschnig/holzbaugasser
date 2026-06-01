@@ -51,7 +51,7 @@ function AppContent() {
       // Auto-Feiertage: max. 1x pro Tag pro Browser (throttle via localStorage),
       // nur Admin/PL/Vorarbeiter (RLS-Rechte für fremde User).
       const today = new Date().toISOString().slice(0, 10);
-      const lastRun = localStorage.getItem("feiertag_auto_book_last");
+      const lastRun = localStorage.getItem("feiertag_auto_book_last_v2");
       if (lastRun === today) return;
       try {
         const { data: r } = await supabase
@@ -61,11 +61,11 @@ function AppContent() {
           .maybeSingle();
         const role = ((r as any)?.role as string) || "";
         const { added } = await autoBookFeiertage(role);
-        localStorage.setItem("feiertag_auto_book_last", today);
+        localStorage.setItem("feiertag_auto_book_last_v2", today);
         if (added > 0) {
           toast({
             title: `${added} Feiertag-Buchungen automatisch ergänzt`,
-            description: "Für die nächsten 60 Tage.",
+            description: "Für das laufende Jahr (rückwirkend) plus 60 Tage voraus.",
           });
         }
       } catch (err) {

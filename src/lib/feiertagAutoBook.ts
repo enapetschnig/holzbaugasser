@@ -42,10 +42,11 @@ export async function autoBookFeiertage(
   const userIds = profiles.map((p) => p.id).filter((id) => !externIds.has(id));
   if (userIds.length === 0) return { added: 0 };
 
-  // Relevante Feiertage: heute bis +60 Tage. Begrenzt damit pro Login keine
-  // riesigen Inserts laufen — die nächsten Wochen reichen.
+  // Relevante Feiertage: Jahresanfang bis +60 Tage. Vergangene werden
+  // rückwirkend eingebucht (idempotent durch existing-Check), zukünftige
+  // bis 2 Monate voraus.
   const now = new Date();
-  const today = now.toISOString().slice(0, 10);
+  const yearStart = `${now.getFullYear()}-01-01`;
   const limitDate = new Date(now);
   limitDate.setDate(limitDate.getDate() + 60);
   const limitStr = limitDate.toISOString().slice(0, 10);
@@ -55,7 +56,7 @@ export async function autoBookFeiertage(
   const allFeiertage: Feiertag[] = [];
   for (const y of years) allFeiertage.push(...getAustrianFeiertage(y));
   const relevant = allFeiertage.filter(
-    (f) => f.datum >= today && f.datum <= limitStr
+    (f) => f.datum >= yearStart && f.datum <= limitStr
   );
   if (relevant.length === 0) return { added: 0 };
 
