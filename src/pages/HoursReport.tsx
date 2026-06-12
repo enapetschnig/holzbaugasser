@@ -970,7 +970,7 @@ export default function HoursReport() {
       const [{ data: berichte }, { data: maData }] = await Promise.all([
         supabase
           .from("leistungsberichte" as any)
-          .select("id, datum, projekt_id")
+          .select("id, datum, projekt_id, bericht_typ")
           .in("id", ids),
         supabase
           .from("leistungsbericht_mitarbeiter" as any)
@@ -978,12 +978,11 @@ export default function HoursReport() {
           .in("bericht_id", ids),
       ]);
 
-      // 2. Lösche time_entries für jeden Bericht — hat kein FK, muss manuell
-      // aufgeräumt werden, sonst Datenschrott in der Stundenauswertung.
+      // 2. Legacy-time_entries (ohne bericht_id-Verknüpfung) manuell aufräumen.
+      // Neue Einträge (mit Verknüpfung) löscht der FK CASCADE beim Bericht-Delete
+      // in Schritt 3 automatisch — dort ist KEINE Heuristik mehr nötig.
       // Standard-LB: project_id im Header gesetzt → auf Projekt filtern damit
       // andere LBs am gleichen Tag (Multi-Bericht) unangetastet bleiben.
-      // Werk/LKW: projekt_id=NULL im Header; UNIQUE-Constraint sichert max. 1
-      // Bericht pro (User, Datum, Typ) → Cleanup ohne project_id ist sicher.
       // entry_typ-Filter immer: schützt PL/Vorfertigung/Absenz-Einträge.
       const berichtIdToTyp: Record<string, string> = {};
       ((berichte as any[]) || []).forEach((b: any) => {
@@ -1000,9 +999,13 @@ export default function HoursReport() {
         let teQuery: any = supabase
           .from("time_entries")
           .delete()
+          .is("bericht_id", null)
           .eq("datum", b.datum)
           .eq("entry_typ", typ)
-          .in("user_id", userIds);
+          .in("user_id", userIds)
+          // Absenzen + Feiertags-Automatik haben entry_typ-Default 'leistungsbericht'
+          // und project_id NULL — sie dürfen hier NIE mitgelöscht werden.
+          .not("taetigkeit", "in", '("Urlaub","Krankenstand","Fortbildung","Feiertag","Schule","Weiterbildung","ZA","Zeitausgleich","Arzt","Sonstiges")');
         if (b.projekt_id) teQuery = teQuery.eq("project_id", b.projekt_id);
         await teQuery;
       }

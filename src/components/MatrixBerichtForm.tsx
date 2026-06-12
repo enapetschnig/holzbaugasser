@@ -161,6 +161,10 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
   // ----- Edit-Mode -----
   const editingBerichtId = searchParams.get("edit");
   const [originalMaIds, setOriginalMaIds] = useState<string[]>([]);
+  // erstellt_von des geladenen Berichts — bleibt beim Re-Insert erhalten
+  // (Admin/PL editieren fremde Berichte; Besitzerwechsel würde mit dem
+  // UNIQUE-Constraint des Editors kollidieren).
+  const [originalErstelltVon, setOriginalErstelltVon] = useState<string | null>(null);
 
   // ----- "Bereits heute gebucht"-Card: alle eigenen Berichte (LB + Werkstatt + LKW)
   // für (User, Datum), exkl. dem aktuell editierten. -----
@@ -355,6 +359,7 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
       setKeinePause(!b.pause_von && !b.pause_bis);
       setAnmerkungen(b.anmerkungen || "");
       setFertiggestellt(b.fertiggestellt || false);
+      setOriginalErstelltVon(b.erstellt_von || null);
 
       // Projekt-Zeilen aus leistungsbericht_taetigkeiten
       const { data: taetData } = await supabase
@@ -634,6 +639,24 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
       return;
     }
 
+    // Stunden in einer Zeile OHNE gewähltes Projekt blockieren — sonst zählt
+    // die UI-Summe sie, der Save verwirft sie aber still (Stunden verschwinden).
+    const invalidZeilen = projektZeilen.filter((z) => !z.projektId);
+    for (const z of invalidZeilen) {
+      for (const row of activeMaRows) {
+        const h = parseStunden(row.stunden[z.localId] || "");
+        if (h > 0) {
+          const zeilenNr = projektZeilen.findIndex((p) => p.localId === z.localId) + 1;
+          toast({
+            variant: "destructive",
+            title: "Fehler",
+            description: `Zeile ${zeilenNr} hat Stunden (${h}h), aber kein Projekt ausgewählt. Bitte Projekt wählen oder Stunden entfernen.`,
+          });
+          return;
+        }
+      }
+    }
+
     setSaving(true);
     try {
       // Wenn nicht im URL-Edit-Mode, aber ein bestehender Bericht für (user, datum, typ) existiert,
@@ -652,30 +675,58 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
 
       // 1. Editing oder Auto-Overwrite? Alte Daten löschen
       if (cleanupBerichtId) {
+        // time_entries ZUERST über die exakte Bericht-Verknüpfung —
+        // trifft garantiert nur Einträge DIESES Berichts.
+        const { error: teByBerichtErr } = await supabase
+          .from("time_entries")
+          .delete()
+          .eq("bericht_id", cleanupBerichtId);
+        if (teByBerichtErr) throw teByBerichtErr;
+
+        // Legacy-Fallback für Alt-Berichte (Einträge ohne Verknüpfung):
+        // alte Heuristik, aber NUR auf bericht_id IS NULL beschränkt.
+        // MA-Union: originalMaIds (URL-Edit) ∪ aktuelle Form-MA ∪ MA des
+        // überschriebenen Berichts (Auto-Overwrite-Pfad hat keine originalMaIds —
+        // sonst behalten entfallene MA ihre verwaisten Legacy-Einträge).
+        const { data: cleanupMaRows } = await supabase
+          .from("leistungsbericht_mitarbeiter" as any)
+          .select("mitarbeiter_id")
+          .eq("bericht_id", cleanupBerichtId);
+        const cleanupBerichtMaIds = ((cleanupMaRows as any[]) || [])
+          .map((m) => m.mitarbeiter_id)
+          .filter(Boolean);
+        const allAffectedMaIds = Array.from(new Set([
+          ...originalMaIds,
+          ...cleanupBerichtMaIds,
+          ...activeMaRows.map((r) => r.mitarbeiterId),
+        ]));
+        if (allAffectedMaIds.length > 0) {
+          const teQuery: any = supabase.from("time_entries").delete();
+          await teQuery
+            .is("bericht_id", null)
+            .eq("datum", datum)
+            .eq("entry_typ", berichtTyp)
+            .in("user_id", allAffectedMaIds);
+        }
+
         await supabase.from("leistungsbericht_stunden" as any).delete().eq("bericht_id", cleanupBerichtId);
         await supabase.from("leistungsbericht_mitarbeiter" as any).delete().eq("bericht_id", cleanupBerichtId);
         await supabase.from("leistungsbericht_taetigkeiten" as any).delete().eq("bericht_id", cleanupBerichtId);
         await supabase.from("leistungsbericht_geraete" as any).delete().eq("bericht_id", cleanupBerichtId);
         await supabase.from("leistungsbericht_materialien" as any).delete().eq("bericht_id", cleanupBerichtId);
-
-        // time_entries: alle alten MAs (originalMaIds) ∪ aktuelle MAs für den Tag mit unserem Typ
-        const allAffectedMaIds = Array.from(new Set([...originalMaIds, ...activeMaRows.map((r) => r.mitarbeiterId)]));
-        if (allAffectedMaIds.length > 0) {
-          const teQuery: any = supabase.from("time_entries").delete();
-          await teQuery.eq("datum", datum).eq("entry_typ", berichtTyp).in("user_id", allAffectedMaIds);
-        }
-        await supabase.from("leistungsberichte" as any).delete().eq("id", cleanupBerichtId);
+        const { error: berichtDelErr } = await supabase.from("leistungsberichte" as any).delete().eq("id", cleanupBerichtId);
+        if (berichtDelErr) throw berichtDelErr;
       }
 
-      // Schutz-Schicht gegen Orphan-time_entries: vor jedem INSERT alle bestehenden
-      // time_entries für (user, datum, typ) löschen — auch wenn kein Bericht-Match
-      // gefunden wurde. Verhindert Doppelbuchungen falls aus früheren Delete-Bugs
-      // ein time_entry ohne zugehörigen Bericht in der DB liegt.
+      // Schutz-Schicht gegen verwaiste Alt-time_entries (ohne Bericht-Verknüpfung):
+      // NUR bericht_id IS NULL — Einträge gültiger Berichte sind über die
+      // Verknüpfung geschützt und werden hier nie mitgelöscht.
       const activeMaIdsForOrphanCleanup = activeMaRows.map((r) => r.mitarbeiterId).filter(Boolean);
       if (activeMaIdsForOrphanCleanup.length > 0) {
         await supabase
           .from("time_entries")
           .delete()
+          .is("bericht_id", null)
           .eq("datum", datum)
           .eq("entry_typ", berichtTyp)
           .in("user_id", activeMaIdsForOrphanCleanup);
@@ -690,7 +741,7 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
       const { data: berichtData, error: berichtErr } = await supabase
         .from("leistungsberichte" as any)
         .insert({
-          erstellt_von: currentUserId,
+          erstellt_von: (editingBerichtId && originalErstelltVon) || currentUserId,
           projekt_id: null,
           bericht_typ: berichtTyp,
           datum,
@@ -804,6 +855,9 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
               end_time: computedAbfahrt || arbeitsbeginn || "06:30",
               pause_minutes: pauseMinuten,
               entry_typ: berichtTyp,
+              // Exakte Verknüpfung zum Bericht (Edit/Delete treffen nur eigene
+              // Einträge; Bericht-Delete räumt per FK CASCADE auf).
+              bericht_id: berichtId,
             });
           }
         }

@@ -16,6 +16,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import ChangePasswordDialog from "@/components/ChangePasswordDialog";
+import { darfLkwBericht } from "@/lib/lkwBerechtigte";
 
 type Project = {
   id: string;
@@ -487,8 +488,8 @@ export default function Index() {
             </Card>
           )}
 
-          {/* LKW-Bericht (Matrix) */}
-          {canUseVorfertigung && (
+          {/* LKW-Bericht (Matrix) — nur für die zwei LKW-Fahrer (siehe lib/lkwBerechtigte) */}
+          {darfLkwBericht(user?.id) && (
             <Card
               className="cursor-pointer hover:shadow-lg transition-all hover:border-primary/50"
               onClick={() => navigate("/lkw-bericht")}

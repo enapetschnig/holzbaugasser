@@ -173,8 +173,14 @@ const TimeTracking = () => {
     onConfirm: () => void | Promise<void>;
   } | null>(null);
 
-  // Original-MA-Liste beim Edit (zum Erkennen neu hinzugefügter MA)
+  // Original-Snapshot beim Edit: MA-Liste, Datum, Projekt und Ersteller des
+  // GELADENEN Berichts. Der Legacy-time_entries-Cleanup muss gegen diese
+  // Originalwerte laufen (nicht gegen den editierbaren Form-State), und
+  // erstellt_von darf beim Re-Insert nicht auf den Editor wechseln.
   const [originalMaIds, setOriginalMaIds] = useState<string[]>([]);
+  const [originalDatum, setOriginalDatum] = useState<string | null>(null);
+  const [originalProjektId, setOriginalProjektId] = useState<string | null>(null);
+  const [originalErstelltVon, setOriginalErstelltVon] = useState<string | null>(null);
 
   // Data
   const [projects, setProjects] = useState<Project[]>([]);
@@ -732,9 +738,15 @@ const TimeTracking = () => {
     );
   };
 
+  // Neue Position immer max+1 (nicht length+1): nach Edit-Load können die
+  // Positionen Lücken haben (z.B. 1,2,4) — length+1 würde dann kollidieren
+  // und beim Save den UNIQUE-Constraint (bericht_id, position) verletzen.
+  const nextFreiePosition = () =>
+    Math.max(0, ...taetigkeiten.map((t) => t.position)) + 1;
+
   const addTaetigkeit = () => {
     if (taetigkeiten.length >= 8) return;
-    const nextPos = taetigkeiten.length + 1;
+    const nextPos = nextFreiePosition();
     setTaetigkeiten((prev) => [...prev, { position: nextPos, bezeichnung: "" }]);
   };
 
@@ -745,7 +757,7 @@ const TimeTracking = () => {
       schmutz: "Schmutzzulage",
       regen: "Regen",
     };
-    const nextPos = taetigkeiten.length + 1;
+    const nextPos = nextFreiePosition();
     setTaetigkeiten((prev) => [...prev, { position: nextPos, bezeichnung: labels[type], tag: type }]);
   };
 
@@ -995,6 +1007,27 @@ const TimeTracking = () => {
       return "Jeder Mitarbeiter darf nur einmal vorkommen.";
     }
 
+    // Stunden in Zeilen OHNE Tätigkeits-Text blockieren. Sonst landen die
+    // Stunden beim Speichern auf der falschen Zeile (Pause-Kollision) oder
+    // verschwinden aus der Berichts-Matrix (Phantom-Stunden) — beides hat
+    // real zu falschen Berichten geführt (Benda 06/2026).
+    const benanntePositionen = new Set(
+      taetigkeiten
+        .filter((t) => t.position === 1 || t.bezeichnung.trim())
+        .map((t) => t.position)
+    );
+    for (const r of activeMitarbeiter) {
+      for (const [posStr, rawH] of Object.entries(r.stunden)) {
+        const pos = Number(posStr);
+        const h = parseStunden(rawH);
+        if (h > 0 && !benanntePositionen.has(pos)) {
+          const maName = profiles.find((p) => p.id === r.mitarbeiterId);
+          const name = maName ? `${maName.vorname} ${maName.nachname}` : "Ein Mitarbeiter";
+          return `${name} hat ${h}h in Zeile ${pos} eingetragen, aber Zeile ${pos} hat keine Tätigkeits-Bezeichnung. Bitte Tätigkeit eintragen oder Stunden entfernen.`;
+        }
+      }
+    }
+
     return null;
   };
 
@@ -1092,9 +1125,68 @@ const TimeTracking = () => {
     const { cleanupBeforeInsert, activeMaIdsForCleanup } = opts;
     setSaving(true);
     try {
+      // erstellt_von bleibt beim Edit der Original-Ersteller (Admin/PL editieren
+      // fremde Berichte — der Bericht darf dabei nicht den Besitzer wechseln,
+      // sonst kollidiert der Re-Insert mit einem eigenen Bericht des Editors).
+      const erstelltVonForSave = (editingBerichtId && originalErstelltVon) || currentUserId;
+
       // If editing, delete old records first
       if (editingBerichtId) {
-        // Delete in correct order (foreign keys)
+        // SICHERHEITS-CHECK VOR dem Löschen: existiert bereits ein ANDERER
+        // Bericht desselben Erstellers für (Projekt, Datum)? Dann würde der
+        // Re-Insert am UNIQUE-Constraint scheitern, NACHDEM der alte Bericht
+        // schon gelöscht wäre → Totalverlust. Lieber vorher abbrechen.
+        const { data: dupCheck } = await supabase
+          .from("leistungsberichte" as any)
+          .select("id")
+          .eq("erstellt_von", erstelltVonForSave)
+          .eq("datum", datum)
+          .eq("projekt_id", projektId)
+          .neq("id", editingBerichtId)
+          .maybeSingle();
+        if (dupCheck) {
+          toast({
+            variant: "destructive",
+            title: "Speichern nicht möglich",
+            description: "Für dieses Projekt und Datum existiert bereits ein anderer Bericht desselben Erstellers. Bitte zuerst den anderen Bericht löschen oder Datum/Projekt anpassen.",
+          });
+          setSaving(false);
+          return;
+        }
+
+        // time_entries ZUERST über die exakte Bericht-Verknüpfung löschen —
+        // trifft garantiert nur die Einträge DIESES Berichts (auch wenn der
+        // User MA entfernt oder Datum/Projekt geändert hat).
+        const { error: teByBerichtErr } = await supabase
+          .from("time_entries")
+          .delete()
+          .eq("bericht_id", editingBerichtId);
+        if (teByBerichtErr) throw teByBerichtErr;
+
+        // Legacy-Fallback: Alt-Berichte (vor Einführung von bericht_id) haben
+        // time_entries ohne Verknüpfung — für die greift die alte Heuristik
+        // (NUR Einträge ohne bericht_id, damit fremde Berichte sicher sind).
+        // WICHTIG: gegen die ORIGINAL-Werte des geladenen Berichts laufen
+        // (Datum/Projekt/MA-Union) — der User kann im Edit alles geändert haben.
+        const editMaIds = Array.from(new Set([
+          ...originalMaIds,
+          ...mitarbeiterRows.filter((r) => r.mitarbeiterId).map((r) => r.mitarbeiterId),
+        ]));
+        const legacyDatum = originalDatum || datum;
+        const legacyProjektId = originalProjektId || projektId;
+        if (editMaIds.length > 0 && legacyProjektId) {
+          await (supabase
+            .from("time_entries")
+            .delete()
+            .is("bericht_id", null)
+            .eq("datum", legacyDatum)
+            .eq("project_id", legacyProjektId)
+            .eq("entry_typ", "leistungsbericht")
+            .in("user_id", editMaIds) as any)
+            .not("taetigkeit", "in", '("Urlaub","Krankenstand","Fortbildung","Feiertag","Schule","Weiterbildung","ZA","Zeitausgleich","Arzt","Sonstiges")');
+        }
+
+        // Bericht-Kind-Tabellen + Bericht selbst löschen
         await supabase
           .from("leistungsbericht_stunden" as any)
           .delete()
@@ -1116,49 +1208,25 @@ const TimeTracking = () => {
           .delete()
           .eq("bericht_id", editingBerichtId);
 
-        // Delete associated time_entries — nur für das AKTUELLE Projekt + Leistungsbericht-Typ,
-        // damit andere Berichte (anderes Projekt am gleichen Tag) bzw. Vorfertigung/PL-Einträge
-        // unangetastet bleiben.
-        await supabase
-          .from("time_entries")
-          .delete()
-          .eq("datum", datum)
-          .eq("project_id", projektId)
-          .eq("entry_typ", "leistungsbericht")
-          .in(
-            "user_id",
-            mitarbeiterRows.filter((r) => r.mitarbeiterId).map((r) => r.mitarbeiterId)
-          );
-
-        // Delete the bericht itself
-        await supabase
+        const { error: berichtDelErr } = await supabase
           .from("leistungsberichte" as any)
           .delete()
           .eq("id", editingBerichtId);
+        if (berichtDelErr) throw berichtDelErr;
       }
 
       // Cleanup: Wenn der User "Überschreiben" gewählt hat (NEW-Modus mit existing entries),
       // alte Daten der betroffenen Mitarbeiter sauber entfernen.
       if (cleanupBeforeInsert && activeMaIdsForCleanup.length > 0) {
-        // 1. Lösche existierende time_entries für die MA am Datum + Projekt — nur Leistungsbericht-Typ.
-        // Vorfertigung/Projektleiter/Absenz bleiben unangetastet (entry_typ-Filter).
-        await (supabase
-          .from("time_entries")
-          .delete()
-          .eq("datum", datum)
-          .eq("project_id", projektId)
-          .eq("entry_typ", "leistungsbericht")
-          .in("user_id", activeMaIdsForCleanup) as any)
-          .not("taetigkeit", "in", '("Urlaub","Krankenstand","Fortbildung","Feiertag","Schule","Weiterbildung","ZA","Zeitausgleich")');
-
         // 2. Finde andere Leistungsberichte am gleichen Datum + GLEICHEM Projekt
         // mit den betroffenen Mitarbeitern (Multi-Bericht für anderes Projekt = OK, nicht aufräumen)
-        const { data: overlappingMA } = await supabase
+        const { data: overlappingMA, error: overlapErr } = await supabase
           .from("leistungsbericht_mitarbeiter" as any)
           .select("id, bericht_id, mitarbeiter_id, leistungsberichte!inner(id, datum, projekt_id)")
           .in("mitarbeiter_id", activeMaIdsForCleanup)
           .eq("leistungsberichte.datum" as any, datum)
           .eq("leistungsberichte.projekt_id" as any, projektId);
+        if (overlapErr) throw overlapErr;
 
         const otherBerichtIds = new Set<string>();
         const otherMaRowIds: string[] = [];
@@ -1166,6 +1234,26 @@ const TimeTracking = () => {
           otherBerichtIds.add(om.bericht_id);
           otherMaRowIds.push(om.id);
         }
+
+        // 1. Lösche time_entries der betroffenen MA — exakt über die Bericht-
+        // Verknüpfung der ÜBERLAPPENDEN Berichte (nie fremde Berichte) plus
+        // Legacy-Einträge ohne Verknüpfung (alte Heuristik, nur bericht_id IS NULL).
+        if (otherBerichtIds.size > 0) {
+          await supabase
+            .from("time_entries")
+            .delete()
+            .in("bericht_id", Array.from(otherBerichtIds))
+            .in("user_id", activeMaIdsForCleanup);
+        }
+        await (supabase
+          .from("time_entries")
+          .delete()
+          .is("bericht_id", null)
+          .eq("datum", datum)
+          .eq("project_id", projektId)
+          .eq("entry_typ", "leistungsbericht")
+          .in("user_id", activeMaIdsForCleanup) as any)
+          .not("taetigkeit", "in", '("Urlaub","Krankenstand","Fortbildung","Feiertag","Schule","Weiterbildung","ZA","Zeitausgleich","Arzt","Sonstiges")');
 
         // 3. Lösche leistungsbericht_stunden für die betroffenen MA in den anderen Berichten
         if (otherBerichtIds.size > 0 && activeMaIdsForCleanup.length > 0) {
@@ -1192,6 +1280,7 @@ const TimeTracking = () => {
             .eq("bericht_id", bid);
           if ((count ?? 0) === 0) {
             // Bericht hat keine Mitarbeiter mehr → komplett aufräumen
+            // (Bericht-Delete räumt verknüpfte time_entries per FK CASCADE mit)
             await supabase.from("leistungsbericht_taetigkeiten" as any).delete().eq("bericht_id", bid);
             await supabase.from("leistungsbericht_geraete" as any).delete().eq("bericht_id", bid);
             await supabase.from("leistungsbericht_materialien" as any).delete().eq("bericht_id", bid);
@@ -1200,21 +1289,22 @@ const TimeTracking = () => {
         }
       }
 
-      // Schutz-Schicht gegen Orphan-time_entries: vor jedem INSERT alle bestehenden
-      // time_entries für (user, datum, projekt, entry_typ='leistungsbericht') löschen
-      // — auch wenn kein Bericht-Match war. Verhindert Doppelbuchungen, falls aus
-      // früheren Delete-Bugs ein time_entry ohne zugehörigen Bericht in der DB liegt.
-      // project_id muss rein wegen Multi-Bericht-Tagen (gleicher User, anderer LB
-      // für anderes Projekt am gleichen Tag bleibt unangetastet).
+      // Schutz-Schicht gegen verwaiste Alt-time_entries (ohne Bericht-Verknüpfung):
+      // NUR Einträge mit bericht_id IS NULL anfassen — Einträge die zu einem
+      // existierenden Bericht gehören, sind über die Verknüpfung geschützt und
+      // werden hier nie gelöscht (vorher konnten sich Mehrfach-Berichte am selben
+      // Tag gegenseitig die time_entries wegnehmen).
       const orphanCleanupMaIds = mitarbeiterRows.filter((r) => r.mitarbeiterId).map((r) => r.mitarbeiterId);
       if (orphanCleanupMaIds.length > 0 && projektId) {
-        await supabase
+        await (supabase
           .from("time_entries")
           .delete()
+          .is("bericht_id", null)
           .eq("datum", datum)
           .eq("entry_typ", "leistungsbericht")
           .eq("project_id", projektId)
-          .in("user_id", orphanCleanupMaIds);
+          .in("user_id", orphanCleanupMaIds) as any)
+          .not("taetigkeit", "in", '("Urlaub","Krankenstand","Fortbildung","Feiertag","Schule","Weiterbildung","ZA","Zeitausgleich","Arzt","Sonstiges")');
       }
 
       // 1. Create Leistungsbericht
@@ -1237,7 +1327,7 @@ const TimeTracking = () => {
       const { data: berichtData, error: berichtError } = await supabase
         .from("leistungsberichte" as any)
         .insert({
-          erstellt_von: currentUserId,
+          erstellt_von: erstelltVonForSave,
           projekt_id: projektId,
           datum,
           objekt: objekt || null,
@@ -1259,6 +1349,19 @@ const TimeTracking = () => {
       if (berichtError) throw berichtError;
       const berichtId = (berichtData as any).id;
 
+      // Rollback-Helfer: räumt bei Fehlern in Folge-Schritten den halben
+      // Bericht weg, damit kein Bericht ohne time_entries stehen bleibt.
+      const rollbackBericht = async () => {
+        try {
+          await supabase.from("leistungsbericht_stunden" as any).delete().eq("bericht_id", berichtId);
+          await supabase.from("leistungsbericht_mitarbeiter" as any).delete().eq("bericht_id", berichtId);
+          await supabase.from("leistungsbericht_taetigkeiten" as any).delete().eq("bericht_id", berichtId);
+          await supabase.from("leistungsberichte" as any).delete().eq("id", berichtId);
+        } catch {
+          // best-effort
+        }
+      };
+
       // 2. Build final taetigkeiten list with auto-fills
       const finalTaetigkeiten: { position: number; bezeichnung: string; tag?: string }[] = [];
       for (const t of taetigkeiten) {
@@ -1270,8 +1373,11 @@ const TimeTracking = () => {
         }
       }
 
-      // Add Pause position
-      const pausePos = finalTaetigkeiten.length + 1;
+      // Add Pause position — IMMER größer als jede existierende Matrix-Position,
+      // sonst kollidiert die Pause-Zeile mit Stunden einer (ggf. unbenannten)
+      // Tätigkeits-Zeile und die Stunden landen auf "Pause" (Benda-Bug 06/2026).
+      const maxPos = Math.max(0, ...taetigkeiten.map((t) => t.position));
+      const pausePos = maxPos + 1;
       finalTaetigkeiten.push({ position: pausePos, bezeichnung: pauseText });
 
       // 3. Create taetigkeiten records (with tag)
@@ -1287,7 +1393,7 @@ const TimeTracking = () => {
         )
         .select("id, position");
 
-      if (taetigkeitenError) throw taetigkeitenError;
+      if (taetigkeitenError) { await rollbackBericht(); throw taetigkeitenError; }
 
       // Map position -> taetigkeit DB id
       const positionToTaetigkeitId: Record<number, string> = {};
@@ -1342,7 +1448,7 @@ const TimeTracking = () => {
         .from("leistungsbericht_mitarbeiter" as any)
         .insert(mitarbeiterInserts);
 
-      if (mitarbeiterError) throw mitarbeiterError;
+      if (mitarbeiterError) { await rollbackBericht(); throw mitarbeiterError; }
 
       // 5. Create stunden records (matrix entries)
       const stundenInserts: any[] = [];
@@ -1366,7 +1472,7 @@ const TimeTracking = () => {
           .from("leistungsbericht_stunden" as any)
           .insert(stundenInserts);
 
-        if (stundenError) throw stundenError;
+        if (stundenError) { await rollbackBericht(); throw stundenError; }
       }
 
       // 6. Create time_entries for each mitarbeiter
@@ -1405,6 +1511,9 @@ const TimeTracking = () => {
           pause_minutes: pauseMinuten,
           location_type: r.istWerkstatt ? "werkstatt" : "baustelle",
           entry_typ: "leistungsbericht",
+          // Exakte Verknüpfung zum Bericht: Edit/Delete treffen damit garantiert
+          // nur die eigenen Einträge; Bericht-Delete räumt per FK CASCADE auf.
+          bericht_id: berichtId,
         };
       });
 
@@ -1412,7 +1521,7 @@ const TimeTracking = () => {
         .from("time_entries")
         .insert(timeEntryInserts);
 
-      if (timeError) throw timeError;
+      if (timeError) { await rollbackBericht(); throw timeError; }
 
       // 7. Save Geräte
       if (geraete.length > 0) {
@@ -1482,6 +1591,9 @@ const TimeTracking = () => {
   const resetForm = () => {
     setEditingBerichtId(null);
     setOriginalMaIds([]);
+    setOriginalDatum(null);
+    setOriginalProjektId(null);
+    setOriginalErstelltVon(null);
     setProjektId("");
     setObjekt("");
     setArbeitsbeginn("06:30");
@@ -1525,6 +1637,10 @@ const TimeTracking = () => {
       setEditingBerichtId(id);
       setDatum(b.datum);
       setProjektId(b.projekt_id);
+      // Original-Snapshot für den Edit-Save (Legacy-Cleanup + erstellt_von)
+      setOriginalDatum(b.datum);
+      setOriginalProjektId(b.projekt_id);
+      setOriginalErstelltVon(b.erstellt_von || null);
       setObjekt(b.objekt || "");
       setArbeitsbeginn(b.arbeitsbeginn || "06:30");
       setAnkunftZeit(b.ankunft_zeit || "07:00");
@@ -1578,9 +1694,15 @@ const TimeTracking = () => {
         .select("*")
         .eq("bericht_id", id);
 
-      // Build taetigkeit_id -> position mapping
+      // Build taetigkeit_id -> position mapping — NUR für die behaltenen
+      // (sichtbaren) Tätigkeiten. Alt-Berichte mit dem Pause-Kollisions-Bug
+      // haben Stunden auf der ausgefilterten Pause-Zeile; würden wir die in
+      // die Matrix laden, hätte der User unsichtbare Stunden, die die
+      // Validierung blockieren und beim Re-Save verloren gehen.
       const taetigkeitIdToPos: Record<string, number> = {};
       for (const t of (tData as any[]) || []) {
+        const bez = (t.bezeichnung as string) || "";
+        if (bez.startsWith("LKW AN+ABFAHRT") || bez.startsWith("Pause")) continue;
         taetigkeitIdToPos[t.id] = t.position;
       }
 
@@ -1670,6 +1792,33 @@ const TimeTracking = () => {
     if (!confirm("Diesen Leistungsbericht wirklich löschen?")) return;
 
     try {
+      // Legacy-time_entries (ohne bericht_id-Verknüpfung) manuell aufräumen,
+      // damit keine Stunden in der Auswertung übrig bleiben. Neue Einträge
+      // (mit Verknüpfung) löscht der FK CASCADE beim Bericht-Delete automatisch.
+      const { data: berichtData } = await supabase
+        .from("leistungsberichte" as any)
+        .select("datum, projekt_id, bericht_typ")
+        .eq("id", id)
+        .maybeSingle();
+      const { data: maRows } = await supabase
+        .from("leistungsbericht_mitarbeiter" as any)
+        .select("mitarbeiter_id")
+        .eq("bericht_id", id);
+      const b = berichtData as any;
+      const maIds = ((maRows as any[]) || []).map((m) => m.mitarbeiter_id).filter(Boolean);
+      if (b && maIds.length > 0) {
+        let legacyQ: any = supabase
+          .from("time_entries")
+          .delete()
+          .is("bericht_id", null)
+          .eq("datum", b.datum)
+          .eq("entry_typ", b.bericht_typ || "leistungsbericht")
+          .in("user_id", maIds)
+          .not("taetigkeit", "in", '("Urlaub","Krankenstand","Fortbildung","Feiertag","Schule","Weiterbildung","ZA","Zeitausgleich","Arzt","Sonstiges")');
+        if (b.projekt_id) legacyQ = legacyQ.eq("project_id", b.projekt_id);
+        await legacyQ;
+      }
+
       await supabase
         .from("leistungsbericht_stunden" as any)
         .delete()
@@ -1690,10 +1839,12 @@ const TimeTracking = () => {
         .from("leistungsbericht_materialien" as any)
         .delete()
         .eq("bericht_id", id);
-      await supabase
+      // Bericht-Delete: FK CASCADE entfernt verknüpfte time_entries automatisch.
+      const { error: delErr } = await supabase
         .from("leistungsberichte" as any)
         .delete()
         .eq("id", id);
+      if (delErr) throw delErr;
 
       toast({ title: "Gelöscht", description: "Bericht wurde gelöscht." });
       loadBerichte();
