@@ -12,7 +12,12 @@ import {
   type LeistungsberichtPDFData,
 } from "./generateLeistungsberichtPDF";
 
-export async function downloadLeistungsberichtPDF(berichtId: string): Promise<void> {
+/**
+ * Generiert das PDF und gibt die Blob-URL zurück — für die eingebettete
+ * Vorschau (iframe) in der Stundenauswertung. Der Aufrufer ist für
+ * URL.revokeObjectURL() beim Schließen verantwortlich.
+ */
+export async function getLeistungsberichtPDFUrl(berichtId: string): Promise<string> {
   // 1. Bericht laden
   const { data: bericht, error: berichtErr } = await supabase
     .from("leistungsberichte" as any)
@@ -168,8 +173,13 @@ export async function downloadLeistungsberichtPDF(berichtId: string): Promise<vo
     fertiggestellt: b.fertiggestellt || false,
   };
 
-  // 8. PDF erzeugen + öffnen
+  // 8. PDF erzeugen → Blob-URL
   const blob = await generateLeistungsberichtPDF(pdfData);
-  const url = URL.createObjectURL(blob);
+  return URL.createObjectURL(blob);
+}
+
+/** Generiert das PDF und öffnet es in einem neuen Tab (bisheriges Verhalten). */
+export async function downloadLeistungsberichtPDF(berichtId: string): Promise<void> {
+  const url = await getLeistungsberichtPDFUrl(berichtId);
   window.open(url, "_blank");
 }

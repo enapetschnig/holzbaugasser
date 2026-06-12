@@ -17,7 +17,8 @@ import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import ProjectHoursReport from "@/components/ProjectHoursReport";
 import ProjektleiterAuswertung from "@/components/ProjektleiterAuswertung";
-import { FileSpreadsheet, Building2, ClipboardList, Loader2, Download, X, Clock, Pencil } from "lucide-react";
+import { FileSpreadsheet, Building2, ClipboardList, Loader2, Download, X, Clock, Pencil, Eye, ExternalLink } from "lucide-react";
+import { getLeistungsberichtPDFUrl } from "@/lib/downloadLeistungsberichtPDF";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -357,6 +358,31 @@ export default function HoursReport() {
 
   // Cell editing (Admin only)
   const [editingCell, setEditingCell] = useState<{ userId: string; day: number; name: string } | null>(null);
+
+  // PDF-Vorschau des Leistungsberichts direkt im Overlay (ohne Seitenwechsel),
+  // inkl. Bearbeiten-Button der zur passenden Form navigiert.
+  const [pdfPreview, setPdfPreview] = useState<{ url: string; berichtId: string; berichtTyp: string } | null>(null);
+  const [pdfPreviewLoading, setPdfPreviewLoading] = useState(false);
+
+  const openPdfVorschau = async (berichtId: string, berichtTyp: string) => {
+    setPdfPreviewLoading(true);
+    try {
+      const url = await getLeistungsberichtPDFUrl(berichtId);
+      setPdfPreview({ url, berichtId, berichtTyp });
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Fehler", description: "PDF konnte nicht erstellt werden." });
+    } finally {
+      setPdfPreviewLoading(false);
+    }
+  };
+
+  const closePdfVorschau = () => {
+    if (pdfPreview) URL.revokeObjectURL(pdfPreview.url);
+    setPdfPreview(null);
+  };
+
+  const editPathForTyp = (typ: string) =>
+    typ === "werk" ? "/werk-bericht" : typ === "lkw" ? "/lkw-bericht" : "/time-tracking";
   const [editStunden, setEditStunden] = useState("");
   const [editType, setEditType] = useState<"arbeit" | "absenz">("arbeit");
   const [editAbsenzTyp, setEditAbsenzTyp] = useState("Urlaub");
@@ -2101,6 +2127,16 @@ export default function HoursReport() {
                                 <Button
                                   variant="outline"
                                   size="sm"
+                                  disabled={pdfPreviewLoading}
+                                  onClick={() => openPdfVorschau(b.id, b.bericht_typ)}
+                                  title="PDF-Vorschau im Overlay"
+                                >
+                                  <Eye className="w-3.5 h-3.5 mr-1" />
+                                  Vorschau
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
                                   onClick={() => handleViewBerichtPDF(b.id, true)}
                                 >
                                   <Download className="w-3.5 h-3.5 mr-1" />
@@ -2189,15 +2225,44 @@ export default function HoursReport() {
             </DialogTitle>
           </DialogHeader>
           {/* Hinweis wenn die Stunden des Tages aus einem Leistungsbericht stammen —
-              manuelle Zellen-Edits und Berichte sollen sich nicht in die Quere kommen. */}
-          {editingCell && gridBerichtData.some(
-            (bm) => bm.mitarbeiter_id === editingCell.userId
-              && parseInt(bm.bericht_datum.split("-")[2], 10) === editingCell.day
-          ) && (
-            <div className="rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-950/30 px-3 py-2 text-xs text-amber-900 dark:text-amber-200">
-              ⚠ Für diesen Tag existiert ein <strong>Leistungsbericht</strong>. Änderungen besser direkt im Bericht vornehmen (Tab Leistungsberichte → Bearbeiten) — sonst können doppelte oder widersprüchliche Stunden entstehen.
-            </div>
-          )}
+              manuelle Zellen-Edits und Berichte sollen sich nicht in die Quere kommen.
+              Plus PDF-Vorschau-Buttons: Bericht direkt im Overlay ansehen. */}
+          {editingCell && (() => {
+            const zellenBerichte = gridBerichtData.filter(
+              (bm) => bm.mitarbeiter_id === editingCell.userId
+                && parseInt(bm.bericht_datum.split("-")[2], 10) === editingCell.day
+            );
+            if (zellenBerichte.length === 0) return null;
+            const typLabel: Record<string, string> = {
+              leistungsbericht: "Zum Leistungsbericht",
+              werk: "Zum Werkstatt-Bericht",
+              lkw: "Zum LKW-Bericht",
+            };
+            return (
+              <div className="rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-950/30 px-3 py-2 space-y-2">
+                <p className="text-xs text-amber-900 dark:text-amber-200">
+                  ⚠ Für diesen Tag existiert ein <strong>Leistungsbericht</strong> — du kannst ihn hier direkt ansehen und bearbeiten. Änderungen besser dort vornehmen, sonst können doppelte oder widersprüchliche Stunden entstehen.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {zellenBerichte.map((bm) => (
+                    <Button
+                      key={bm.bericht_id}
+                      variant="outline"
+                      size="sm"
+                      className="h-8 text-xs border-amber-400"
+                      disabled={pdfPreviewLoading}
+                      onClick={() => openPdfVorschau(bm.bericht_id, bm.bericht_typ)}
+                    >
+                      {pdfPreviewLoading
+                        ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />
+                        : <Eye className="w-3.5 h-3.5 mr-1" />}
+                      {typLabel[bm.bericht_typ] || "Zum Bericht"}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
           <div className="space-y-4">
             <div className="flex gap-2">
               <Button
@@ -2318,6 +2383,48 @@ export default function HoursReport() {
               {savingCell ? "Speichert..." : "Speichern"}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* PDF-Vorschau Leistungsbericht (Overlay, ohne Seitenwechsel) */}
+      <Dialog open={!!pdfPreview} onOpenChange={(open) => { if (!open) closePdfVorschau(); }}>
+        <DialogContent className="max-w-4xl w-[95vw] p-0 gap-0">
+          <DialogHeader className="px-4 py-3 border-b flex-row items-center justify-between space-y-0">
+            <DialogTitle className="text-base">Leistungsbericht-Vorschau</DialogTitle>
+            <div className="flex gap-2 mr-8">
+              {(isAdmin || isProjektleiter) && (
+                <Button
+                  variant="default"
+                  size="sm"
+                  onClick={() => {
+                    if (!pdfPreview) return;
+                    const path = editPathForTyp(pdfPreview.berichtTyp);
+                    const id = pdfPreview.berichtId;
+                    closePdfVorschau();
+                    navigate(`${path}?edit=${id}`);
+                  }}
+                >
+                  <Pencil className="w-3.5 h-3.5 mr-1" />
+                  Bearbeiten
+                </Button>
+              )}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => { if (pdfPreview) window.open(pdfPreview.url, "_blank"); }}
+              >
+                <ExternalLink className="w-3.5 h-3.5 mr-1" />
+                Neuer Tab
+              </Button>
+            </div>
+          </DialogHeader>
+          {pdfPreview && (
+            <iframe
+              src={pdfPreview.url}
+              title="Leistungsbericht PDF"
+              className="w-full h-[80vh] border-0"
+            />
+          )}
         </DialogContent>
       </Dialog>
 
