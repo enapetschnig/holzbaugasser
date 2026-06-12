@@ -41,6 +41,7 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { ABSENCE_TAETIGKEITEN_INKL_FEIERTAG, VOLL_ABSENZ_TAETIGKEITEN, findAbsenceTypeByTaetigkeit } from "@/lib/absenceTypes";
+import { findeTagesKonflikte } from "@/lib/berichtKonflikte";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -1114,6 +1115,44 @@ const TimeTracking = () => {
         });
         return;
       }
+    }
+
+    // Pre-Check 3: Sind MA am gleichen Tag in ANDEREN Berichten gebucht
+    // (anderes Projekt, Werkstatt- oder LKW-Bericht — egal welcher Ersteller)?
+    // Verhindert versehentliche Doppelbuchungen über Bericht-Typen hinweg
+    // (Ursache der 16/18h-Tage). Bewusstes Fortfahren bleibt möglich.
+    const pauseHoursPre = pauseMinuten / 60;
+    const maMitStunden = mitarbeiterRows
+      .filter((r) => r.mitarbeiterId)
+      .map((r) => {
+        const gross = sumStunden(r, zulagePositions);
+        const netto = matrixBrutto ? Math.max(0, gross - pauseHoursPre) : gross;
+        const p = profiles.find((pr) => pr.id === r.mitarbeiterId);
+        return {
+          id: r.mitarbeiterId,
+          name: p ? `${p.vorname} ${p.nachname}` : "?",
+          stunden: Math.round(netto * 100) / 100,
+        };
+      });
+    const tagesKonflikte = await findeTagesKonflikte(
+      datum,
+      maMitStunden,
+      editingBerichtId,
+      projektId // gleiche-Projekt-Konflikte behandelt Pre-Check 1
+    );
+    if (tagesKonflikte.length > 0) {
+      const sehrHoch = tagesKonflikte.some((k) => k.gesamt > 12);
+      setConfirmState({
+        title: sehrHoch ? "⚠ Achtung: sehr hohe Tagessumme!" : "Mitarbeiter bereits am gleichen Tag gebucht",
+        description: `Folgende Mitarbeiter haben am ${format(new Date(datum + "T00:00:00"), "dd.MM.yyyy")} bereits Stunden in anderen Berichten. Mit diesem Bericht zusammen ergibt das:`,
+        details: tagesKonflikte.map(
+          (k) => `${k.mitarbeiterName}: ${String(k.bestehendeStunden).replace(".", ",")}h bestehend (${k.details.join("; ")}) + ${String(k.neueStunden).replace(".", ",")}h neu = ${String(k.gesamt).replace(".", ",")}h gesamt${k.gesamt > 12 ? " ⚠" : ""}`
+        ),
+        actionLabel: "Trotzdem speichern",
+        variant: sehrHoch ? "destructive" : undefined,
+        onConfirm: () => doSave({ cleanupBeforeInsert: false, activeMaIdsForCleanup: [] }),
+      });
+      return;
     }
 
     // Keine Konflikte → direkt speichern

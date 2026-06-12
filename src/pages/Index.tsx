@@ -467,19 +467,19 @@ export default function Index() {
             </Card>
           )}
 
-          {/* Werk-Bericht (Matrix) */}
+          {/* Werk-Bericht (Matrix) — dezent amber markiert, NUR für Werkstatt-Arbeiten */}
           {canUseVorfertigung && (
             <Card
-              className="cursor-pointer hover:shadow-lg transition-all hover:border-primary/50"
+              className="cursor-pointer hover:shadow-lg transition-all border-amber-300 bg-amber-50/60 dark:bg-amber-950/20 dark:border-amber-800 hover:border-amber-400"
               onClick={() => navigate("/werk-bericht")}
             >
               <CardHeader className="space-y-2 pb-3">
-                <div className="h-12 w-12 rounded-lg bg-amber-500/10 flex items-center justify-center">
+                <div className="h-12 w-12 rounded-lg bg-amber-500/15 flex items-center justify-center">
                   <Clock className="h-6 w-6 text-amber-600" />
                 </div>
                 <CardTitle className="text-lg sm:text-xl">Leistungsbericht Werkstatt</CardTitle>
-                <CardDescription className="text-sm">
-                  Mehrere Projekte pro Tag
+                <CardDescription className="text-sm font-semibold text-amber-700 dark:text-amber-400">
+                  NUR für Werkstatt-Arbeiten!
                 </CardDescription>
               </CardHeader>
               <CardContent>

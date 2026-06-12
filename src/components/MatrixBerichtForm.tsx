@@ -41,6 +41,7 @@ import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { localDateString } from "@/lib/workingHours";
 import { findAbsenceTypeByTaetigkeit } from "@/lib/absenceTypes";
+import { findeTagesKonflikte, konflikteAlsText } from "@/lib/berichtKonflikte";
 
 // ----------------------------- Types -----------------------------
 type BerichtTyp = "werk" | "lkw";
@@ -673,6 +674,31 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
         if (existing) cleanupBerichtId = (existing as any).id as string;
       }
 
+      // Tages-Konflikt-Warnung: sind MA am gleichen Tag bereits in ANDEREN
+      // Berichten gebucht (Standard-LB, anderer Werk/LKW-Bericht — egal von wem)?
+      // Verhindert versehentliche Doppelbuchungen über Bericht-Typen hinweg.
+      const maMitStundenForCheck = activeMaRows.map((r) => {
+        const gross = validZeilen.reduce((acc, z) => acc + parseStunden(r.stunden[z.localId] || ""), 0);
+        const netto = Math.max(0, gross - pauseHours);
+        const ma = availableMitarbeiter.find((m) => m.id === r.mitarbeiterId);
+        return {
+          id: r.mitarbeiterId,
+          name: ma?.name || "?",
+          stunden: Math.round(netto * 100) / 100,
+        };
+      });
+      const tagesKonflikte = await findeTagesKonflikte(datum, maMitStundenForCheck, cleanupBerichtId);
+      if (tagesKonflikte.length > 0) {
+        const warnung =
+          "ACHTUNG — Mitarbeiter bereits am gleichen Tag gebucht!\n\n" +
+          konflikteAlsText(tagesKonflikte, datum) +
+          "\n\nTrotzdem speichern?";
+        if (!window.confirm(warnung)) {
+          setSaving(false);
+          return;
+        }
+      }
+
       // 1. Editing oder Auto-Overwrite? Alte Daten löschen
       if (cleanupBerichtId) {
         // time_entries ZUERST über die exakte Bericht-Verknüpfung —
@@ -930,6 +956,17 @@ export default function MatrixBerichtForm({ berichtTyp, pageTitle, taetigkeitPre
       <PageHeader title={editingBerichtId ? `${pageTitle} bearbeiten` : pageTitle} />
 
       <main className="container mx-auto px-3 sm:px-4 py-4 sm:py-6 max-w-3xl space-y-4">
+        {/* Werkstatt-Hinweis: dezenter amber Banner, damit niemand versehentlich
+            Baustellen-Arbeit hier bucht (Abgrenzung zum Standard-LB). */}
+        {berichtTyp === "werk" && (
+          <div className="rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-800 px-4 py-3 text-sm text-amber-900 dark:text-amber-200 font-medium">
+            🔧 Leistungsbericht Werkstatt — <strong>NUR für Werkstatt-Arbeiten!</strong>
+            <span className="block text-xs font-normal mt-0.5">
+              Für Baustellen-Einsätze bitte den normalen Leistungsbericht verwenden.
+            </span>
+          </div>
+        )}
+
         {/* Datum */}
         <Card>
           <CardContent className="pt-4 pb-4">

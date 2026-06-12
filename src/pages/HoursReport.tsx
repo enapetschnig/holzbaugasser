@@ -2188,6 +2188,16 @@ export default function HoursReport() {
               {editingCell?.name} — {editingCell ? `${editingCell.day}. ${monthNames[gridMonth - 1]}` : ""}
             </DialogTitle>
           </DialogHeader>
+          {/* Hinweis wenn die Stunden des Tages aus einem Leistungsbericht stammen —
+              manuelle Zellen-Edits und Berichte sollen sich nicht in die Quere kommen. */}
+          {editingCell && gridBerichtData.some(
+            (bm) => bm.mitarbeiter_id === editingCell.userId
+              && parseInt(bm.bericht_datum.split("-")[2], 10) === editingCell.day
+          ) && (
+            <div className="rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-950/30 px-3 py-2 text-xs text-amber-900 dark:text-amber-200">
+              ⚠ Für diesen Tag existiert ein <strong>Leistungsbericht</strong>. Änderungen besser direkt im Bericht vornehmen (Tab Leistungsberichte → Bearbeiten) — sonst können doppelte oder widersprüchliche Stunden entstehen.
+            </div>
+          )}
           <div className="space-y-4">
             <div className="flex gap-2">
               <Button
