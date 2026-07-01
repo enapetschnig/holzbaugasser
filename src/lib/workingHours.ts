@@ -1,4 +1,19 @@
+import { getBuroMonatsSoll } from "./buroSchedules";
+
 export type Role = "administrator" | "projektleiter" | "vorarbeiter" | "mitarbeiter" | "extern";
+
+/**
+ * Die tatsächlichen Chefs (kein Gleitzeitkonto, nicht in der Stundenauswertung).
+ * WICHTIG: NICHT über die Rolle "administrator"/"projektleiter" ausschließen — die
+ * ist bei mehreren echten Mitarbeitern gesetzt (Büro-Kräfte, Vorarbeiter mit
+ * App-Zugang). Nur diese konkreten Personen sind die Chefs.
+ * Napetschnig (Haupt- + Dubletten-Konto) + Gasser.
+ */
+export const OWNER_USER_IDS = new Set<string>([
+  "79995a5d-f308-4e67-8c00-965a597b60a6", // Napetschnig Christoph (Admin)
+  "c5baca0d-f7ff-4963-a93c-740255921241", // Napetschnig Christoph (Dublette)
+  "9167d2b7-a6cb-4ea5-a420-a731272d8870", // Gasser F
+]);
 
 /**
  * Returns the local date as "YYYY-MM-DD" string (no timezone conversion).
@@ -60,4 +75,24 @@ export function getWorkingDaysInMonth(year: number, month: number): number {
     if (day !== 0 && day !== 6) count++;
   }
   return count;
+}
+
+/**
+ * Monats-Soll für einen Mitarbeiter (geteilt von Stundenauswertung UND Zeitkonto,
+ * damit beide byte-gleich rechnen):
+ *  - fester Büro-Wochenplan (Barbara/Isabel) → exakt aus dem Schedule summiert,
+ *  - sonst Standard-Monat (39h-Muster: Mo–Do 8h, Fr 7h) skaliert mit weekly/39,
+ *  - weeklyHours == null → Standard-Monat unskaliert.
+ */
+export function weeklyToMonthlyTarget(
+  userId: string,
+  weeklyHours: number | null,
+  year: number,
+  month: number
+): number {
+  const buroSoll = getBuroMonatsSoll(userId, year, month);
+  if (buroSoll != null) return buroSoll;
+  const standardMonthly = getMonthlyTargetHours(year, month);
+  if (weeklyHours == null) return standardMonthly;
+  return Math.round((weeklyHours / 39) * standardMonthly * 10) / 10;
 }

@@ -12,6 +12,7 @@ import { Clock, Plus, History, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 import { de } from "date-fns/locale";
+import { weeklyToMonthlyTarget, OWNER_USER_IDS } from "@/lib/workingHours";
 
 type Profile = {
   id: string;
@@ -76,8 +77,15 @@ export default function TimeAccountManagement({ profiles }: TimeAccountManagemen
     const currentYear = now.getFullYear();
     const currentMonth = now.getMonth() + 1; // 1-based
 
-    // Load all time entries for this year (including current month = live)
-    const startDate = `${currentYear}-01-01`;
+    // Zeitkonto = Summe der Monats-+/- aus der großen Liste, ab Juni 2026,
+    // nur ABGESCHLOSSENE Monate. Alles vor Juni wird ignoriert.
+    const START_MONTH = 6; // Juni
+    if (currentYear !== 2026 || currentMonth < START_MONTH) return;
+
+    const monthNames = ["Jänner","Feber","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember"];
+
+    // Datenfenster: ab Juni (Vor-Juni komplett ignoriert).
+    const startDate = `${currentYear}-06-01`;
     const endDate = `${currentYear}-${String(currentMonth).padStart(2, "0")}-${new Date(currentYear, currentMonth, 0).getDate()}`;
 
     const { data: entries } = await supabase
@@ -85,12 +93,9 @@ export default function TimeAccountManagement({ profiles }: TimeAccountManagemen
       .select("user_id, datum, stunden, taetigkeit")
       .gte("datum", startDate)
       .lte("datum", endDate);
-
     if (!entries) return;
 
-    // Interne Stunden-Korrekturen (Stundenauswertung) — sie ersetzen für die
-    // Überstunden-Rechnung den jeweiligen Tag. time_entries/Leistungsbericht
-    // bleiben unberührt; nur die interne Ist-Summe verwendet den Korrekturwert.
+    // Interne Korrekturen (Stundenauswertung) — ersetzen den jeweiligen Tag.
     const { data: overridesData } = await supabase
       .from("stundenauswertung_overrides" as any)
       .select("user_id, datum, typ, stunden, absenz_typ")
@@ -100,59 +105,37 @@ export default function TimeAccountManagement({ profiles }: TimeAccountManagemen
     const overridesByMonth: Record<string, any[]> = {};
     for (const ov of (overridesData || []) as any[]) {
       overrideKeys.add(`${ov.user_id}|${ov.datum}`);
-      const mk = (ov.datum as string).slice(0, 7); // YYYY-MM
-      (overridesByMonth[mk] ||= []).push(ov);
+      (overridesByMonth[(ov.datum as string).slice(0, 7)] ||= []).push(ov);
     }
 
-    // Load employee weekly hours + Eintritt/Austritt (für anteiliges Soll bei
-    // Teil-Monaten — sonst bekäme ein Mitte-des-Monats-Starter ein Riesen-Minus).
+    // Wochenstunden (für Teilzeit-Soll — dieselbe Funktion wie das Grid).
     const { data: employees } = await supabase
-      .from("employees")
-      .select("user_id, monats_soll_stunden, eintritt_datum, austritt_datum");
+      .from("employees").select("user_id, monats_soll_stunden");
     const weeklyMap: Record<string, number | null> = {};
-    const eintrittMap: Record<string, string | null> = {};
-    const austrittMap: Record<string, string | null> = {};
-    if (employees) employees.forEach((e: any) => {
-      if (e.user_id) {
-        weeklyMap[e.user_id] = e.monats_soll_stunden;
-        eintrittMap[e.user_id] = e.eintritt_datum || null;
-        austrittMap[e.user_id] = e.austritt_datum || null;
-      }
-    });
-    // Load user roles for correct daily-soll pattern
-    const { data: roles } = await supabase.from("user_roles").select("user_id, role");
-    const roleMap: Record<string, string> = {};
-    // Höchste Rolle gewinnt (PL/Admin → 40h-Basis, 8h/Tag). Verhindert, dass eine
-    // Zweitrolle (z.B. "vorarbeiter") einen Admin fälschlich auf 39h-Basis zieht.
-    const rolePrio = (r: string) =>
-      r === "administrator" || r === "projektleiter" ? 2 : 1;
-    if (roles) roles.forEach((r: any) => {
-      const cur = roleMap[r.user_id];
-      if (!cur || rolePrio(r.role) > rolePrio(cur)) roleMap[r.user_id] = r.role;
-    });
+    if (employees) employees.forEach((e: any) => { if (e.user_id) weeklyMap[e.user_id] = e.monats_soll_stunden; });
 
-    const monthNames = ["Jänner","Feber","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember"];
+    // Population fürs Zeitkonto = alle echten Mitarbeiter mit Gleitzeit (= dieselben
+    // wie in der großen Liste): aktive, nicht-versteckte Profile OHNE die 2 Chefs
+    // (OWNER_USER_IDS) und OHNE Externe (Subunternehmer — kein Gleitzeitkonto).
+    // NICHT über die Rolle Admin/PL ausschließen (die haben auch echte Büro-Kräfte/
+    // Vorarbeiter). Auch MA mit 0 Einträgen in einem abgeschlossenen Monat werden
+    // gebucht (→ Minus, exakt wie das Grid).
+    const [{ data: profs }, { data: roles }] = await Promise.all([
+      supabase.from("profiles").select("id, is_active, is_hidden"),
+      supabase.from("user_roles").select("user_id, role"),
+    ]);
+    const externIds = new Set(
+      (roles || []).filter((r: any) => r.role === "extern").map((r: any) => r.user_id)
+    );
+    const populationIds = (profs || [])
+      .filter((p: any) => p.is_active && p.is_hidden !== true && !OWNER_USER_IDS.has(p.id) && !externIds.has(p.id))
+      .map((p: any) => p.id as string);
 
     const { data: { user: currentUser } } = await supabase.auth.getUser();
 
-    // Echtes Gleitzeitkonto (Plus UND Minus) wird erst ab diesem Monat gebucht.
-    // Grund: davor war die App im Ramp-up, die Zeiterfassung unvollständig — ein
-    // rückwirkendes Minus wäre kein echtes Minus, sondern nur eine Erfassungslücke.
-    // Plus wird immer gebucht (Mehrstunden sind unabhängig von Lücken echt).
-    const MINUS_START = "2026-07"; // YYYY-MM — ab hier zählt auch Minus
+    const isZA = (t: string) => t === "ZA" || t === "Zeitausgleich";
 
-    // Voll-Tages-Absenzen: füllen den ganzen Tag und werden mit dem (ggf. Teilzeit-
-    // anteiligen) Tages-Soll gewertet, damit sie exakt das Soll decken (netto 0).
-    // Teil-Absenzen (Arzt/ZA/Sonstiges) zählen mit ihren echten Stunden.
-    const FULL_ABSENCE = new Set([
-      "Urlaub", "Krankenstand", "Feiertag", "Schule", "Berufsschule",
-      "Fortbildung", "Weiterbildung",
-    ]);
-
-    // Eine Monats-Buchung idempotent auf ihren Soll-Wert bringen — oder entfernen.
-    // target === null  → es darf KEINE Buchung geben (evtl. alte wird gelöscht).
-    // Verhindert stehengebliebene "Überstunden {Monat}"-Buchungen (z.B. laufender
-    // Monat war kurz im Plus und fällt wieder ins Minus, oder Beschäftigung endet).
+    // Eine Monats-Buchung idempotent setzen — oder entfernen (target === null).
     const reconcile = async (
       userId: string, txKey: string, target: number | null, reason?: string
     ) => {
@@ -162,11 +145,8 @@ export default function TimeAccountManagement({ profiles }: TimeAccountManagemen
         .eq("user_id", userId)
         .eq("change_type", txKey)
         .maybeSingle();
-
       if (target === null) {
-        if (existingTx) {
-          await supabase.from("time_account_transactions").delete().eq("id", existingTx.id);
-        }
+        if (existingTx) await supabase.from("time_account_transactions").delete().eq("id", existingTx.id);
         return;
       }
       if (!existingTx) {
@@ -180,89 +160,42 @@ export default function TimeAccountManagement({ profiles }: TimeAccountManagemen
       }
     };
 
-    for (let m = 1; m <= currentMonth; m++) {
+    // Der LAUFENDE Monat wird NIE gebucht (sonst falsches Riesen-Minus, weil die
+    // Zeiten noch nicht erfasst sind). Evtl. stehengebliebene Buchung entfernen.
+    await supabase.from("time_account_transactions").delete()
+      .eq("change_type", `Überstunden ${monthNames[currentMonth - 1]} ${currentYear}`);
+
+    // Nur ABGESCHLOSSENE Monate ab Juni buchen (Plus UND Minus).
+    // Ist = Summe ALLER Tages-Stunden des MA (Arbeit + ZA + Arzt + Voll-Absenz, roh),
+    // Override-ersetzt. ZA bleibt in der Ist (wird separat via "ZA genommen" abgezogen)
+    // → keine Doppelzählung. Soll = weeklyToMonthlyTarget (byte-gleich wie das Grid).
+    for (let m = START_MONTH; m < currentMonth; m++) {
       const monthKey = `${currentYear}-${String(m).padStart(2, "0")}`;
       const daysInMonth = new Date(currentYear, m, 0).getDate();
       const monthStart = `${monthKey}-01`;
       const monthEnd = `${monthKey}-${String(daysInMonth).padStart(2, "0")}`;
       const monthLabel = `${monthNames[m - 1]} ${currentYear}`;
       const txKey = `Überstunden ${monthLabel}`;
-      const isCurrentMonth = m === currentMonth;                 // noch nicht abgeschlossen
-      const minusAllowed = monthKey >= MINUS_START && !isCurrentMonth;
 
       const monthEntries = entries.filter(e => e.datum >= monthStart && e.datum <= monthEnd);
-
-      // Pro User: gearbeitete + Teil-Absenz-Stunden getrennt von Voll-Absenz-Stunden.
-      // Einträge außerhalb der Beschäftigung (Eintritt/Austritt) werden ignoriert —
-      // konsistent mit dem Soll-Fenster unten (sonst Phantom-Plus/Minus).
-      const workedPerUser: Record<string, number> = {};
-      const fullAbsPerUser: Record<string, number> = {};
+      const istPerUser: Record<string, number> = {};
       for (const e of monthEntries) {
-        const uid = e.user_id;
-        if (overrideKeys.has(`${uid}|${e.datum}`)) continue; // durch interne Korrektur ersetzt
-        const eintritt = eintrittMap[uid];
-        const austritt = austrittMap[uid];
-        if (eintritt && e.datum < eintritt) continue;
-        if (austritt && e.datum > austritt) continue;
-        const h = parseFloat(e.stunden as any) || 0;
-        if (FULL_ABSENCE.has(e.taetigkeit)) fullAbsPerUser[uid] = (fullAbsPerUser[uid] || 0) + h;
-        else workedPerUser[uid] = (workedPerUser[uid] || 0) + h;
+        if (overrideKeys.has(`${e.user_id}|${e.datum}`)) continue; // durch Korrektur ersetzt
+        istPerUser[e.user_id] = (istPerUser[e.user_id] || 0) + (parseFloat(e.stunden as any) || 0);
       }
-
-      // Interne Korrekturen dieses Monats einrechnen (ersetzen den Tag oben).
       for (const ov of (overridesByMonth[monthKey] || [])) {
-        const uid = ov.user_id;
-        const eintritt = eintrittMap[uid];
-        const austritt = austrittMap[uid];
-        if (eintritt && ov.datum < eintritt) continue;
-        if (austritt && ov.datum > austritt) continue;
-        const h = parseFloat(ov.stunden) || 0;
-        const isFullAbs = ov.typ === "absenz" && FULL_ABSENCE.has(ov.absenz_typ);
-        if (isFullAbs) fullAbsPerUser[uid] = (fullAbsPerUser[uid] || 0) + h;
-        else workedPerUser[uid] = (workedPerUser[uid] || 0) + h;
+        // Override-ZA zählt netto 0 (wie das Grid; für Overrides gibt es kein "ZA genommen").
+        if (ov.typ === "absenz" && isZA(ov.absenz_typ)) continue;
+        istPerUser[ov.user_id] = (istPerUser[ov.user_id] || 0) + (parseFloat(ov.stunden) || 0);
       }
 
-      const userIds = new Set([...Object.keys(workedPerUser), ...Object.keys(fullAbsPerUser)]);
-      for (const userId of userIds) {
-        const weekly = weeklyMap[userId];
-        const role = roleMap[userId];
-        const isPL = role === "projektleiter" || role === "administrator";
-        const baseWeekly = isPL ? 40 : 39;
-        const eintritt = eintrittMap[userId]; // "YYYY-MM-DD" oder null
-        const austritt = austrittMap[userId];
-
-        // Monats-Soll pro Mitarbeiter: nur Arbeitstage INNERHALB der Beschäftigung.
-        // (Eintritt=null → ganzer Monat; Austritt=null → kein Ende.)
-        let sollBase = 0;
-        for (let d = 1; d <= daysInMonth; d++) {
-          const dateStr = `${monthKey}-${String(d).padStart(2, "0")}`;
-          const dow = new Date(currentYear, m - 1, d).getDay();
-          if (dow === 0 || dow === 6) continue;              // Wochenende
-          if (eintritt && dateStr < eintritt) continue;      // vor Eintritt
-          if (austritt && dateStr > austritt) continue;      // nach Austritt
-          sollBase += isPL ? 8 : (dow === 5 ? 7 : 8);
-        }
-        // Nicht (mehr/noch) beschäftigt in diesem Monat → evtl. alte Buchung entfernen.
-        if (sollBase === 0) { await reconcile(userId, txKey, null); continue; }
-
-        // Teilzeit-Faktor: skaliert Soll UND Voll-Absenzen gleich, sodass ein
-        // Feiertag/Urlaubstag exakt das Tages-Soll deckt (netto 0, kein Phantom-Plus).
-        const factor = weekly != null ? weekly / baseWeekly : 1;
-        const soll = Math.round(factor * sollBase * 10) / 10;
-        const ist = Math.round(
-          ((workedPerUser[userId] || 0) + (fullAbsPerUser[userId] || 0) * factor) * 100
-        ) / 100;
+      for (const userId of populationIds) {
+        const soll = weeklyToMonthlyTarget(userId, weeklyMap[userId] ?? null, currentYear, m);
+        const ist = Math.round((istPerUser[userId] || 0) * 100) / 100;
         const diff = Math.round((ist - soll) * 100) / 100;
-
-        // Buchungsregel:
-        // - Plus (diff > 0): immer buchen — Mehrstunden sind echt.
-        // - Minus (diff <= 0): nur für abgeschlossene Monate ab MINUS_START.
-        //   Historie (Ramp-up) + laufender, unvollständiger Monat → kein Minus.
-        const target = diff > 0 ? diff : (minusAllowed ? diff : null);
-
-        const vorz = (target ?? 0) >= 0 ? "+" : "";
-        const reason = `${monthLabel}: ${ist}h gearbeitet - ${soll}h Soll = ${vorz}${target ?? 0}h`;
-        await reconcile(userId, txKey, target, reason);
+        const vorz = diff >= 0 ? "+" : "";
+        const reason = `${monthLabel}: ${ist}h - ${soll}h Soll = ${vorz}${diff}h`;
+        await reconcile(userId, txKey, diff, reason);
       }
     }
 

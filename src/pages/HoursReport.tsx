@@ -34,13 +34,12 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { getMonthlyTargetHours, getWorkingDaysInMonth, getTargetHoursForDate } from "@/lib/workingHours";
+import { getMonthlyTargetHours, getWorkingDaysInMonth, getTargetHoursForDate, weeklyToMonthlyTarget, OWNER_USER_IDS } from "@/lib/workingHours";
 import { generateStundenauswertungPDF, StundenauswertungPDFData } from "@/lib/generateStundenauswertungPDF";
 import { generateLeistungsberichtPDF, LeistungsberichtPDFData } from "@/lib/generateLeistungsberichtPDF";
 import { generateArbeitszeitExcel } from "@/lib/generateArbeitszeitExcel";
 import { format, parseISO } from "date-fns";
 import { de } from "date-fns/locale";
-import { getBuroMonatsSoll } from "@/lib/buroSchedules";
 import {
   ABSENCE_TYPES as ABSENCE_TYPES_LIB,
   ABSENCE_TAETIGKEITEN_INKL_FEIERTAG,
@@ -215,24 +214,35 @@ function countWorkingDays(year: number, month: number): number {
   return count;
 }
 
-/** Convert weekly hours to monthly target. weeklyHours=null means standard 39h.
- * Wenn der User einen festen Büro-Wochenplan hat (Barbara/Isabel), wird das
- * Monats-Soll daraus exakt summiert (jeder Werktag laut Schedule).
- */
-function weeklyToMonthlyTarget(userId: string, weeklyHours: number | null, year: number, month: number): number {
-  const buroSoll = getBuroMonatsSoll(userId, year, month);
-  if (buroSoll != null) return buroSoll;
-  const standardMonthly = getMonthlyTargetHours(year, month);
-  if (weeklyHours == null) return standardMonthly;
-  return Math.round((weeklyHours / 39) * standardMonthly * 10) / 10;
-}
-
 function formatNumber(n: number): string {
   // Auf 1 Nachkommastelle runden — entfernt Floating-Point-Artefakte
   // (z.B. 2.82 + 4.71 + 0.47 = 8.000000000000001 → 8.0 → "8").
   const rounded = Math.round(n * 10) / 10;
   if (rounded === Math.floor(rounded)) return rounded.toFixed(0);
   return rounded.toFixed(1).replace(".", ",");
+}
+
+/**
+ * Laufender Monat: das Soll nur anteilig BIS HEUTE (Werktage Mo–Fr) statt vollem
+ * Monats-Soll — damit die Differenz-Spalte nicht ein Riesen-Minus zeigt, nur weil
+ * die Stunden für den Rest des Monats noch nicht erfasst sind. Für abgeschlossene
+ * (oder künftige) Monate wird das volle Soll unverändert zurückgegeben.
+ * Reine Anzeige — das Zeitkonto zählt den laufenden Monat ohnehin nicht.
+ */
+function proratedTargetToToday(fullTarget: number, year: number, month: number): number {
+  const today = new Date();
+  if (year !== today.getFullYear() || month !== today.getMonth() + 1) return fullTarget;
+  const todayDay = today.getDate();
+  const daysInMonth = new Date(year, month, 0).getDate();
+  let total = 0, elapsed = 0;
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dow = new Date(year, month - 1, d).getDay();
+    if (dow === 0 || dow === 6) continue;
+    total++;
+    if (d <= todayDay) elapsed++;
+  }
+  if (total === 0) return fullTarget;
+  return Math.round(fullTarget * (elapsed / total) * 10) / 10;
 }
 
 type CellData = {
@@ -458,15 +468,13 @@ export default function HoursReport() {
   };
 
   const fetchProfiles = async () => {
-    // Load all roles to determine: who to exclude (admin, projektleiter) and who is extern (for badge)
+    // Roles nur noch für die Extern-Markierung (Badge). Ausgeschlossen werden NUR
+    // die 2 echten Chefs (OWNER_USER_IDS) — NICHT alle Admin/PL, denn diese Rolle
+    // haben auch echte Büro-Kräfte/Vorarbeiter, die in die Liste gehören.
     const { data: rolesData } = await supabase
       .from("user_roles")
       .select("user_id, role");
-    const excludeIds = new Set(
-      (rolesData || [])
-        .filter((r: any) => r.role === "administrator" || r.role === "projektleiter")
-        .map((r: any) => r.user_id)
-    );
+    const excludeIds = OWNER_USER_IDS;
     const externs = new Set(
       (rolesData || [])
         .filter((r: any) => r.role === "extern")
@@ -480,8 +488,7 @@ export default function HoursReport() {
       .eq("is_active", true)
       .order("nachname");
     if (data) {
-      // Filter out administrators, projektleiter, and hidden profiles.
-      // Extern users remain visible (with badge).
+      // Nur die 2 Chefs + versteckte Profile raus; Externe bleiben sichtbar (Badge).
       const filtered = data.filter((p) => !excludeIds.has(p.id) && !(p as any).is_hidden);
       setProfiles(filtered);
       const map: Record<string, Profile> = {};
@@ -1688,8 +1695,11 @@ export default function HoursReport() {
                             montageStd = totalHours - werkstattStd - regenStd;
                             // "Ohne Überstunden": gedeckelt auf Soll
                             // "Mit Überstunden": echte Stunden
-                            const displayIst = showWithZA ? totalHours : Math.min(totalHours, monthlyTarget);
-                            const diff = displayIst - monthlyTarget;
+                            // Laufender Monat: Soll nur bis heute (Anzeige), sonst voll.
+                            const runningTarget = proratedTargetToToday(monthlyTarget, gridYear, gridMonth);
+                            const isRunningMonth = runningTarget !== monthlyTarget;
+                            const displayIst = showWithZA ? totalHours : Math.min(totalHours, runningTarget);
+                            const diff = displayIst - runningTarget;
 
                             const isExternUser = externIds.has(employee.id);
                             return (
@@ -1759,8 +1769,9 @@ export default function HoursReport() {
                                 <td className="border border-border px-2 py-1 text-center font-bold bg-gray-50 whitespace-nowrap">
                                   {totalHours > 0 ? formatNumber(totalHours) : ""}
                                 </td>
-                                <td className="border border-border px-2 py-1 text-center bg-gray-50 whitespace-nowrap">
-                                  {formatNumber(monthlyTarget)}
+                                <td className="border border-border px-2 py-1 text-center bg-gray-50 whitespace-nowrap"
+                                  title={isRunningMonth ? "Soll anteilig bis heute (laufender Monat, vorläufig)" : undefined}>
+                                  {formatNumber(runningTarget)}{isRunningMonth ? "*" : ""}
                                 </td>
                                 <td className="border border-border px-2 py-1 text-center bg-gray-50 whitespace-nowrap">
                                   {formatNumber(displayIst)}
@@ -1768,8 +1779,9 @@ export default function HoursReport() {
                                 <td className={cn(
                                   "border border-border px-2 py-1 text-center font-bold bg-gray-50 whitespace-nowrap",
                                   diff >= 0 ? "text-green-600" : "text-red-600"
-                                )}>
-                                  {diff >= 0 ? "+" : ""}{formatNumber(diff)}
+                                )}
+                                  title={isRunningMonth ? "vorläufig – bis heute (Zeitkonto zählt den laufenden Monat noch nicht)" : undefined}>
+                                  {diff >= 0 ? "+" : ""}{formatNumber(diff)}{isRunningMonth ? "*" : ""}
                                 </td>
                                 {/* Zulagen-Zusammenfassung */}
                                 <td className="border border-border px-1 py-1 text-center text-xs bg-blue-50 whitespace-nowrap">
