@@ -100,6 +100,9 @@ interface DayData {
   // wieder abgezogen, weil ZA bereits aufgebaute Überstunden sind (keine
   // erneut gearbeitete Zeit). Die Zelle zeigt trotzdem "7ZA".
   zaHours: number;
+  // true = dieser Tag stammt aus einer internen Korrektur (stundenauswertung_overrides),
+  // NICHT aus dem Leistungsbericht/den Projektzeilen. Zelle wird markiert.
+  isOverride: boolean;
 }
 
 interface ExistingBericht {
@@ -351,6 +354,8 @@ export default function HoursReport() {
   const [gridEmployee, setGridEmployee] = useState<string>("all");
   const [gridEntries, setGridEntries] = useState<TimeEntry[]>([]);
   const [gridBerichtData, setGridBerichtData] = useState<BerichtMitarbeiterRow[]>([]);
+  // Interne Korrekturen (stundenauswertung_overrides) des aktuellen Monats.
+  const [gridOverrides, setGridOverrides] = useState<any[]>([]);
   const [gridLoading, setGridLoading] = useState(false);
   const showWithZA = true; // App zeigt immer echte Stunden
 
@@ -569,6 +574,19 @@ export default function HoursReport() {
     }));
 
     setGridBerichtData(transformed);
+
+    // Interne Korrekturen des Monats laden (nur intern, berührt LB/Projekt nicht).
+    let ovQuery = supabase
+      .from("stundenauswertung_overrides" as any)
+      .select("*")
+      .gte("datum", startOfMonth)
+      .lte("datum", endOfMonth);
+    if (gridEmployee !== "all") {
+      ovQuery = ovQuery.eq("user_id", gridEmployee);
+    }
+    const { data: ovData } = await ovQuery;
+    setGridOverrides(ovData || []);
+
     setGridLoading(false);
   }, [gridMonth, gridYear, gridEmployee]);
 
@@ -593,6 +611,7 @@ export default function HoursReport() {
           schmutzzulageStunden: null, regenStunden: null,
           isAbsence: false, absenceType: "",
           partialAbsenceHours: 0, partialAbsenceShort: null, zaHours: 0,
+          isOverride: false,
         };
       }
       return map[uid][day];
@@ -616,6 +635,7 @@ export default function HoursReport() {
           isAbsence: true, absenceType: entry.taetigkeit,
           partialAbsenceHours: partialBefore, partialAbsenceShort: partialShortBefore,
           zaHours: map[entry.user_id][day]?.zaHours ?? 0,
+          isOverride: false,
         };
       } else if (isPartial) {
         // Teil-Absenz: nicht als Tag-Override, sondern als zusaetzlicher Marker
@@ -671,12 +691,54 @@ export default function HoursReport() {
           partialAbsenceHours: 0,
           partialAbsenceShort: null,
           zaHours: 0,
+          isOverride: false,
         };
       }
     }
 
+    // Dritter Pass: interne Korrekturen (stundenauswertung_overrides) gewinnen.
+    // Sie ersetzen den Tag komplett — der Leistungsbericht/die Projektzeilen
+    // bleiben unberührt, nur die interne Anzeige zeigt den korrigierten Wert.
+    for (const ov of gridOverrides) {
+      const day = parseInt(ov.datum.split("-")[2], 10);
+      if (!map[ov.user_id]) map[ov.user_id] = {};
+      const stunden = parseFloat(ov.stunden) || 0;
+      const base: DayData = {
+        stunden: 0, istFahrer: false, istWerkstatt: false, schmutzzulage: false,
+        regenSchicht: false, fahrerStunden: null, werkstattStunden: null,
+        schmutzzulageStunden: null, regenStunden: null,
+        isAbsence: false, absenceType: "",
+        partialAbsenceHours: 0, partialAbsenceShort: null, zaHours: 0,
+        isOverride: true,
+      };
+      if (ov.typ === "absenz" && ov.absenz_typ) {
+        const typ = findAbsenceTypeByTaetigkeit(ov.absenz_typ);
+        if (typ?.hourlyEditable) {
+          // Teil-Absenz (Arzt/ZA/Sonstiges): Marker zusätzlich, keine Voll-Blockade
+          base.partialAbsenceHours = stunden;
+          base.partialAbsenceShort = typ.short;
+          if (ov.absenz_typ === "ZA" || ov.absenz_typ === "Zeitausgleich") base.zaHours = stunden;
+        } else {
+          base.isAbsence = true;
+          base.absenceType = ov.absenz_typ;
+          base.stunden = stunden;
+        }
+      } else {
+        base.stunden = stunden;
+        base.istFahrer = !!ov.ist_fahrer;
+        base.istWerkstatt = !!ov.ist_werkstatt;
+        base.schmutzzulage = !!ov.schmutzzulage;
+        base.regenSchicht = !!ov.regen_schicht;
+        base.fahrerStunden = ov.fahrer_stunden != null ? parseFloat(ov.fahrer_stunden) : null;
+        base.werkstattStunden = ov.werkstatt_stunden != null ? parseFloat(ov.werkstatt_stunden) : null;
+        base.schmutzzulageStunden = ov.schmutzzulage_stunden != null ? parseFloat(ov.schmutzzulage_stunden) : null;
+        base.regenStunden = ov.regen_stunden != null ? parseFloat(ov.regen_stunden) : null;
+      }
+      map[ov.user_id][day] = base;
+    }
+
     return map;
-  }, [gridEntries, gridBerichtData]);
+  }, [gridEntries, gridBerichtData, gridOverrides]);
 
   // Determine which employees to show
   const gridEmployees = useMemo(() => {
@@ -823,23 +885,18 @@ export default function HoursReport() {
     setEditingCell({ userId, day, name });
   };
 
+  // Löscht die interne Korrektur des Tages → Revert auf den Leistungsbericht-/
+  // Original-Wert. time_entries und der Leistungsbericht werden NICHT berührt.
   const handleDeleteCell = async () => {
     if (!editingCell) return;
     const { userId, day } = editingCell;
     const dateStr = `${gridYear}-${String(gridMonth).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
     setSavingCell(true);
     try {
-      await supabase.from("time_entries").delete().eq("user_id", userId).eq("datum", dateStr);
-      // Also clean leistungsbericht_mitarbeiter flags
-      const { data: berichte } = await supabase.from("leistungsberichte" as any).select("id").eq("datum", dateStr);
-      if (berichte) {
-        for (const b of berichte) {
-          await supabase.from("leistungsbericht_mitarbeiter" as any).delete()
-            .eq("bericht_id", (b as any).id).eq("mitarbeiter_id", userId);
-        }
-      }
+      await supabase.from("stundenauswertung_overrides" as any)
+        .delete().eq("user_id", userId).eq("datum", dateStr);
       setEditingCell(null);
-      toast({ title: "Eintrag gelöscht" });
+      toast({ title: "Korrektur entfernt" });
       fetchGridData();
     } catch (err: any) {
       toast({ variant: "destructive", title: "Fehler", description: err.message });
@@ -848,126 +905,56 @@ export default function HoursReport() {
     }
   };
 
-  const handleSaveCell = async (forceMultiBerichtOverwrite = false) => {
+  // Speichert eine rein interne Korrektur (stundenauswertung_overrides).
+  // Verändert bewusst WEDER time_entries (Projektstunden) NOCH den Leistungsbericht —
+  // die ändert man weiterhin nur über den Leistungsbericht selbst.
+  const handleSaveCell = async () => {
     if (!editingCell) return;
     const { userId, day } = editingCell;
     const dateStr = `${gridYear}-${String(gridMonth).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-    const stunden = parseFloat(editStunden) || 0;
 
-    // Pre-Check: Multi-Projekt-Tag erkennen — Direct-Edit der Zelle würde alle Projekte ersetzen
-    if (!forceMultiBerichtOverwrite && editType === "arbeit") {
-      const { data: existingEntries } = await supabase
-        .from("time_entries")
-        .select("id, project_id, taetigkeit, stunden")
-        .eq("user_id", userId)
-        .eq("datum", dateStr);
-
-      const distinctProjects = new Set(
-        (existingEntries || [])
-          .map((e: any) => e.project_id)
-          .filter(Boolean)
-      );
-
-      if (distinctProjects.size > 1) {
-        const profile = profileMap[userId];
-        const userName = profile ? `${profile.vorname} ${profile.nachname}` : "Mitarbeiter";
-        const details = (existingEntries || [])
-          .filter((e: any) => e.project_id)
-          .map((e: any) => `${e.taetigkeit || "?"}: ${e.stunden}h`);
-        setEditingCell(null);
-        // Use window.alert as simple way - the cell-edit dialog is already a Dialog, can't nest AlertDialog easily
-        const ok = window.confirm(
-          `${userName} hat am ${dateStr} Buchungen für mehrere Projekte:\n\n${details.join("\n")}\n\n` +
-          `Direktes Bearbeiten der Zelle würde alle Projekt-Einträge zu einem zusammenfassen!\n\n` +
-          `Bitte stattdessen den Bericht direkt bearbeiten (über den Tab "Leistungsberichte").\n\n` +
-          `Möchtest du trotzdem überschreiben?`
-        );
-        if (!ok) return;
-        // User hat bestätigt — re-open editingCell und fortfahren mit force
-        setEditingCell({ userId, day, name: profile ? `${profile.vorname} ${profile.nachname}` : "" });
-        return handleSaveCell(true);
-      }
+    // Leeres Stunden-Feld bei "Arbeit" = Korrektur entfernen (Revert auf Original).
+    if (editType === "arbeit" && editStunden.trim() === "") {
+      return handleDeleteCell();
     }
 
     setSavingCell(true);
     try {
+      const stunden = parseFloat(editStunden) || 0;
       const isFriday = new Date(gridYear, gridMonth - 1, day).getDay() === 5;
       const standardDefault = isFriday ? 7 : 8;
       const empWeekly = employeeSollMap[userId];
       const defaultHours = empWeekly != null
         ? Math.round((empWeekly / 39) * standardDefault * 10) / 10
         : standardDefault;
-      const absenzStunden = editType === "absenz" ? (stunden > 0 ? stunden : defaultHours) : stunden;
 
-      // Delete existing time_entry for this day
-      await supabase.from("time_entries").delete().eq("user_id", userId).eq("datum", dateStr);
+      const { data: { user } } = await supabase.auth.getUser();
+      const isArbeit = editType === "arbeit";
+      const row = {
+        user_id: userId,
+        datum: dateStr,
+        typ: editType,
+        stunden: isArbeit ? stunden : (stunden > 0 ? stunden : defaultHours),
+        absenz_typ: isArbeit ? null : editAbsenzTyp,
+        ist_fahrer: isArbeit ? editFahrer : false,
+        ist_werkstatt: isArbeit ? editWerkstatt : false,
+        schmutzzulage: isArbeit ? editSchmutz : false,
+        regen_schicht: isArbeit ? editRegen : false,
+        fahrer_stunden: null as number | null,
+        werkstatt_stunden: isArbeit && editWerkstattStunden ? parseFloat(editWerkstattStunden) : null,
+        schmutzzulage_stunden: isArbeit && editSchmutzStunden ? parseFloat(editSchmutzStunden) : null,
+        regen_stunden: isArbeit && editRegenStunden ? parseFloat(editRegenStunden) : null,
+        created_by: user?.id,
+        updated_at: new Date().toISOString(),
+      };
 
-      if (stunden > 0 || editType === "absenz") {
-
-        await supabase.from("time_entries").insert({
-          user_id: userId,
-          datum: dateStr,
-          stunden: absenzStunden,
-          taetigkeit: editType === "absenz" ? editAbsenzTyp : "Arbeit",
-          start_time: "07:00",
-          end_time: isFriday ? "14:00" : "15:00",
-          pause_minutes: 0,
-          project_id: null,
-          location_type: editType === "arbeit" ? "baustelle" : null,
-        });
-      }
-
-      // Save flags in leistungsbericht_mitarbeiter
-      if (editType === "arbeit") {
-        const flagData = {
-          ist_fahrer: editFahrer,
-          ist_werkstatt: editWerkstatt,
-          schmutzzulage: editSchmutz,
-          regen_schicht: editRegen,
-          fahrer_stunden: null as number | null,
-          werkstatt_stunden: editWerkstattStunden ? parseFloat(editWerkstattStunden) : null,
-          schmutzzulage_stunden: editSchmutzStunden ? parseFloat(editSchmutzStunden) : null,
-          regen_stunden: editRegenStunden ? parseFloat(editRegenStunden) : null,
-          summe_stunden: stunden,
-        };
-
-        // Find or create a bericht for this date
-        let { data: berichte } = await supabase
-          .from("leistungsberichte" as any)
-          .select("id")
-          .eq("datum", dateStr)
-          .limit(1);
-
-        let berichtId: string;
-        if (berichte && berichte.length > 0) {
-          berichtId = (berichte[0] as any).id;
-        } else {
-          // Create minimal bericht
-          const { data: { user } } = await supabase.auth.getUser();
-          const { data: nb } = await supabase
-            .from("leistungsberichte" as any)
-            .insert({ datum: dateStr, erstellt_von: user?.id, ankunft_zeit: "07:00", abfahrt_zeit: isFriday ? "15:00" : "16:00", pause_von: "11:00", pause_bis: "11:30" })
-            .select("id")
-            .single();
-          berichtId = (nb as any)?.id;
-        }
-
-        if (berichtId) {
-          // Upsert: delete old + insert new (simple and reliable)
-          await supabase
-            .from("leistungsbericht_mitarbeiter" as any)
-            .delete()
-            .eq("bericht_id", berichtId)
-            .eq("mitarbeiter_id", userId);
-
-          await supabase
-            .from("leistungsbericht_mitarbeiter" as any)
-            .insert({ bericht_id: berichtId, mitarbeiter_id: userId, ...flagData });
-        }
-      }
+      const { error } = await supabase
+        .from("stundenauswertung_overrides" as any)
+        .upsert(row as any, { onConflict: "user_id,datum" });
+      if (error) throw error;
 
       setEditingCell(null);
-      toast({ title: "Gespeichert" });
+      toast({ title: "Intern korrigiert" });
       fetchGridData();
     } catch (err: any) {
       toast({ variant: "destructive", title: "Fehler", description: err.message });
@@ -1736,22 +1723,26 @@ export default function HoursReport() {
                                     <td
                                       key={day}
                                       className={cn(
-                                        "border border-border px-0.5 py-1 text-center whitespace-nowrap",
+                                        "relative border border-border px-0.5 py-1 text-center whitespace-nowrap",
                                         we && !dd && "bg-orange-50",
                                         we && dd && "bg-orange-100",
                                         !we && holiday && !dd && "bg-red-50",
                                         cell.className,
+                                        dd?.isOverride && "ring-1 ring-inset ring-blue-400 bg-blue-50/50",
                                         isAdmin && "cursor-pointer hover:ring-2 hover:ring-primary/40 hover:ring-inset"
                                       )}
                                       title={
                                         dd
-                                          ? dd.isAbsence
+                                          ? (dd.isOverride ? "Intern korrigiert — " : "") + (dd.isAbsence
                                             ? dd.absenceType
-                                            : `${dd.stunden}h${dd.istFahrer ? " Fahrer" : ""}${dd.istWerkstatt ? " Werkstatt" : ""}${dd.schmutzzulage ? " Schmutz" : ""}${dd.regenSchicht ? " Regen" : ""}`
+                                            : `${dd.stunden}h${dd.istFahrer ? " Fahrer" : ""}${dd.istWerkstatt ? " Werkstatt" : ""}${dd.schmutzzulage ? " Schmutz" : ""}${dd.regenSchicht ? " Regen" : ""}`)
                                           : isAdmin ? "Klicken zum Bearbeiten" : ""
                                       }
                                       onClick={() => openEditCell(employee.id, day, `${employee.nachname} ${employee.vorname}`)}
                                     >
+                                      {dd?.isOverride && (
+                                        <span className="absolute top-0 right-0 text-[8px] leading-none text-blue-500" title="Intern korrigiert">✎</span>
+                                      )}
                                       {cell.badges.length > 0 && (
                                         <div className="text-[9px] leading-none text-muted-foreground font-bold -mb-0.5">
                                           {cell.badges.join(" ")}
@@ -2253,7 +2244,7 @@ export default function HoursReport() {
             return (
               <div className="rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-950/30 px-3 py-2 space-y-2">
                 <p className="text-xs text-amber-900 dark:text-amber-200">
-                  ⚠ Für diesen Tag existiert ein <strong>Leistungsbericht</strong> — du kannst ihn hier direkt ansehen und bearbeiten. Änderungen besser dort vornehmen, sonst können doppelte oder widersprüchliche Stunden entstehen.
+                  ℹ Für diesen Tag existiert ein <strong>Leistungsbericht</strong>. Deine Änderung hier gilt <strong>nur intern</strong> (Stundenauswertung/Überstunden) — der Leistungsbericht und die Projektstunden bleiben unverändert. Wenn du die auch ändern willst, öffne den Bericht.
                 </p>
                 <div className="flex flex-wrap gap-2">
                   {zellenBerichte.map((bm) => (
@@ -2373,7 +2364,7 @@ export default function HoursReport() {
             )}
 
             {editStunden === "" && editType === "arbeit" && (
-              <p className="text-xs text-muted-foreground">Leer lassen = Eintrag löschen</p>
+              <p className="text-xs text-muted-foreground">Leer lassen = Korrektur entfernen (zurück auf Original)</p>
             )}
           </div>
           <DialogFooter className="flex flex-col sm:flex-row gap-2">
@@ -2383,15 +2374,15 @@ export default function HoursReport() {
               className="sm:mr-auto"
               disabled={savingCell}
               onClick={() => {
-                if (confirm("Eintrag für diesen Tag löschen?")) handleDeleteCell();
+                if (confirm("Interne Korrektur entfernen (zurück auf Original)?")) handleDeleteCell();
               }}
             >
-              Eintrag löschen
+              Korrektur entfernen
             </Button>
             <Button variant="outline" onClick={() => setEditingCell(null)}>
               Abbrechen
             </Button>
-            <Button onClick={handleSaveCell} disabled={savingCell}>
+            <Button onClick={() => handleSaveCell()} disabled={savingCell}>
               {savingCell ? "Speichert..." : "Speichern"}
             </Button>
           </DialogFooter>

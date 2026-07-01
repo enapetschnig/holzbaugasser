@@ -88,6 +88,22 @@ export default function TimeAccountManagement({ profiles }: TimeAccountManagemen
 
     if (!entries) return;
 
+    // Interne Stunden-Korrekturen (Stundenauswertung) — sie ersetzen für die
+    // Überstunden-Rechnung den jeweiligen Tag. time_entries/Leistungsbericht
+    // bleiben unberührt; nur die interne Ist-Summe verwendet den Korrekturwert.
+    const { data: overridesData } = await supabase
+      .from("stundenauswertung_overrides" as any)
+      .select("user_id, datum, typ, stunden, absenz_typ")
+      .gte("datum", startDate)
+      .lte("datum", endDate);
+    const overrideKeys = new Set<string>();
+    const overridesByMonth: Record<string, any[]> = {};
+    for (const ov of (overridesData || []) as any[]) {
+      overrideKeys.add(`${ov.user_id}|${ov.datum}`);
+      const mk = (ov.datum as string).slice(0, 7); // YYYY-MM
+      (overridesByMonth[mk] ||= []).push(ov);
+    }
+
     // Load employee weekly hours + Eintritt/Austritt (für anteiliges Soll bei
     // Teil-Monaten — sonst bekäme ein Mitte-des-Monats-Starter ein Riesen-Minus).
     const { data: employees } = await supabase
@@ -183,12 +199,26 @@ export default function TimeAccountManagement({ profiles }: TimeAccountManagemen
       const fullAbsPerUser: Record<string, number> = {};
       for (const e of monthEntries) {
         const uid = e.user_id;
+        if (overrideKeys.has(`${uid}|${e.datum}`)) continue; // durch interne Korrektur ersetzt
         const eintritt = eintrittMap[uid];
         const austritt = austrittMap[uid];
         if (eintritt && e.datum < eintritt) continue;
         if (austritt && e.datum > austritt) continue;
         const h = parseFloat(e.stunden as any) || 0;
         if (FULL_ABSENCE.has(e.taetigkeit)) fullAbsPerUser[uid] = (fullAbsPerUser[uid] || 0) + h;
+        else workedPerUser[uid] = (workedPerUser[uid] || 0) + h;
+      }
+
+      // Interne Korrekturen dieses Monats einrechnen (ersetzen den Tag oben).
+      for (const ov of (overridesByMonth[monthKey] || [])) {
+        const uid = ov.user_id;
+        const eintritt = eintrittMap[uid];
+        const austritt = austrittMap[uid];
+        if (eintritt && ov.datum < eintritt) continue;
+        if (austritt && ov.datum > austritt) continue;
+        const h = parseFloat(ov.stunden) || 0;
+        const isFullAbs = ov.typ === "absenz" && FULL_ABSENCE.has(ov.absenz_typ);
+        if (isFullAbs) fullAbsPerUser[uid] = (fullAbsPerUser[uid] || 0) + h;
         else workedPerUser[uid] = (workedPerUser[uid] || 0) + h;
       }
 

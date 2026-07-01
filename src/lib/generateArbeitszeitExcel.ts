@@ -138,6 +138,22 @@ export async function generateArbeitszeitExcel(options: ExportOptions) {
     }
   });
 
+  // Interne Korrekturen (Stundenauswertung) überschreiben den jeweiligen Tag —
+  // konsistent mit dem Grid. Leistungsbericht/Projektstunden bleiben unberührt.
+  const { data: overrides } = await supabase
+    .from("stundenauswertung_overrides" as any)
+    .select("datum, typ, stunden, absenz_typ")
+    .eq("user_id", userId)
+    .gte("datum", monthStart)
+    .lte("datum", monthEnd);
+  (overrides || []).forEach((ov: any) => {
+    entryMap[ov.datum] = {
+      stunden: parseFloat(ov.stunden) || 0,
+      taetigkeit: ov.typ === "absenz" ? (ov.absenz_typ || "") : "Arbeit",
+      project_id: null,
+    };
+  });
+
   // Build rows
   const rows: any[][] = [];
 
