@@ -87,6 +87,12 @@ export function findAbsenceTypeByTaetigkeit(
 ): AbsenceType | undefined {
   if (!taetigkeit) return undefined;
   if (taetigkeit === "Feiertag") return FEIERTAG_TYPE;
+  // Legacy-String "Zeitausgleich" (heute in der DB "ZA") auf den ZA-Typ mappen,
+  // damit alte Einträge im Grid/Export korrekt als ZA (Teil-Absenz) erkannt und
+  // nicht als reguläre Arbeit gezählt werden.
+  if (taetigkeit === "Zeitausgleich") {
+    return ABSENCE_TYPES.find((t) => t.id === "zeitausgleich");
+  }
   return ABSENCE_TYPES.find((t) => t.taetigkeit === taetigkeit);
 }
 

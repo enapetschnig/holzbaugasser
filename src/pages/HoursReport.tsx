@@ -96,6 +96,10 @@ interface DayData {
   // Teil-Absenz (Arzt 2h, ZA-Teilzeit 4h, Sonstiges-mit-Stunden) zusätzlich zur Arbeit.
   partialAbsenceHours: number;       // 0 = keine
   partialAbsenceShort: string | null; // "A", "ZA", "S"
+  // ZA-Anteil (in partialAbsenceHours enthalten) — wird aus der Ist-Summe
+  // wieder abgezogen, weil ZA bereits aufgebaute Überstunden sind (keine
+  // erneut gearbeitete Zeit). Die Zelle zeigt trotzdem "7ZA".
+  zaHours: number;
 }
 
 interface ExistingBericht {
@@ -588,7 +592,7 @@ export default function HoursReport() {
           regenSchicht: false, fahrerStunden: null, werkstattStunden: null,
           schmutzzulageStunden: null, regenStunden: null,
           isAbsence: false, absenceType: "",
-          partialAbsenceHours: 0, partialAbsenceShort: null,
+          partialAbsenceHours: 0, partialAbsenceShort: null, zaHours: 0,
         };
       }
       return map[uid][day];
@@ -611,12 +615,17 @@ export default function HoursReport() {
           fahrerStunden: null, werkstattStunden: null, schmutzzulageStunden: null, regenStunden: null,
           isAbsence: true, absenceType: entry.taetigkeit,
           partialAbsenceHours: partialBefore, partialAbsenceShort: partialShortBefore,
+          zaHours: map[entry.user_id][day]?.zaHours ?? 0,
         };
       } else if (isPartial) {
         // Teil-Absenz: nicht als Tag-Override, sondern als zusaetzlicher Marker
         const d = emptyDay(entry.user_id, day);
         d.partialAbsenceHours = (d.partialAbsenceHours || 0) + entry.stunden;
         d.partialAbsenceShort = typ!.short;
+        // ZA gesondert merken (wird aus der Ist-Summe abgezogen, s. Kommentar bei DayData).
+        if (entry.taetigkeit === "ZA" || entry.taetigkeit === "Zeitausgleich") {
+          d.zaHours = (d.zaHours || 0) + entry.stunden;
+        }
       } else {
         // Regulaere Arbeit
         const d = emptyDay(entry.user_id, day);
@@ -661,6 +670,7 @@ export default function HoursReport() {
           absenceType: "",
           partialAbsenceHours: 0,
           partialAbsenceShort: null,
+          zaHours: 0,
         };
       }
     }
@@ -1317,8 +1327,9 @@ export default function HoursReport() {
           const cell = formatCell(dd);
 
           if (dd) {
-            // Teil-Absenz-Stunden (Arzt 2h, ZA-Teilzeit) zaehlen zum Tag dazu.
-            const dayHoursRaw = dd.stunden + (dd.partialAbsenceHours || 0);
+            // Teil-Absenz-Stunden (Arzt) zaehlen zum Tag dazu; ZA wird abgezogen
+            // (bereits aufgebaute Überstunden, keine neu gearbeitete Zeit).
+            const dayHoursRaw = dd.stunden + (dd.partialAbsenceHours || 0) - (dd.zaHours || 0);
             totalHours += dayHoursRaw;
             // "ohne UEberstunden": cap auf Tagessoll
             if (!withOvertime && !dd.isAbsence) {
@@ -1666,8 +1677,9 @@ export default function HoursReport() {
                             for (let d = 1; d <= daysInMonth; d++) {
                               const dd = employeeDays[d];
                               if (dd) {
-                                // Teil-Absenz-Stunden zaehlen zum Tag dazu (Arzt 2h + Arbeit 6h = 8h Total)
-                                totalHours += dd.stunden + (dd.partialAbsenceHours || 0);
+                                // Teil-Absenz-Stunden zaehlen zum Tag dazu (Arzt 2h + Arbeit 6h = 8h Total).
+                                // ZA wird wieder abgezogen (bereits aufgebaute Überstunden, keine neu gearbeitete Zeit).
+                                totalHours += dd.stunden + (dd.partialAbsenceHours || 0) - (dd.zaHours || 0);
                                 if (dd.istFahrer) fahrerTage++;
                                 if (dd.istWerkstatt) {
                                   werkstattTage++;

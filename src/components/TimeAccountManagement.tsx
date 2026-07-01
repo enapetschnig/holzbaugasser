@@ -82,94 +82,157 @@ export default function TimeAccountManagement({ profiles }: TimeAccountManagemen
 
     const { data: entries } = await supabase
       .from("time_entries")
-      .select("user_id, datum, stunden")
+      .select("user_id, datum, stunden, taetigkeit")
       .gte("datum", startDate)
       .lte("datum", endDate);
 
     if (!entries) return;
 
-    // Load employee weekly hours
-    const { data: employees } = await supabase.from("employees").select("user_id, monats_soll_stunden");
+    // Load employee weekly hours + Eintritt/Austritt (für anteiliges Soll bei
+    // Teil-Monaten — sonst bekäme ein Mitte-des-Monats-Starter ein Riesen-Minus).
+    const { data: employees } = await supabase
+      .from("employees")
+      .select("user_id, monats_soll_stunden, eintritt_datum, austritt_datum");
     const weeklyMap: Record<string, number | null> = {};
-    if (employees) employees.forEach((e: any) => { if (e.user_id) weeklyMap[e.user_id] = e.monats_soll_stunden; });
-
+    const eintrittMap: Record<string, string | null> = {};
+    const austrittMap: Record<string, string | null> = {};
+    if (employees) employees.forEach((e: any) => {
+      if (e.user_id) {
+        weeklyMap[e.user_id] = e.monats_soll_stunden;
+        eintrittMap[e.user_id] = e.eintritt_datum || null;
+        austrittMap[e.user_id] = e.austritt_datum || null;
+      }
+    });
     // Load user roles for correct daily-soll pattern
     const { data: roles } = await supabase.from("user_roles").select("user_id, role");
     const roleMap: Record<string, string> = {};
-    if (roles) roles.forEach((r: any) => { roleMap[r.user_id] = r.role; });
+    // Höchste Rolle gewinnt (PL/Admin → 40h-Basis, 8h/Tag). Verhindert, dass eine
+    // Zweitrolle (z.B. "vorarbeiter") einen Admin fälschlich auf 39h-Basis zieht.
+    const rolePrio = (r: string) =>
+      r === "administrator" || r === "projektleiter" ? 2 : 1;
+    if (roles) roles.forEach((r: any) => {
+      const cur = roleMap[r.user_id];
+      if (!cur || rolePrio(r.role) > rolePrio(cur)) roleMap[r.user_id] = r.role;
+    });
 
-    // Calculate overtime per user per month (only POSITIVE = Überstunden)
     const monthNames = ["Jänner","Feber","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember"];
-    const overtimePerUser: Record<string, number> = {};
 
     const { data: { user: currentUser } } = await supabase.auth.getUser();
 
+    // Echtes Gleitzeitkonto (Plus UND Minus) wird erst ab diesem Monat gebucht.
+    // Grund: davor war die App im Ramp-up, die Zeiterfassung unvollständig — ein
+    // rückwirkendes Minus wäre kein echtes Minus, sondern nur eine Erfassungslücke.
+    // Plus wird immer gebucht (Mehrstunden sind unabhängig von Lücken echt).
+    const MINUS_START = "2026-07"; // YYYY-MM — ab hier zählt auch Minus
+
+    // Voll-Tages-Absenzen: füllen den ganzen Tag und werden mit dem (ggf. Teilzeit-
+    // anteiligen) Tages-Soll gewertet, damit sie exakt das Soll decken (netto 0).
+    // Teil-Absenzen (Arzt/ZA/Sonstiges) zählen mit ihren echten Stunden.
+    const FULL_ABSENCE = new Set([
+      "Urlaub", "Krankenstand", "Feiertag", "Schule", "Berufsschule",
+      "Fortbildung", "Weiterbildung",
+    ]);
+
+    // Eine Monats-Buchung idempotent auf ihren Soll-Wert bringen — oder entfernen.
+    // target === null  → es darf KEINE Buchung geben (evtl. alte wird gelöscht).
+    // Verhindert stehengebliebene "Überstunden {Monat}"-Buchungen (z.B. laufender
+    // Monat war kurz im Plus und fällt wieder ins Minus, oder Beschäftigung endet).
+    const reconcile = async (
+      userId: string, txKey: string, target: number | null, reason?: string
+    ) => {
+      const { data: existingTx } = await supabase
+        .from("time_account_transactions")
+        .select("id, hours")
+        .eq("user_id", userId)
+        .eq("change_type", txKey)
+        .maybeSingle();
+
+      if (target === null) {
+        if (existingTx) {
+          await supabase.from("time_account_transactions").delete().eq("id", existingTx.id);
+        }
+        return;
+      }
+      if (!existingTx) {
+        await supabase.from("time_account_transactions").insert({
+          user_id: userId, changed_by: currentUser?.id, change_type: txKey,
+          hours: target, balance_before: 0, balance_after: 0, reason,
+        });
+      } else if (Math.abs((parseFloat(existingTx.hours as any) || 0) - target) > 0.01) {
+        await supabase.from("time_account_transactions")
+          .update({ hours: target, reason }).eq("id", existingTx.id);
+      }
+    };
+
     for (let m = 1; m <= currentMonth; m++) {
-      const monthStart = `${currentYear}-${String(m).padStart(2, "0")}-01`;
+      const monthKey = `${currentYear}-${String(m).padStart(2, "0")}`;
       const daysInMonth = new Date(currentYear, m, 0).getDate();
-      const monthEnd = `${currentYear}-${String(m).padStart(2, "0")}-${daysInMonth}`;
+      const monthStart = `${monthKey}-01`;
+      const monthEnd = `${monthKey}-${String(daysInMonth).padStart(2, "0")}`;
       const monthLabel = `${monthNames[m - 1]} ${currentYear}`;
       const txKey = `Überstunden ${monthLabel}`;
-
-      // Monthly Soll: MA/VA pattern (Fr=7, sonst=8, Gesamt/Woche=39)
-      //            : PL pattern    (Fr=8, sonst=8, Gesamt/Woche=40)
-      let monthSollMA = 0;  // 39h/week pattern
-      let monthSollPL = 0;  // 40h/week pattern
-      for (let d = 1; d <= daysInMonth; d++) {
-        const dow = new Date(currentYear, m - 1, d).getDay();
-        if (dow === 0 || dow === 6) continue;
-        monthSollMA += dow === 5 ? 7 : 8;
-        monthSollPL += 8;
-      }
+      const isCurrentMonth = m === currentMonth;                 // noch nicht abgeschlossen
+      const minusAllowed = monthKey >= MINUS_START && !isCurrentMonth;
 
       const monthEntries = entries.filter(e => e.datum >= monthStart && e.datum <= monthEnd);
-      const hoursPerUser: Record<string, number> = {};
+
+      // Pro User: gearbeitete + Teil-Absenz-Stunden getrennt von Voll-Absenz-Stunden.
+      // Einträge außerhalb der Beschäftigung (Eintritt/Austritt) werden ignoriert —
+      // konsistent mit dem Soll-Fenster unten (sonst Phantom-Plus/Minus).
+      const workedPerUser: Record<string, number> = {};
+      const fullAbsPerUser: Record<string, number> = {};
       for (const e of monthEntries) {
-        hoursPerUser[e.user_id] = (hoursPerUser[e.user_id] || 0) + (parseFloat(e.stunden as any) || 0);
+        const uid = e.user_id;
+        const eintritt = eintrittMap[uid];
+        const austritt = austrittMap[uid];
+        if (eintritt && e.datum < eintritt) continue;
+        if (austritt && e.datum > austritt) continue;
+        const h = parseFloat(e.stunden as any) || 0;
+        if (FULL_ABSENCE.has(e.taetigkeit)) fullAbsPerUser[uid] = (fullAbsPerUser[uid] || 0) + h;
+        else workedPerUser[uid] = (workedPerUser[uid] || 0) + h;
       }
 
-      for (const [userId, ist] of Object.entries(hoursPerUser)) {
+      const userIds = new Set([...Object.keys(workedPerUser), ...Object.keys(fullAbsPerUser)]);
+      for (const userId of userIds) {
         const weekly = weeklyMap[userId];
         const role = roleMap[userId];
         const isPL = role === "projektleiter" || role === "administrator";
-        const baseSoll = isPL ? monthSollPL : monthSollMA;
         const baseWeekly = isPL ? 40 : 39;
-        const soll = weekly != null ? Math.round((weekly / baseWeekly) * baseSoll * 10) / 10 : baseSoll;
+        const eintritt = eintrittMap[userId]; // "YYYY-MM-DD" oder null
+        const austritt = austrittMap[userId];
+
+        // Monats-Soll pro Mitarbeiter: nur Arbeitstage INNERHALB der Beschäftigung.
+        // (Eintritt=null → ganzer Monat; Austritt=null → kein Ende.)
+        let sollBase = 0;
+        for (let d = 1; d <= daysInMonth; d++) {
+          const dateStr = `${monthKey}-${String(d).padStart(2, "0")}`;
+          const dow = new Date(currentYear, m - 1, d).getDay();
+          if (dow === 0 || dow === 6) continue;              // Wochenende
+          if (eintritt && dateStr < eintritt) continue;      // vor Eintritt
+          if (austritt && dateStr > austritt) continue;      // nach Austritt
+          sollBase += isPL ? 8 : (dow === 5 ? 7 : 8);
+        }
+        // Nicht (mehr/noch) beschäftigt in diesem Monat → evtl. alte Buchung entfernen.
+        if (sollBase === 0) { await reconcile(userId, txKey, null); continue; }
+
+        // Teilzeit-Faktor: skaliert Soll UND Voll-Absenzen gleich, sodass ein
+        // Feiertag/Urlaubstag exakt das Tages-Soll deckt (netto 0, kein Phantom-Plus).
+        const factor = weekly != null ? weekly / baseWeekly : 1;
+        const soll = Math.round(factor * sollBase * 10) / 10;
+        const ist = Math.round(
+          ((workedPerUser[userId] || 0) + (fullAbsPerUser[userId] || 0) * factor) * 100
+        ) / 100;
         const diff = Math.round((ist - soll) * 100) / 100;
 
-        // Only count positive overtime (no minus)
-        if (diff > 0) {
-          overtimePerUser[userId] = (overtimePerUser[userId] || 0) + diff;
+        // Buchungsregel:
+        // - Plus (diff > 0): immer buchen — Mehrstunden sind echt.
+        // - Minus (diff <= 0): nur für abgeschlossene Monate ab MINUS_START.
+        //   Historie (Ramp-up) + laufender, unvollständiger Monat → kein Minus.
+        const target = diff > 0 ? diff : (minusAllowed ? diff : null);
 
-          // Log transaction if not already logged for this month
-          const { data: existingTx } = await supabase
-            .from("time_account_transactions")
-            .select("id, hours")
-            .eq("user_id", userId)
-            .eq("change_type", txKey)
-            .maybeSingle();
-
-          if (!existingTx) {
-            // New entry
-            await supabase.from("time_account_transactions").insert({
-              user_id: userId,
-              changed_by: currentUser?.id,
-              change_type: txKey,
-              hours: diff,
-              balance_before: 0,
-              balance_after: 0,
-              reason: `${monthLabel}: ${ist}h gearbeitet - ${soll}h Soll = +${diff}h Überstunden`,
-            });
-          } else if (Math.abs((parseFloat(existingTx.hours as any) || 0) - diff) > 0.01) {
-            // Update if hours changed
-            await supabase.from("time_account_transactions")
-              .update({
-                hours: diff,
-                reason: `${monthLabel}: ${ist}h gearbeitet - ${soll}h Soll = +${diff}h Überstunden`,
-              })
-              .eq("id", existingTx.id);
-          }
-        }
+        const vorz = (target ?? 0) >= 0 ? "+" : "";
+        const reason = `${monthLabel}: ${ist}h gearbeitet - ${soll}h Soll = ${vorz}${target ?? 0}h`;
+        await reconcile(userId, txKey, target, reason);
       }
     }
 

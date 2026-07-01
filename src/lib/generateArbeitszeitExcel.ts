@@ -211,7 +211,11 @@ export async function generateArbeitszeitExcel(options: ExportOptions) {
     else if (isFeiertag) { label = "Feiertag"; sumArbeit += hours; }
     else { label = ""; sumArbeit += hours; }
 
-    sumGesamt += hours;
+    // ZA (Zeitausgleich) NICHT in die Gesamt-Arbeitsstunden zählen — es sind
+    // bereits aufgebaute Überstunden, keine neu gearbeitete Zeit. Der ZA-Tag
+    // bleibt in der Tageszeile sichtbar (Projektspalte "Zeitausgleich") und in
+    // der separaten sumZA-Zeile.
+    if (!isZA) sumGesamt += hours;
 
     // Fixed times based on hours worked
     let vormittagBeginn = "";
