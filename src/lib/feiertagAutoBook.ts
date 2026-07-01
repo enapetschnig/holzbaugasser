@@ -13,7 +13,7 @@
 
 import { supabase } from "@/integrations/supabase/client";
 import { getAustrianFeiertage, type Feiertag } from "./feiertage";
-import { getBuroSchedule, getSchedulePauseMinutes } from "./buroSchedules";
+import { getBuroSchedule, getSchedulePauseMinutes, hasBuroSchedule } from "./buroSchedules";
 import { ABSENCE_TAETIGKEITEN } from "./absenceTypes";
 
 export async function autoBookFeiertage(
@@ -91,6 +91,9 @@ export async function autoBookFeiertage(
       if (otherAbsenceSeen.has(key)) continue;   // andere Absenz hat Vorrang
 
       const sched = getBuroSchedule(uid, f.datum);
+      // Fixer Wochenplan, aber an diesem Tag kein Arbeitstag (z.B. Malle Di/Mi)
+      // → keinen Feiertag buchen (er hätte an dem Tag ohnehin nicht gearbeitet).
+      if (!sched && hasBuroSchedule(uid)) continue;
       const stunden = sched ? sched.stunden : isFr ? 7 : 8;
       const startTime = sched ? sched.start : "07:00";
       const endTime = sched ? sched.end : isFr ? "14:00" : "15:00";

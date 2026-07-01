@@ -1,5 +1,6 @@
 import * as XLSX from "xlsx";
 import { supabase } from "@/integrations/supabase/client";
+import { hasBuroSchedule, getBuroSchedule } from "./buroSchedules";
 
 interface ExportOptions {
   userId: string;
@@ -154,6 +155,25 @@ export async function generateArbeitszeitExcel(options: ExportOptions) {
     };
   });
 
+  // Fixer Wochenplan (z.B. Krusic 4h Mo–Fr, Malle 8h Mo/Do/Fr): das Excel zeigt
+  // IMMER die Regel-Arbeitszeiten an den Regeltagen — egal an welchen Tagen real
+  // gebucht wurde. Absenzen (Urlaub/Krank/Feiertag) überschreiben den Tag.
+  // Über-/Minusstunden laufen monatsweise übers Zeitkonto, nicht hier.
+  const fixedPlan = hasBuroSchedule(userId);
+  if (fixedPlan) {
+    for (let day = 1; day <= daysInMonth; day++) {
+      const dateStr = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+      const existing = entryMap[dateStr];
+      if (existing && isAbsenceTaetigkeit(existing.taetigkeit)) continue; // Absenz bleibt
+      const sched = getBuroSchedule(userId, dateStr);
+      if (sched && sched.stunden > 0) {
+        entryMap[dateStr] = { stunden: sched.stunden, taetigkeit: "Arbeit", project_id: null };
+      } else {
+        delete entryMap[dateStr]; // Nicht-Arbeitstag → leer
+      }
+    }
+  }
+
   // Build rows
   const rows: any[][] = [];
 
@@ -186,7 +206,11 @@ export async function generateArbeitszeitExcel(options: ExportOptions) {
     const dow = new Date(year, month - 1, day).getDay();
     const isWeekend = dow === 0 || dow === 6;
     const isFriday = dow === 5;
-    const dailyTarget = getDailyTarget(dow, weeklyHours);
+    // Bei fixem Wochenplan ist das Tages-Soll = Plan-Stunden dieses Tages
+    // (sonst würde die Deckelung z.B. Malles 8h fälschlich auf ~4,9h stutzen).
+    const dailyTarget = fixedPlan
+      ? (getBuroSchedule(userId, dateStr)?.stunden ?? 0)
+      : getDailyTarget(dow, weeklyHours);
     const entry = entryMap[dateStr];
 
     if (isWeekend) {

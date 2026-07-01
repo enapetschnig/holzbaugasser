@@ -1,7 +1,9 @@
-// Hartcodierte Wochenpläne für die zwei Büro-Mitarbeiterinnen (Barbara, Isabel),
-// die ausschließlich im Büro arbeiten und feste Tageszeiten haben.
-// Bewusst hartcodiert (statt DB-Tabelle), weil diese Sonderbehandlung explizit
-// nur für die zwei gilt und nicht skaliert.
+// Hartcodierte fixe Wochenpläne für Mitarbeiter mit festem Teilzeit-Plan:
+//  - Büro-Kräfte (Barbara, Isabel) mit festen Tageszeiten,
+//  - Teilzeit-Feldmitarbeiter mit fixen Regel-Arbeitstagen (Krusic, Malle).
+// Bewusst hartcodiert (statt DB-Tabelle), weil es nur wenige Sonderfälle sind.
+// Wirkung: exaktes Monats-Soll (getBuroMonatsSoll), korrekte Feiertag-Stunden
+// (feiertagAutoBook) und fixe Regel-Zeiten im Excel-Stundenzettel.
 
 export type DaySchedule = {
   start: string;        // "HH:MM"
@@ -16,6 +18,8 @@ export type WeekSchedule = Record<number, DaySchedule | null>;
 
 const BARBARA_USER_ID = "3ed43f8c-40a7-40df-8b3b-951c74e80af5";
 const ISABEL_USER_ID = "367a3fe2-855a-4808-925d-94f913738450";
+const KRUSIC_USER_ID = "202cf540-6b55-4b59-8db4-0016c668ac98";
+const MALLE_USER_ID = "0334be8e-59c9-45f4-a6d4-840dae511b5f";
 
 export const BURO_SCHEDULES: Record<string, WeekSchedule> = {
   // Barbara Andreycic — 28h/Woche
@@ -35,6 +39,26 @@ export const BURO_SCHEDULES: Record<string, WeekSchedule> = {
     3: { start: "07:00", pauseVon: null,    pauseBis: null,    end: "12:00", stunden: 5.0 },
     4: { start: "07:30", pauseVon: "12:00", pauseBis: "13:00", end: "16:00", stunden: 7.5 },
     5: { start: "07:30", pauseVon: null,    pauseBis: null,    end: "12:00", stunden: 4.5 },
+    0: null,
+    6: null,
+  },
+  // Krusic Johann — 20h/Woche = 4h je Mo–Fr (Teilzeit-Feld)
+  [KRUSIC_USER_ID]: {
+    1: { start: "07:00", pauseVon: null, pauseBis: null, end: "11:00", stunden: 4 },
+    2: { start: "07:00", pauseVon: null, pauseBis: null, end: "11:00", stunden: 4 },
+    3: { start: "07:00", pauseVon: null, pauseBis: null, end: "11:00", stunden: 4 },
+    4: { start: "07:00", pauseVon: null, pauseBis: null, end: "11:00", stunden: 4 },
+    5: { start: "07:00", pauseVon: null, pauseBis: null, end: "11:00", stunden: 4 },
+    0: null,
+    6: null,
+  },
+  // Malle Georg — 24h/Woche = je 8h Mo, Do, Fr (Di/Mi frei)
+  [MALLE_USER_ID]: {
+    1: { start: "07:00", pauseVon: "12:00", pauseBis: "12:30", end: "15:30", stunden: 8 },
+    2: null,
+    3: null,
+    4: { start: "07:00", pauseVon: "12:00", pauseBis: "12:30", end: "15:30", stunden: 8 },
+    5: { start: "07:00", pauseVon: "12:00", pauseBis: "12:30", end: "15:30", stunden: 8 },
     0: null,
     6: null,
   },
