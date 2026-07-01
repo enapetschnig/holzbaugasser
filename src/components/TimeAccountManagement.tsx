@@ -12,7 +12,6 @@ import { Clock, Plus, History, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 import { de } from "date-fns/locale";
-import { hasBuroSchedule, getBuroSchedule } from "@/lib/buroSchedules";
 
 type Profile = {
   id: string;
@@ -206,13 +205,8 @@ export default function TimeAccountManagement({ profiles }: TimeAccountManagemen
         if (eintritt && e.datum < eintritt) continue;
         if (austritt && e.datum > austritt) continue;
         const h = parseFloat(e.stunden as any) || 0;
-        // Voll-Absenz: bei fixem Wochenplan mit den Plan-Stunden des Tages
-        // gutschreiben (Feiertag an Malles Montag = 8h, an Di/Mi = 0h → netto 0),
-        // sonst roh (wird unten mit dem Teilzeit-Faktor skaliert).
-        if (FULL_ABSENCE.has(e.taetigkeit)) {
-          const credit = hasBuroSchedule(uid) ? (getBuroSchedule(uid, e.datum)?.stunden ?? 0) : h;
-          fullAbsPerUser[uid] = (fullAbsPerUser[uid] || 0) + credit;
-        } else workedPerUser[uid] = (workedPerUser[uid] || 0) + h;
+        if (FULL_ABSENCE.has(e.taetigkeit)) fullAbsPerUser[uid] = (fullAbsPerUser[uid] || 0) + h;
+        else workedPerUser[uid] = (workedPerUser[uid] || 0) + h;
       }
 
       // Interne Korrekturen dieses Monats einrechnen (ersetzen den Tag oben).
@@ -224,10 +218,8 @@ export default function TimeAccountManagement({ profiles }: TimeAccountManagemen
         if (austritt && ov.datum > austritt) continue;
         const h = parseFloat(ov.stunden) || 0;
         const isFullAbs = ov.typ === "absenz" && FULL_ABSENCE.has(ov.absenz_typ);
-        if (isFullAbs) {
-          const credit = hasBuroSchedule(uid) ? (getBuroSchedule(uid, ov.datum)?.stunden ?? 0) : h;
-          fullAbsPerUser[uid] = (fullAbsPerUser[uid] || 0) + credit;
-        } else workedPerUser[uid] = (workedPerUser[uid] || 0) + h;
+        if (isFullAbs) fullAbsPerUser[uid] = (fullAbsPerUser[uid] || 0) + h;
+        else workedPerUser[uid] = (workedPerUser[uid] || 0) + h;
       }
 
       const userIds = new Set([...Object.keys(workedPerUser), ...Object.keys(fullAbsPerUser)]);
@@ -241,32 +233,25 @@ export default function TimeAccountManagement({ profiles }: TimeAccountManagemen
 
         // Monats-Soll pro Mitarbeiter: nur Arbeitstage INNERHALB der Beschäftigung.
         // (Eintritt=null → ganzer Monat; Austritt=null → kein Ende.)
-        // Bei fixem Wochenplan (Krusic/Malle): exaktes Plan-Soll je Tag.
-        const scheduled = hasBuroSchedule(userId);
-        let sollBase = 0;      // Vollzeit-/Teilzeit-Faktor-Modell (gleichmäßig verteilt)
-        let scheduleSum = 0;   // Fixer Wochenplan
+        let sollBase = 0;
         for (let d = 1; d <= daysInMonth; d++) {
           const dateStr = `${monthKey}-${String(d).padStart(2, "0")}`;
           const dow = new Date(currentYear, m - 1, d).getDay();
           if (dow === 0 || dow === 6) continue;              // Wochenende
           if (eintritt && dateStr < eintritt) continue;      // vor Eintritt
           if (austritt && dateStr > austritt) continue;      // nach Austritt
-          if (scheduled) scheduleSum += getBuroSchedule(userId, dateStr)?.stunden ?? 0;
-          else sollBase += isPL ? 8 : (dow === 5 ? 7 : 8);
+          sollBase += isPL ? 8 : (dow === 5 ? 7 : 8);
         }
         // Nicht (mehr/noch) beschäftigt in diesem Monat → evtl. alte Buchung entfernen.
-        if ((scheduled ? scheduleSum : sollBase) === 0) { await reconcile(userId, txKey, null); continue; }
+        if (sollBase === 0) { await reconcile(userId, txKey, null); continue; }
 
         // Teilzeit-Faktor: skaliert Soll UND Voll-Absenzen gleich, sodass ein
         // Feiertag/Urlaubstag exakt das Tages-Soll deckt (netto 0, kein Phantom-Plus).
-        // Bei fixem Plan sind Soll und Voll-Absenz-Gutschrift schon plan-genau (kein Faktor).
         const factor = weekly != null ? weekly / baseWeekly : 1;
-        const soll = scheduled
-          ? Math.round(scheduleSum * 10) / 10
-          : Math.round(factor * sollBase * 10) / 10;
-        const ist = scheduled
-          ? Math.round(((workedPerUser[userId] || 0) + (fullAbsPerUser[userId] || 0)) * 100) / 100
-          : Math.round(((workedPerUser[userId] || 0) + (fullAbsPerUser[userId] || 0) * factor) * 100) / 100;
+        const soll = Math.round(factor * sollBase * 10) / 10;
+        const ist = Math.round(
+          ((workedPerUser[userId] || 0) + (fullAbsPerUser[userId] || 0) * factor) * 100
+        ) / 100;
         const diff = Math.round((ist - soll) * 100) / 100;
 
         // Buchungsregel:

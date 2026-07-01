@@ -1,6 +1,6 @@
 import * as XLSX from "xlsx";
 import { supabase } from "@/integrations/supabase/client";
-import { hasBuroSchedule, getBuroSchedule } from "./buroSchedules";
+import { hasExcelSchedule, getExcelSchedule } from "./buroSchedules";
 
 interface ExportOptions {
   userId: string;
@@ -159,18 +159,18 @@ export async function generateArbeitszeitExcel(options: ExportOptions) {
   // IMMER die Regel-Arbeitszeiten an den Regeltagen — egal an welchen Tagen real
   // gebucht wurde. Absenzen (Urlaub/Krank/Feiertag) überschreiben den Tag.
   // Über-/Minusstunden laufen monatsweise übers Zeitkonto, nicht hier.
-  const fixedPlan = hasBuroSchedule(userId);
+  const fixedPlan = hasExcelSchedule(userId);
   if (fixedPlan) {
     for (let day = 1; day <= daysInMonth; day++) {
       const dateStr = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-      const existing = entryMap[dateStr];
-      if (existing && isAbsenceTaetigkeit(existing.taetigkeit)) continue; // Absenz bleibt
-      const sched = getBuroSchedule(userId, dateStr);
-      if (sched && sched.stunden > 0) {
-        entryMap[dateStr] = { stunden: sched.stunden, taetigkeit: "Arbeit", project_id: null };
-      } else {
-        delete entryMap[dateStr]; // Nicht-Arbeitstag → leer
+      const schedHours = getExcelSchedule(userId, dateStr)?.stunden ?? 0;
+      if (schedHours <= 0) {
+        delete entryMap[dateStr]; // Nicht-Arbeitstag → immer leer (auch Feiertag ausblenden)
+        continue;
       }
+      const existing = entryMap[dateStr];
+      if (existing && isAbsenceTaetigkeit(existing.taetigkeit)) continue; // Absenz am Arbeitstag bleibt
+      entryMap[dateStr] = { stunden: schedHours, taetigkeit: "Arbeit", project_id: null };
     }
   }
 
@@ -209,7 +209,7 @@ export async function generateArbeitszeitExcel(options: ExportOptions) {
     // Bei fixem Wochenplan ist das Tages-Soll = Plan-Stunden dieses Tages
     // (sonst würde die Deckelung z.B. Malles 8h fälschlich auf ~4,9h stutzen).
     const dailyTarget = fixedPlan
-      ? (getBuroSchedule(userId, dateStr)?.stunden ?? 0)
+      ? (getExcelSchedule(userId, dateStr)?.stunden ?? 0)
       : getDailyTarget(dow, weeklyHours);
     const entry = entryMap[dateStr];
 

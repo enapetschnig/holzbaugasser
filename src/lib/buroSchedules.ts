@@ -1,9 +1,12 @@
-// Hartcodierte fixe Wochenpläne für Mitarbeiter mit festem Teilzeit-Plan:
-//  - Büro-Kräfte (Barbara, Isabel) mit festen Tageszeiten,
-//  - Teilzeit-Feldmitarbeiter mit fixen Regel-Arbeitstagen (Krusic, Malle).
-// Bewusst hartcodiert (statt DB-Tabelle), weil es nur wenige Sonderfälle sind.
-// Wirkung: exaktes Monats-Soll (getBuroMonatsSoll), korrekte Feiertag-Stunden
-// (feiertagAutoBook) und fixe Regel-Zeiten im Excel-Stundenzettel.
+// Hartcodierte Wochenpläne für die zwei Büro-Mitarbeiterinnen (Barbara, Isabel),
+// die ausschließlich im Büro arbeiten und feste Tageszeiten haben. Diese Pläne
+// treiben das Monats-Soll (getBuroMonatsSoll), die Feiertag-Stunden
+// (feiertagAutoBook) und das Zeitkonto-Verhalten.
+//
+// SEPARAT davon: EXCEL_SCHEDULES (Krusic, Malle) — reine ANZEIGE-Pläne für den
+// Excel-Stundenzettel. Sie ändern bewusst NICHT die Berechnung (Zeitkonto/Grid/
+// Feiertag laufen für die beiden weiter gleichmäßig verteilt wie bisher), sondern
+// nur, welche Regel-Arbeitszeiten im Excel je Tag angezeigt werden.
 
 export type DaySchedule = {
   start: string;        // "HH:MM"
@@ -42,7 +45,13 @@ export const BURO_SCHEDULES: Record<string, WeekSchedule> = {
     0: null,
     6: null,
   },
-  // Krusic Johann — 20h/Woche = 4h je Mo–Fr (Teilzeit-Feld)
+};
+
+// NUR für die Excel-Anzeige (Regel-Arbeitszeiten der Teilzeit-Feldmitarbeiter).
+// Keine Wirkung auf Zeitkonto/Grid/Feiertag — diese rechnen für die beiden weiter
+// gleichmäßig verteilt (monatsweise) wie bisher.
+export const EXCEL_SCHEDULES: Record<string, WeekSchedule> = {
+  // Krusic Johann — 20h/Woche = 4h je Mo–Fr
   [KRUSIC_USER_ID]: {
     1: { start: "07:00", pauseVon: null, pauseBis: null, end: "11:00", stunden: 4 },
     2: { start: "07:00", pauseVon: null, pauseBis: null, end: "11:00", stunden: 4 },
@@ -63,6 +72,24 @@ export const BURO_SCHEDULES: Record<string, WeekSchedule> = {
     6: null,
   },
 };
+
+/** Nur für die Excel-Anzeige: hat dieser MA einen fixen Regel-Wochenplan? */
+export function hasExcelSchedule(userId: string | null | undefined): boolean {
+  if (!userId) return false;
+  return userId in EXCEL_SCHEDULES;
+}
+
+/** Nur für die Excel-Anzeige: Regel-Tagesplan (oder null an Nicht-Arbeitstagen). */
+export function getExcelSchedule(
+  userId: string | null | undefined,
+  datum: string
+): DaySchedule | null {
+  if (!userId) return null;
+  const week = EXCEL_SCHEDULES[userId];
+  if (!week) return null;
+  const dow = new Date(datum + "T00:00:00").getDay();
+  return week[dow] ?? null;
+}
 
 export function hasBuroSchedule(userId: string | null | undefined): boolean {
   if (!userId) return false;
