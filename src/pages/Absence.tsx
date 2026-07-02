@@ -301,29 +301,40 @@ export default function Absence() {
       const { error: insertError } = await supabase.from("time_entries").insert(entries);
       if (insertError) throw insertError;
 
-      // ZA: Stunden vom Zeitkonto abziehen + Transaktion loggen
+      // ZA: Stunden vom Zeitkonto abziehen + Transaktion loggen.
+      // Der Abzug MUSS immer gebucht werden — ohne ihn würde der ZA-Tag im
+      // Monats-Ist des Zeitkontos als Arbeitszeit stehenbleiben (Doppel-Plus).
       if (absenceType === "zeitausgleich" && totalZaHours > 0) {
-        const { data: account } = await supabase
+        let { data: account } = await supabase
           .from("time_accounts")
           .select("id, balance_hours")
           .eq("user_id", currentUserId)
           .maybeSingle();
-        if (account) {
-          const newBalance = (account.balance_hours || 0) - totalZaHours;
-          await supabase.from("time_accounts")
-            .update({ balance_hours: newBalance })
-            .eq("id", account.id);
-          await supabase.from("time_account_transactions").insert({
-            user_id: currentUserId,
-            changed_by: currentUserId,
-            change_type: "ZA genommen",
-            hours: -totalZaHours,
-            balance_before: account.balance_hours || 0,
-            balance_after: newBalance,
-            reason: `Zeitausgleich: ${totalZaHours}h (${startDate}${startDate !== endDate ? ` bis ${endDate}` : ""})`,
-          });
-          setZeitkontoBalance(newBalance);
+        if (!account) {
+          // Alt-User ohne Zeitkonto-Zeile: jetzt anlegen statt still zu überspringen.
+          const { data: created, error: accErr } = await supabase
+            .from("time_accounts")
+            .insert({ user_id: currentUserId, balance_hours: 0 })
+            .select("id, balance_hours")
+            .single();
+          if (accErr) throw accErr;
+          account = created;
         }
+        const newBalance = (account.balance_hours || 0) - totalZaHours;
+        await supabase.from("time_accounts")
+          .update({ balance_hours: newBalance })
+          .eq("id", account.id);
+        const { error: txErr } = await supabase.from("time_account_transactions").insert({
+          user_id: currentUserId,
+          changed_by: currentUserId,
+          change_type: "ZA genommen",
+          hours: -totalZaHours,
+          balance_before: account.balance_hours || 0,
+          balance_after: newBalance,
+          reason: `Zeitausgleich: ${totalZaHours}h (${startDate}${startDate !== endDate ? ` bis ${endDate}` : ""})`,
+        });
+        if (txErr) throw txErr;
+        setZeitkontoBalance(newBalance);
       }
 
       // Update leave balance for urlaub
@@ -425,6 +436,32 @@ export default function Absence() {
           .update({ used_days: Math.max(0, leaveBalance.used_days - 1) })
           .eq("user_id", currentUserId)
           .eq("year", currentYear);
+      }
+
+      // ZA gelöscht → die sofortige "ZA genommen"-Abbuchung zurückerstatten,
+      // sonst bleibt der Abzug für immer ohne den ZA-Tag stehen (Konto zu niedrig).
+      if ((absence.taetigkeit === "ZA" || absence.taetigkeit === "Zeitausgleich") && absence.stunden > 0) {
+        const { data: account } = await supabase
+          .from("time_accounts")
+          .select("id, balance_hours")
+          .eq("user_id", currentUserId)
+          .maybeSingle();
+        if (account) {
+          const newBalance = (account.balance_hours || 0) + absence.stunden;
+          await supabase.from("time_accounts")
+            .update({ balance_hours: newBalance })
+            .eq("id", account.id);
+          await supabase.from("time_account_transactions").insert({
+            user_id: currentUserId,
+            changed_by: currentUserId,
+            change_type: "ZA storniert",
+            hours: absence.stunden,
+            balance_before: account.balance_hours || 0,
+            balance_after: newBalance,
+            reason: `Zeitausgleich gelöscht: ${absence.stunden}h (${absence.datum})`,
+          });
+          setZeitkontoBalance(newBalance);
+        }
       }
 
       toast({ title: "Eintrag geloescht" });

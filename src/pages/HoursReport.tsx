@@ -878,6 +878,14 @@ export default function HoursReport() {
       setEditType("absenz");
       setEditAbsenzTyp(dd.absenceType || "Urlaub");
       setEditStunden(dd.stunden.toString());
+    } else if (dd && !dd.isAbsence && dd.stunden === 0 && dd.partialAbsenceHours > 0) {
+      // Reiner Teil-Absenz-Tag (Arzt/ZA/Sonstiges ohne Arbeit): als Absenz
+      // vorbefüllen — sonst würde "Speichern" ohne Änderung die Absenz durch
+      // einen leeren Arbeitstag-Override ersetzen.
+      const typ = ABSENCE_TYPES_LIB.find((t) => t.short === dd.partialAbsenceShort);
+      setEditType("absenz");
+      setEditAbsenzTyp(typ?.taetigkeit || "Arzt");
+      setEditStunden(dd.partialAbsenceHours.toString());
     } else {
       setEditType("arbeit");
       setEditStunden(dd ? dd.stunden.toString() : "");
@@ -1299,7 +1307,11 @@ export default function HoursReport() {
   // -------------------------------------------------------------------------
 
   const handleExportPDF = async (withOvertime: boolean) => {
-    const defaultMonthlyTarget = getMonthlyTargetHours(gridYear, gridMonth);
+    // Laufender Monat: Soll anteilig bis heute — wie das Grid. Sonst würde das
+    // PDF am Monatsanfang jedem MA ein Riesen-Minus (volles Soll) ausweisen.
+    const defaultMonthlyTarget = proratedTargetToToday(
+      getMonthlyTargetHours(gridYear, gridMonth), gridYear, gridMonth
+    );
 
     const pdfData: StundenauswertungPDFData = {
       monat: monthNames[gridMonth - 1],
@@ -1354,7 +1366,11 @@ export default function HoursReport() {
           };
         });
 
-        const employeeSoll = weeklyToMonthlyTarget(p.id, employeeSollMap[p.id] ?? null, gridYear, gridMonth);
+        // Laufender Monat: anteiliges Soll (wie Grid), abgeschlossene Monate: voll.
+        const employeeSoll = proratedTargetToToday(
+          weeklyToMonthlyTarget(p.id, employeeSollMap[p.id] ?? null, gridYear, gridMonth),
+          gridYear, gridMonth
+        );
         const displayTotal = withOvertime ? totalHours : cappedTotalHours;
 
         return {

@@ -71,48 +71,89 @@ export default function TimeAccountManagement({ profiles }: TimeAccountManagemen
     setLoading(false);
   };
 
+  // PostgREST liefert pro Request max. 1000 Zeilen (still gekappt!) — daher
+  // ALLE wachsenden Tabellen seitenweise laden, sonst rechnet der Sync ab
+  // ein paar Monaten Datenbestand mit fehlenden Tagen falsche (Minus-)Werte.
+  const fetchAllRows = async (
+    build: (from: number, to: number) => PromiseLike<{ data: any[] | null; error: any }>
+  ): Promise<any[]> => {
+    const PAGE = 1000;
+    const rows: any[] = [];
+    for (let from = 0; ; from += PAGE) {
+      const { data, error } = await build(from, from + PAGE - 1);
+      if (error) { console.error("Zeitkonto-Sync: Ladefehler", error); throw error; }
+      rows.push(...(data || []));
+      if (!data || data.length < PAGE) break;
+    }
+    return rows;
+  };
+
   // Live sync: Calculate overtime from all completed months and update balance
   const syncOvertimeBalances = async () => {
     const now = new Date();
-    const currentYear = now.getFullYear();
-    const currentMonth = now.getMonth() + 1; // 1-based
-
-    // Zeitkonto = Summe der Monats-+/- aus der großen Liste, ab Juni 2026,
-    // nur ABGESCHLOSSENE Monate. Alles vor Juni wird ignoriert.
-    const START_MONTH = 6; // Juni
-    if (currentYear !== 2026 || currentMonth < START_MONTH) return;
-
     const monthNames = ["Jänner","Feber","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember"];
 
-    // Datenfenster: ab Juni (Vor-Juni komplett ignoriert).
-    const startDate = `${currentYear}-06-01`;
-    const endDate = `${currentYear}-${String(currentMonth).padStart(2, "0")}-${new Date(currentYear, currentMonth, 0).getDate()}`;
+    // Zeitkonto = Summe der Monats-+/- aus der großen Liste, ab Juni 2026,
+    // nur ABGESCHLOSSENE Monate. Alles vor Juni 2026 wird ignoriert.
+    // Monatsliste JAHRESÜBERGREIFEND (2026-06 … Vormonat von heute) — sonst
+    // würde Dezember nie gebucht und der Sync ab Jänner 2027 komplett stehen.
+    const START = "2026-06-01";
+    const months: { y: number; m: number }[] = [];
+    for (let y = 2026, m = 6; y < now.getFullYear() || (y === now.getFullYear() && m < now.getMonth() + 1); ) {
+      months.push({ y, m });
+      m++; if (m > 12) { m = 1; y++; }
+    }
+    // Vor Juni 2026 gibt es nichts zu synchronisieren.
+    if (now.getFullYear() < 2026 || (now.getFullYear() === 2026 && now.getMonth() + 1 < 6)) return;
 
-    const { data: entries } = await supabase
-      .from("time_entries")
-      .select("user_id, datum, stunden, taetigkeit")
-      .gte("datum", startDate)
-      .lte("datum", endDate);
-    if (!entries) return;
+    try {
+
+    const lastClosed = months.length ? months[months.length - 1] : null;
+    const endDate = lastClosed
+      ? `${lastClosed.y}-${String(lastClosed.m).padStart(2, "0")}-${String(new Date(lastClosed.y, lastClosed.m, 0).getDate()).padStart(2, "0")}`
+      : null;
+
+    // Daten des Buchungsfensters laden (seitenweise, s. fetchAllRows).
+    const entries = endDate ? await fetchAllRows((from, to) =>
+      supabase.from("time_entries")
+        .select("user_id, datum, stunden, taetigkeit")
+        .gte("datum", START).lte("datum", endDate)
+        .order("id").range(from, to)
+    ) : [];
 
     // Interne Korrekturen (Stundenauswertung) — ersetzen den jeweiligen Tag.
-    const { data: overridesData } = await supabase
-      .from("stundenauswertung_overrides" as any)
-      .select("user_id, datum, typ, stunden, absenz_typ")
-      .gte("datum", startDate)
-      .lte("datum", endDate);
-    const overrideKeys = new Set<string>();
-    const overridesByMonth: Record<string, any[]> = {};
-    for (const ov of (overridesData || []) as any[]) {
-      overrideKeys.add(`${ov.user_id}|${ov.datum}`);
-      (overridesByMonth[(ov.datum as string).slice(0, 7)] ||= []).push(ov);
-    }
+    const overridesData = endDate ? await fetchAllRows((from, to) =>
+      (supabase.from("stundenauswertung_overrides" as any)
+        .select("user_id, datum, typ, stunden, absenz_typ")
+        .gte("datum", START).lte("datum", endDate)
+        .order("id").range(from, to)) as any
+    ) : [];
 
-    // Wochenstunden (für Teilzeit-Soll — dieselbe Funktion wie das Grid).
+    // Leistungsbericht-Zeilen als Fallback: das Grid zählt eine
+    // leistungsbericht_mitarbeiter-Zeile OHNE time_entry am Tag mit
+    // (summe_stunden) — der Sync muss das genauso tun, sonst divergiert
+    // das Zeitkonto bei solchen Alt-/Orphan-Daten vom Grid.
+    const bmRows = endDate ? await fetchAllRows((from, to) =>
+      (supabase.from("leistungsbericht_mitarbeiter" as any)
+        .select("mitarbeiter_id, summe_stunden, leistungsberichte!inner(datum)")
+        .gte("leistungsberichte.datum" as any, START)
+        .lte("leistungsberichte.datum" as any, endDate)
+        .order("id").range(from, to)) as any
+    ) : [];
+
+    // Wochenstunden + Eintrittsdatum (Monate komplett vor dem Eintritt werden
+    // NICHT gebucht — sonst bekäme ein später aktivierter MA rückwirkend
+    // volle Soll-Minus-Monate seit Juni).
     const { data: employees } = await supabase
-      .from("employees").select("user_id, monats_soll_stunden");
+      .from("employees").select("user_id, monats_soll_stunden, eintritt_datum");
     const weeklyMap: Record<string, number | null> = {};
-    if (employees) employees.forEach((e: any) => { if (e.user_id) weeklyMap[e.user_id] = e.monats_soll_stunden; });
+    const eintrittMap: Record<string, string | null> = {};
+    if (employees) employees.forEach((e: any) => {
+      if (e.user_id) {
+        weeklyMap[e.user_id] = e.monats_soll_stunden;
+        eintrittMap[e.user_id] = e.eintritt_datum || null;
+      }
+    });
 
     // Population fürs Zeitkonto = alle echten Mitarbeiter mit Gleitzeit (= dieselben
     // wie in der großen Liste): aktive, nicht-versteckte Profile OHNE die 2 Chefs
@@ -134,68 +175,133 @@ export default function TimeAccountManagement({ profiles }: TimeAccountManagemen
     const { data: { user: currentUser } } = await supabase.auth.getUser();
 
     const isZA = (t: string) => t === "ZA" || t === "Zeitausgleich";
+    // Klassifizierung EXAKT wie das Grid (HoursReport gridDataMap):
+    // Voll-Absenz überschreibt den Tag (gleichzeitige Arbeit zählt dort nicht),
+    // Teil-Absenzen (Arzt/ZA/Sonstiges) zählen zusätzlich zur Arbeit.
+    const FULL_ABSENCE = new Set(["Urlaub", "Krankenstand", "Fortbildung", "Schule", "Feiertag"]);
+    const PARTIAL_ABSENCE = new Set(["Arzt", "ZA", "Zeitausgleich", "Sonstiges"]);
+
+    // Tages-Aggregation pro (user, datum) — Basis für die Grid-identische Ist-Rechnung.
+    type DayAgg = {
+      entryCount: number; work: number; fullAbs: number; hasFull: boolean;
+      partial: number; zaEntries: number; bmFallback: number; override: any | null;
+    };
+    const days: Record<string, DayAgg> = {};
+    const dayOf = (uid: string, datum: string): DayAgg =>
+      (days[`${uid}|${datum}`] ??= {
+        entryCount: 0, work: 0, fullAbs: 0, hasFull: false,
+        partial: 0, zaEntries: 0, bmFallback: 0, override: null,
+      });
+
+    for (const e of entries) {
+      const d = dayOf(e.user_id, e.datum);
+      const h = parseFloat(e.stunden as any) || 0;
+      d.entryCount++;
+      if (FULL_ABSENCE.has(e.taetigkeit)) { d.hasFull = true; d.fullAbs = Math.max(d.fullAbs, h); }
+      else if (PARTIAL_ABSENCE.has(e.taetigkeit)) { d.partial += h; if (isZA(e.taetigkeit)) d.zaEntries += h; }
+      else d.work += h;
+    }
+    for (const ov of overridesData) dayOf(ov.user_id, ov.datum).override = ov;
+    for (const bm of bmRows) {
+      const datum = (bm as any).leistungsberichte?.datum;
+      if (!datum) continue;
+      const d = dayOf((bm as any).mitarbeiter_id, datum);
+      d.bmFallback = Math.max(d.bmFallback, parseFloat((bm as any).summe_stunden) || 0);
+    }
+
+    // Tages-Ist — identisch zum Grid, PLUS die ZA-Stunden echter ZA-Einträge
+    // (das Grid zeigt ZA netto 0; im Zeitkonto bleibt ZA in der Ist und wird
+    // durch die sofortige "ZA genommen"-Buchung ausgeglichen → Summe = Grid-+/-).
+    const dayIst = (d: DayAgg): number => {
+      if (d.override) {
+        const ovH = d.override.typ === "absenz" && isZA(d.override.absenz_typ)
+          ? 0 // Override-ZA netto 0 (wie das Grid — Overrides haben kein "ZA genommen")
+          : (parseFloat(d.override.stunden) || 0);
+        // ZA-Stunden der ERSETZTEN Original-Einträge weiter zählen: deren
+        // "ZA genommen"-Buchung existiert und muss neutralisiert bleiben.
+        return ovH + d.zaEntries;
+      }
+      if (d.entryCount === 0) return d.bmFallback; // LB-Zeile ohne time_entry (Grid-Fallback)
+      return (d.hasFull ? d.fullAbs : d.work) + d.partial;
+    };
 
     // Eine Monats-Buchung idempotent setzen — oder entfernen (target === null).
+    // Fehler werden geprüft (früher liefen UPDATE/DELETE mangels RLS-Policy ins
+    // Leere); Duplikate (Race älterer Versionen) werden abgeräumt.
     const reconcile = async (
       userId: string, txKey: string, target: number | null, reason?: string
     ) => {
-      const { data: existingTx } = await supabase
+      const { data: existing, error: selErr } = await supabase
         .from("time_account_transactions")
         .select("id, hours")
         .eq("user_id", userId)
         .eq("change_type", txKey)
-        .maybeSingle();
+        .order("created_at", { ascending: true });
+      if (selErr) { console.error("Zeitkonto-Sync reconcile:", selErr); return; }
+      const rows = existing || [];
+      for (const dup of rows.slice(1)) {
+        const { error } = await supabase.from("time_account_transactions").delete().eq("id", dup.id);
+        if (error) console.error("Zeitkonto-Sync Duplikat-Löschung:", error);
+      }
+      const first = rows[0];
       if (target === null) {
-        if (existingTx) await supabase.from("time_account_transactions").delete().eq("id", existingTx.id);
+        if (first) {
+          const { error } = await supabase.from("time_account_transactions").delete().eq("id", first.id);
+          if (error) console.error("Zeitkonto-Sync Löschung:", error);
+        }
         return;
       }
-      if (!existingTx) {
-        await supabase.from("time_account_transactions").insert({
+      if (!first) {
+        const { error } = await supabase.from("time_account_transactions").insert({
           user_id: userId, changed_by: currentUser?.id, change_type: txKey,
           hours: target, balance_before: 0, balance_after: 0, reason,
         });
-      } else if (Math.abs((parseFloat(existingTx.hours as any) || 0) - target) > 0.01) {
-        await supabase.from("time_account_transactions")
-          .update({ hours: target, reason }).eq("id", existingTx.id);
+        if (error) console.error("Zeitkonto-Sync Buchung:", error);
+      } else if (Math.abs((parseFloat(first.hours as any) || 0) - target) > 0.005) {
+        const { error } = await supabase.from("time_account_transactions")
+          .update({ hours: target, reason }).eq("id", first.id);
+        if (error) console.error("Zeitkonto-Sync Update:", error);
       }
     };
 
     // Der LAUFENDE Monat wird NIE gebucht (sonst falsches Riesen-Minus, weil die
     // Zeiten noch nicht erfasst sind). Evtl. stehengebliebene Buchung entfernen.
-    await supabase.from("time_account_transactions").delete()
-      .eq("change_type", `Überstunden ${monthNames[currentMonth - 1]} ${currentYear}`);
+    {
+      const { error } = await supabase.from("time_account_transactions").delete()
+        .eq("change_type", `Überstunden ${monthNames[now.getMonth()]} ${now.getFullYear()}`);
+      if (error) console.error("Zeitkonto-Sync Stale-Delete:", error);
+    }
 
-    // Nur ABGESCHLOSSENE Monate ab Juni buchen (Plus UND Minus).
-    // Ist = Summe ALLER Tages-Stunden des MA (Arbeit + ZA + Arzt + Voll-Absenz, roh),
-    // Override-ersetzt. ZA bleibt in der Ist (wird separat via "ZA genommen" abgezogen)
-    // → keine Doppelzählung. Soll = weeklyToMonthlyTarget (byte-gleich wie das Grid).
-    for (let m = START_MONTH; m < currentMonth; m++) {
-      const monthKey = `${currentYear}-${String(m).padStart(2, "0")}`;
-      const daysInMonth = new Date(currentYear, m, 0).getDate();
-      const monthStart = `${monthKey}-01`;
+    // Nur ABGESCHLOSSENE Monate ab Juni 2026 buchen (Plus UND Minus).
+    // Soll = weeklyToMonthlyTarget (byte-gleich wie das Grid).
+    for (const { y, m } of months) {
+      const monthKey = `${y}-${String(m).padStart(2, "0")}`;
+      const daysInMonth = new Date(y, m, 0).getDate();
       const monthEnd = `${monthKey}-${String(daysInMonth).padStart(2, "0")}`;
-      const monthLabel = `${monthNames[m - 1]} ${currentYear}`;
+      const monthLabel = `${monthNames[m - 1]} ${y}`;
       const txKey = `Überstunden ${monthLabel}`;
 
-      const monthEntries = entries.filter(e => e.datum >= monthStart && e.datum <= monthEnd);
       const istPerUser: Record<string, number> = {};
-      for (const e of monthEntries) {
-        if (overrideKeys.has(`${e.user_id}|${e.datum}`)) continue; // durch Korrektur ersetzt
-        istPerUser[e.user_id] = (istPerUser[e.user_id] || 0) + (parseFloat(e.stunden as any) || 0);
-      }
-      for (const ov of (overridesByMonth[monthKey] || [])) {
-        // Override-ZA zählt netto 0 (wie das Grid; für Overrides gibt es kein "ZA genommen").
-        if (ov.typ === "absenz" && isZA(ov.absenz_typ)) continue;
-        istPerUser[ov.user_id] = (istPerUser[ov.user_id] || 0) + (parseFloat(ov.stunden) || 0);
+      for (const [key, d] of Object.entries(days)) {
+        const sep = key.indexOf("|");
+        const datum = key.slice(sep + 1);
+        if (!datum.startsWith(monthKey)) continue;
+        const uid = key.slice(0, sep);
+        istPerUser[uid] = (istPerUser[uid] || 0) + dayIst(d);
       }
 
       for (const userId of populationIds) {
-        const soll = weeklyToMonthlyTarget(userId, weeklyMap[userId] ?? null, currentYear, m);
+        // Monat liegt komplett vor dem Eintritt → keine Buchung (evtl. alte entfernen).
+        const eintritt = eintrittMap[userId];
+        if (eintritt && monthEnd < eintritt) { await reconcile(userId, txKey, null); continue; }
+
+        const soll = weeklyToMonthlyTarget(userId, weeklyMap[userId] ?? null, y, m);
         const ist = Math.round((istPerUser[userId] || 0) * 100) / 100;
         const diff = Math.round((ist - soll) * 100) / 100;
         const vorz = diff >= 0 ? "+" : "";
         const reason = `${monthLabel}: ${ist}h - ${soll}h Soll = ${vorz}${diff}h`;
-        await reconcile(userId, txKey, diff, reason);
+        // ±0-Monate nicht buchen (kein Rausch im Verlauf); bestehende 0er entfernen.
+        await reconcile(userId, txKey, Math.abs(diff) < 0.005 ? null : diff, reason);
       }
     }
 
@@ -203,13 +309,14 @@ export default function TimeAccountManagement({ profiles }: TimeAccountManagemen
     const { data: freshAccounts } = await supabase.from("time_accounts").select("*");
     if (!freshAccounts) return;
 
-    // For each account, compute balance = sum of all transactions
-    const { data: allTx } = await supabase.from("time_account_transactions").select("user_id, hours");
+    // For each account, compute balance = sum of all transactions (seitenweise!)
+    const allTx = await fetchAllRows((from, to) =>
+      supabase.from("time_account_transactions")
+        .select("user_id, hours").order("id").range(from, to)
+    );
     const txSumPerUser: Record<string, number> = {};
-    if (allTx) {
-      for (const tx of allTx) {
-        txSumPerUser[tx.user_id] = (txSumPerUser[tx.user_id] || 0) + (parseFloat(tx.hours as any) || 0);
-      }
+    for (const tx of allTx) {
+      txSumPerUser[tx.user_id] = (txSumPerUser[tx.user_id] || 0) + (parseFloat(tx.hours as any) || 0);
     }
 
     for (const acc of freshAccounts as TimeAccount[]) {
@@ -217,6 +324,12 @@ export default function TimeAccountManagement({ profiles }: TimeAccountManagemen
       if (Math.abs((acc.balance_hours || 0) - realBalance) > 0.01) {
         await supabase.from("time_accounts").update({ balance_hours: realBalance }).eq("id", acc.id);
       }
+    }
+
+    } catch (err) {
+      // Ladefehler → lieber gar nicht buchen als mit unvollständigen Daten
+      // falsche Salden erzeugen.
+      console.error("Zeitkonto-Sync abgebrochen:", err);
     }
   };
 
@@ -430,10 +543,14 @@ export default function TimeAccountManagement({ profiles }: TimeAccountManagemen
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="gutschrift">Gutschrift (Überstunden)</SelectItem>
-                  <SelectItem value="abzug">Abzug (Zeitausgleich / ZA)</SelectItem>
+                  <SelectItem value="gutschrift">Manuelle Gutschrift (Sonderfall)</SelectItem>
+                  <SelectItem value="abzug">Manueller Abzug (Sonderfall)</SelectItem>
                 </SelectContent>
               </Select>
+              <p className="text-xs text-muted-foreground">
+                Nur für Sonderfälle — Überstunden/Minus je Monat und ZA-Tage werden
+                automatisch gebucht. Ein manueller ZA-Abzug würde doppelt zählen.
+              </p>
             </div>
             <div className="space-y-2">
               <Label>Stunden</Label>

@@ -107,29 +107,51 @@ export async function generateArbeitszeitExcel(options: ExportOptions) {
   }
 
   // Aggregiere alle Einträge pro Tag (LB + PL + Vorfertigung + Absenz)
-  // Bei Multi-Entry-Tagen: Stunden summieren, Absenz hat Vorrang vor Arbeit
+  // Bei Multi-Entry-Tagen: Stunden summieren, Absenz hat Vorrang vor Arbeit.
+  // WICHTIG: exakte DB-Werte "ZA" und "Sonstiges" matchen — die Keyword-Liste
+  // allein ("za " mit Leerzeichen) hat den echten ZA-Wert verfehlt, wodurch
+  // ZA-Tage als Arbeit gezählt wurden.
   const ABSENCE_KEYWORDS = ["urlaub", "krank", "arzt", "fortbildung", "weiterbildung", "feiertag", "schule", "berufsschule", "zeitausgleich", "za "];
   const isAbsenceTaetigkeit = (t: string) => {
-    const lower = (t || "").toLowerCase();
+    const lower = (t || "").toLowerCase().trim();
+    if (lower === "za" || lower === "sonstiges") return true;
     return ABSENCE_KEYWORDS.some((kw) => lower.includes(kw));
   };
+  const isZATaetigkeit = (t: string) => {
+    const lower = (t || "").toLowerCase().trim();
+    return lower === "za" || lower.includes("zeitausgleich");
+  };
 
-  const entryMap: Record<string, { stunden: number; taetigkeit: string; project_id: string | null }> = {};
+  // ZA wird pro Tag GETRENNT geführt (zaH): ein Tag kann Arbeit + Teil-ZA
+  // mischen (z.B. 4h Arbeit + 4h ZA) — die Arbeitsstunden gehören in die
+  // Gesamtsumme, die ZA-Stunden nur in die ZA-Summe (sind schon vom
+  // Zeitkonto abgezogen, keine neu gearbeitete Zeit).
+  const entryMap: Record<string, { stunden: number; taetigkeit: string; project_id: string | null; zaH: number }> = {};
   (entries || []).forEach((e: any) => {
     const stunden = parseFloat(e.stunden) || 0;
     const taetigkeit = e.taetigkeit || "";
-    const isAbs = isAbsenceTaetigkeit(taetigkeit);
-    const existing = entryMap[e.datum];
+    const existing = (entryMap[e.datum] ||= { stunden: 0, taetigkeit: "", project_id: null, zaH: 0 });
 
-    if (!existing) {
-      entryMap[e.datum] = { stunden, taetigkeit, project_id: e.project_id || null };
+    if (isZATaetigkeit(taetigkeit)) {
+      existing.zaH += stunden;
+      if (!existing.taetigkeit) existing.taetigkeit = "ZA"; // reiner ZA-Tag (bisher)
       return;
     }
 
-    const existingIsAbs = isAbsenceTaetigkeit(existing.taetigkeit);
-    if (isAbs && !existingIsAbs) {
+    const isAbs = isAbsenceTaetigkeit(taetigkeit);
+    const existingIsAbs = existing.taetigkeit !== "" && existing.taetigkeit !== "ZA"
+      && isAbsenceTaetigkeit(existing.taetigkeit);
+
+    if (existing.taetigkeit === "" || existing.taetigkeit === "ZA") {
+      // Erster Nicht-ZA-Eintrag des Tages (ein reiner ZA-Marker wird ersetzt, zaH bleibt)
+      existing.stunden = stunden;
+      existing.taetigkeit = taetigkeit;
+      existing.project_id = e.project_id || null;
+    } else if (isAbs && !existingIsAbs) {
       // Absenz hat Vorrang — überschreibt Arbeit
-      entryMap[e.datum] = { stunden, taetigkeit, project_id: e.project_id || null };
+      existing.stunden = stunden;
+      existing.taetigkeit = taetigkeit;
+      existing.project_id = e.project_id || null;
     } else if (!isAbs && existingIsAbs) {
       // Existing ist Absenz — neue Arbeit ignorieren
     } else {
@@ -148,11 +170,15 @@ export async function generateArbeitszeitExcel(options: ExportOptions) {
     .gte("datum", monthStart)
     .lte("datum", monthEnd);
   (overrides || []).forEach((ov: any) => {
-    entryMap[ov.datum] = {
-      stunden: parseFloat(ov.stunden) || 0,
-      taetigkeit: ov.typ === "absenz" ? (ov.absenz_typ || "") : "Arbeit",
-      project_id: null,
-    };
+    const isOvZA = ov.typ === "absenz" && isZATaetigkeit(ov.absenz_typ || "");
+    entryMap[ov.datum] = isOvZA
+      ? { stunden: 0, taetigkeit: "ZA", project_id: null, zaH: parseFloat(ov.stunden) || 0 }
+      : {
+          stunden: parseFloat(ov.stunden) || 0,
+          taetigkeit: ov.typ === "absenz" ? (ov.absenz_typ || "") : "Arbeit",
+          project_id: null,
+          zaH: 0,
+        };
   });
 
   // Fixer Wochenplan (z.B. Krusic 4h Mo–Fr, Malle 8h Mo/Do/Fr): das Excel zeigt
@@ -170,7 +196,7 @@ export async function generateArbeitszeitExcel(options: ExportOptions) {
       }
       const existing = entryMap[dateStr];
       if (existing && isAbsenceTaetigkeit(existing.taetigkeit)) continue; // Absenz am Arbeitstag bleibt
-      entryMap[dateStr] = { stunden: schedHours, taetigkeit: "Arbeit", project_id: null };
+      entryMap[dateStr] = { stunden: schedHours, taetigkeit: "Arbeit", project_id: null, zaH: 0 };
     }
   }
 
@@ -234,8 +260,10 @@ export async function generateArbeitszeitExcel(options: ExportOptions) {
     const isFeiertag = taetigkeit.includes("feiertag");
     const isAbsence = isUrlaub || isKrank || isArzt || isSchule || isFortbildung || isZA || isFeiertag;
 
-    // Cap hours at daily target (ohne Überstunden) — Arzt/ZA können stundenweise sein
-    const rawHours = parseFloat(entry.stunden) || 0;
+    // Cap hours at daily target (ohne Überstunden) — Arzt/ZA können stundenweise sein.
+    // Reiner ZA-Tag: die Stunden stehen in zaH (getrennt geführt), nicht in stunden.
+    const zaH = entry.zaH || 0;
+    const rawHours = isZA ? zaH : (parseFloat(entry.stunden as any) || 0);
     const hoursIfAbsenceFull = isAbsence ? Math.min(rawHours, dailyTarget) : Math.min(rawHours, dailyTarget);
     // Arzt + ZA: User trägt manchmal weniger als Tagessoll ein → respektieren statt aufrunden
     const hours = (isArzt || isZA) ? Math.min(rawHours, dailyTarget) : (isAbsence ? dailyTarget : hoursIfAbsenceFull);
@@ -256,6 +284,11 @@ export async function generateArbeitszeitExcel(options: ExportOptions) {
     // bleibt in der Tageszeile sichtbar (Projektspalte "Zeitausgleich") und in
     // der separaten sumZA-Zeile.
     if (!isZA) sumGesamt += hours;
+
+    // Misch-Tag (Arbeit + Teil-ZA, z.B. 4h+4h): Arbeitsstunden laufen normal in
+    // die Gesamtsumme, der ZA-Anteil zusätzlich in die ZA-Summe.
+    const zaExtra = !isZA && zaH > 0 ? zaH : 0;
+    if (zaExtra > 0) sumZA += zaExtra;
 
     // Fixed times based on hours worked
     let vormittagBeginn = "";
@@ -310,6 +343,9 @@ export async function generateArbeitszeitExcel(options: ExportOptions) {
     } else {
       projekt = "Baustelle";
     }
+
+    // Misch-Tag: ZA-Anteil in der Projektspalte sichtbar machen
+    if (zaExtra > 0) projekt = `${projekt} + ${zaExtra}h ZA`;
 
     rows.push([
       day,
