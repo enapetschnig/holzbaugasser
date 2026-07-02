@@ -755,14 +755,18 @@ export default function HoursReport() {
     return map;
   }, [gridEntries, gridBerichtData, gridOverrides]);
 
-  // Determine which employees to show
+  // Determine which employees to show.
+  // "Alle"-Ansicht = nur die Arbeiter (gleiche Personen wie das PDF): Admin-/
+  // PL-Rollen (Büro + Bauleitung) sind ausgeblendet, bleiben aber über den
+  // Mitarbeiter-Filter einzeln erreichbar (ansehen/korrigieren — ihr Zeitkonto
+  // rechnet unabhängig von der Anzeige weiter).
   const gridEmployees = useMemo(() => {
     if (gridEmployee !== "all") {
       const p = profileMap[gridEmployee];
       return p ? [p] : [];
     }
-    return profiles;
-  }, [gridEmployee, profiles, profileMap]);
+    return profiles.filter((p) => !adminPlIds.has(p.id));
+  }, [gridEmployee, profiles, profileMap, adminPlIds]);
 
   const daysInMonth = getDaysInMonth(gridYear, gridMonth);
   const holidays = useMemo(() => getAustrianHolidays(gridYear), [gridYear]);
@@ -1321,12 +1325,9 @@ export default function HoursReport() {
       getMonthlyTargetHours(gridYear, gridMonth), gridYear, gridMonth
     );
 
-    // PDF zeigt nur die Arbeiter (wie früher): Admins/Projektleiter (= Büroleute)
-    // bleiben im Grid, kommen aber nicht in den Download. Ausnahme: ist die
-    // Ansicht explizit auf EINEN Mitarbeiter gefiltert, wird der exportiert.
-    const pdfEmployees = gridEmployee !== "all"
-      ? gridEmployees
-      : gridEmployees.filter((p) => !adminPlIds.has(p.id));
+    // PDF = exakt die angezeigte Liste (in "Alle" sind Admin/PL schon
+    // ausgefiltert; bei Einzelauswahl kommt genau diese Person ins PDF).
+    const pdfEmployees = gridEmployees;
 
     const pdfData: StundenauswertungPDFData = {
       monat: monthNames[gridMonth - 1],
