@@ -118,7 +118,9 @@ const MyHours = () => {
       .order("datum", { ascending: false });
 
     const usedDays = vacEntries?.length || 0;
-    const totalDays = balanceData?.total_days || 25;
+    // Kein Phantom-25 mehr: ohne eingerichtetes Konto ist der Stand 0
+    // (das Kontingent legt der Admin in der Urlaubsverwaltung fest).
+    const totalDays = balanceData?.total_days ?? 0;
 
     setVacationBalance({ total: totalDays, used: usedDays });
     setVacationHistory(vacEntries || []);
@@ -500,16 +502,18 @@ const MyHours = () => {
                   <h4 className="text-sm font-medium mb-2">Urlaubs-Buchungen (Korrekturen / Credits)</h4>
                   <div className="space-y-1.5 max-h-64 overflow-y-auto">
                     {leaveLog.map((l) => {
-                      const isPositive = l.action === "credit" || l.action === "manual_add" || (l.days > 0 && l.action !== "use");
-                      const sign = l.days > 0 ? "+" : "";
+                      // Echte leave_log-Actions (siehe LeaveManagement/leaveAccount)
                       const actionLabel: Record<string, string> = {
-                        credit: "Monats-Gutschrift",
-                        manual_add: "Manuelle Gutschrift",
-                        manual_subtract: "Manueller Abzug",
-                        carry_over: "Übertrag aus Vorjahr",
-                        use: "Urlaub genommen",
-                        correction: "Korrektur",
+                        gutschrift: "Monats-Gutschrift",
+                        jahres_gutschrift: "Jahres-Gutschrift",
+                        uebertrag: "Übertrag aus Vorjahr",
+                        kontingent_angelegt: "Kontingent angelegt",
+                        kontingent_geaendert: "Kontingent geändert",
+                        einstellung_geaendert: "Einstellung geändert",
                       };
+                      const isPositive = ["gutschrift", "jahres_gutschrift", "uebertrag"].includes(l.action) || l.days > 0;
+                      const showDays = l.days != null && l.action !== "einstellung_geaendert";
+                      const sign = l.days > 0 ? "+" : "";
                       return (
                         <div key={l.id} className="flex items-start justify-between gap-2 py-2 px-3 rounded bg-muted/30 text-sm">
                           <div className="flex-1 min-w-0">
@@ -523,9 +527,11 @@ const MyHours = () => {
                               <div className="text-xs mt-0.5 italic text-muted-foreground">{l.description}</div>
                             )}
                           </div>
-                          <Badge variant={isPositive ? "default" : "secondary"} className="tabular-nums shrink-0">
-                            {sign}{Math.round(l.days)} Tage
-                          </Badge>
+                          {showDays && (
+                            <Badge variant={isPositive ? "default" : "secondary"} className="tabular-nums shrink-0">
+                              {sign}{Math.round(l.days)} Tage
+                            </Badge>
+                          )}
                         </div>
                       );
                     })}

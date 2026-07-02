@@ -13,6 +13,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Calendar, Upload, Trash2, Sun, Clock } from "lucide-react";
 import { getTargetHoursForDate } from "@/lib/workingHours";
 import { getBuroSchedule, getSchedulePauseMinutes } from "@/lib/buroSchedules";
+import { ensureLeaveAccount, countUsedVacationDays, getBookableDates } from "@/lib/leaveAccount";
 import {
   ABSENCE_TYPES,
   ABSENCE_TAETIGKEITEN_INKL_FEIERTAG,
@@ -30,17 +31,10 @@ type ExistingAbsence = {
   stunden: number;
 };
 
-function countWorkingDays(start: string, end: string): number {
-  let count = 0;
-  const d = new Date(start + "T00:00:00");
-  const endD = new Date(end + "T00:00:00");
-  while (d <= endD) {
-    const day = d.getDay();
-    if (day !== 0 && day !== 6) count++;
-    d.setDate(d.getDate() + 1);
-  }
-  return count;
-}
+// Buchbare Tage = Mo–Fr OHNE österreichische Feiertage (getBookableDates aus
+// leaveAccount.ts): ein Feiertag verbraucht keinen Urlaubstag, bekommt keinen
+// Absenz-Eintrag (der Feiertag-Auto-Eintrag deckt das Tages-Soll) und ein
+// bereits auto-gebuchter Feiertag blockiert die Buchung nicht mehr.
 
 function capitalizeType(type: AbsenceType, customReason?: string): string {
   if (type === "sonstiges" && customReason && customReason.trim()) return customReason;
@@ -58,7 +52,9 @@ export default function Absence() {
   const [notizen, setNotizen] = useState("");
   const [saving, setSaving] = useState(false);
   const [krankmeldungFile, setKrankmeldungFile] = useState<File | null>(null);
-  const [leaveBalance, setLeaveBalance] = useState<{ total_days: number; used_days: number } | null>(null);
+  // used_counted = gezählte Urlaubs-Einträge des Jahres (die EINE Wahrheit für
+  // Anzeige + Validierung); used_days wird nur noch kompatibel weitergeschrieben.
+  const [leaveBalance, setLeaveBalance] = useState<{ total_days: number; used_days: number; used_counted: number } | null>(null);
   const [existingAbsences, setExistingAbsences] = useState<ExistingAbsence[]>([]);
   const [currentUserId, setCurrentUserId] = useState("");
   const [weeklyHours, setWeeklyHours] = useState<number | null>(null); // null = standard 39h
@@ -105,14 +101,17 @@ export default function Absence() {
 
   const loadLeaveBalance = async (userId: string) => {
     const currentYear = new Date().getFullYear();
-    const { data } = await supabase
-      .from("leave_balances")
-      .select("total_days, used_days")
-      .eq("user_id", userId)
-      .eq("year", currentYear)
-      .maybeSingle();
-    if (data) {
-      setLeaveBalance(data);
+    // Konto sicherstellen (fehlt es, wird ein Arbeiter-Konto mit 0 Tagen
+    // angelegt — KEIN stilles 25-Tage-Geschenk mehr) + fällige Gutschriften/
+    // Jahreswechsel nachholen (z.B. Angestellten-Stichtag ohne Admin-Besuch).
+    const bal = await ensureLeaveAccount(userId, currentYear, { autoCreate: true });
+    const usedCounted = await countUsedVacationDays(userId, currentYear);
+    if (bal) {
+      setLeaveBalance({
+        total_days: bal.total_days || 0,
+        used_days: bal.used_days || 0,
+        used_counted: usedCounted,
+      });
     }
   };
 
@@ -138,7 +137,8 @@ export default function Absence() {
     }
   };
 
-  const workingDays = startDate && endDate ? countWorkingDays(startDate, endDate) : 0;
+  const bookDates = startDate && endDate && startDate <= endDate ? getBookableDates(startDate, endDate) : [];
+  const workingDays = bookDates.length;
 
   const handleSubmit = async () => {
     if (!startDate || !endDate) {
@@ -158,12 +158,22 @@ export default function Absence() {
       return;
     }
 
-    if (absenceType === "urlaub" && leaveBalance) {
-      const remaining = leaveBalance.total_days - leaveBalance.used_days;
+    // Urlaubs-Validierung IMMER (auch ohne Vorbestand): verfügbar = Kontingent
+    // minus gezählte Urlaubs-Einträge des Jahres (dieselbe Zahl wie die Anzeigen).
+    if (absenceType === "urlaub") {
+      if (!leaveBalance) {
+        toast({
+          title: "Kein Urlaubskonto",
+          description: "Bitte beim Admin melden — das Urlaubskonto muss eingerichtet werden.",
+          variant: "destructive",
+        });
+        return;
+      }
+      const remaining = Math.round((leaveBalance.total_days - leaveBalance.used_counted) * 100) / 100;
       if (workingDays > remaining) {
         toast({
           title: "Nicht genügend Urlaubstage",
-          description: `Verfügbar: ${remaining} Tage, angefragt: ${workingDays} Tage`,
+          description: `Verfügbar: ${Math.max(0, Math.round(remaining))} Tage, angefragt: ${workingDays} Tage`,
           variant: "destructive",
         });
         return;
@@ -178,13 +188,18 @@ export default function Absence() {
       .gte("datum", startDate)
       .lte("datum", endDate);
 
+    // Nur Einträge an den tatsächlich zu buchenden Tagen prüfen — auto-gebuchte
+    // Feiertage (und Wochenend-Einträge) blockieren die Buchung nicht mehr.
+    const relevantEntries = (existingEntries || []).filter(
+      (e: any) => bookDates.includes(e.datum)
+    );
     // Separate PL-Arbeitszeit (entry_typ='projektleiter') von anderen Einträgen:
     // PL-Einträge werden automatisch überschrieben (Absenz hat Vorrang vor PL-Arbeitszeit).
     // Andere Einträge (Mitarbeiter-Leistungsbericht, bestehende Absenzen) blockieren.
-    const blockingEntries = (existingEntries || []).filter(
+    const blockingEntries = relevantEntries.filter(
       (e: any) => e.entry_typ !== "projektleiter"
     );
-    const plEntriesToReplace = (existingEntries || []).filter(
+    const plEntriesToReplace = relevantEntries.filter(
       (e: any) => e.entry_typ === "projektleiter"
     );
 
@@ -220,15 +235,14 @@ export default function Absence() {
 
     setSaving(true);
     try {
-      // Build entries for each working day
+      // Build entries for each bookable day (Mo–Fr ohne Feiertage — der
+      // Feiertag-Auto-Eintrag deckt Feiertage ohnehin ab).
       const entries: any[] = [];
       let totalZaHours = 0;
-      const d = new Date(startDate + "T00:00:00");
-      const endD = new Date(endDate + "T00:00:00");
-      while (d <= endD) {
-        const day = d.getDay();
-        if (day !== 0 && day !== 6) {
-          const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      for (const dateStr of bookDates) {
+        {
+          const d = new Date(dateStr + "T00:00:00");
+          const day = d.getDay();
 
           // Büro-Schedule (Barbara/Isabel): Tagessoll, Start/Ende, Pause aus Wochenplan.
           // Sonst Standard-Logik (39h-Vollzeit-Skalierung).
@@ -295,7 +309,6 @@ export default function Absence() {
             location_type: null,
           });
         }
-        d.setDate(d.getDate() + 1);
       }
 
       const { error: insertError } = await supabase.from("time_entries").insert(entries);
@@ -337,25 +350,16 @@ export default function Absence() {
         setZeitkontoBalance(newBalance);
       }
 
-      // Update leave balance for urlaub
-      if (absenceType === "urlaub") {
+      // used_days kompatibel weiterschreiben (Anzeige/Validierung zählen die
+      // Urlaubs-Einträge selbst). Konto existiert garantiert (ensureLeaveAccount);
+      // der frühere stille 25-Tage-Upsert für kontolose MA ist entfernt.
+      if (absenceType === "urlaub" && leaveBalance) {
         const currentYear = new Date().getFullYear();
-        if (leaveBalance) {
-          await supabase
-            .from("leave_balances")
-            .update({ used_days: leaveBalance.used_days + workingDays })
-            .eq("user_id", currentUserId)
-            .eq("year", currentYear);
-        } else {
-          await supabase
-            .from("leave_balances")
-            .upsert({
-              user_id: currentUserId,
-              year: currentYear,
-              total_days: 25,
-              used_days: workingDays,
-            });
-        }
+        await supabase
+          .from("leave_balances")
+          .update({ used_days: leaveBalance.used_days + workingDays })
+          .eq("user_id", currentUserId)
+          .eq("year", currentYear);
       }
 
       // Upload Krankmeldung if applicable
@@ -570,18 +574,18 @@ export default function Absence() {
                       </div>
                       <div>
                         <p className="text-muted-foreground">Verbraucht</p>
-                        <p className="font-bold">{Math.round(leaveBalance.used_days)} Tage</p>
+                        <p className="font-bold">{Math.round(leaveBalance.used_counted)} Tage</p>
                       </div>
                       <div>
                         <p className="text-muted-foreground">Verfuegbar</p>
                         <p className="font-bold text-green-700">
-                          {Math.round(leaveBalance.total_days - leaveBalance.used_days - (workingDays || 0))} Tage
+                          {Math.round(leaveBalance.total_days - leaveBalance.used_counted - (workingDays || 0))} Tage
                         </p>
                       </div>
                     </div>
                   ) : (
                     <p className="text-sm text-muted-foreground">
-                      Noch kein Urlaubskonto vorhanden (Standard: 25 Tage)
+                      Urlaubskonto wird gerade angelegt … (Start: 0 Tage — Kontingent legt der Admin fest)
                     </p>
                   )}
                 </CardContent>

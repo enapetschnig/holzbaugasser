@@ -10,6 +10,7 @@ import { Calendar, Loader2, Plus, Settings, ChevronDown, ChevronUp } from "lucid
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 import { de } from "date-fns/locale";
+import { ensureLeaveAccount, createWorkerAccount } from "@/lib/leaveAccount";
 
 type Profile = {
   id: string;
@@ -26,6 +27,8 @@ type LeaveBalance = {
   days_per_month: number | null;
   next_credit_date: string | null;
   last_credit_date: string | null;
+  modus: string | null;             // 'monatlich' (Arbeiter) | 'jaehrlich' (Angestellter)
+  jahres_kontingent: number | null; // nur bei modus='jaehrlich'
 };
 
 type LeaveLogEntry = {
@@ -55,11 +58,24 @@ export default function LeaveManagement({ profiles }: LeaveManagementProps) {
   const [editingSettings, setEditingSettings] = useState<string | null>(null);
   const [editDaysPerMonth, setEditDaysPerMonth] = useState("");
   const [editNextCreditDate, setEditNextCreditDate] = useState("");
+  const [editModus, setEditModus] = useState<"monatlich" | "jaehrlich">("monatlich");
+  const [editJahresKontingent, setEditJahresKontingent] = useState("");
 
   const fetchData = async () => {
     setLoading(true);
     const yearStart = `${selectedYear}-01-01`;
     const yearEnd = `${selectedYear}-12-31`;
+    const currentYear = new Date().getFullYear();
+
+    // Fällige Gutschriften/Jahreswechsel NUR fürs aktuelle Jahr nachholen —
+    // das Ansehen alter Jahre darf Alt-Konten nicht weiter befüllen, und
+    // Zukunfts-Jahre werden nicht vorab angelegt. Ohne bestehende Zeile wird
+    // hier NICHTS angelegt (autoCreate false) — dafür gibt es den Button.
+    if (selectedYear === currentYear) {
+      for (const profile of profiles) {
+        await ensureLeaveAccount(profile.id, currentYear, { autoCreate: false });
+      }
+    }
 
     const [{ data: balData }, { data: vacData }, { data: logData }] = await Promise.all([
       supabase.from("leave_balances").select("*").eq("year", selectedYear),
@@ -74,56 +90,7 @@ export default function LeaveManagement({ profiles }: LeaveManagementProps) {
     if (vacData) setVacationEntries(vacData);
     if (logData) setLeaveLog(logData as LeaveLogEntry[]);
 
-    // Auto-credit check for each employee
-    if (balData) {
-      for (const bal of balData as LeaveBalance[]) {
-        await checkAndCreditMonthly(bal);
-      }
-    }
-
     setLoading(false);
-  };
-
-  const checkAndCreditMonthly = async (bal: LeaveBalance) => {
-    const daysPerMonth = bal.days_per_month ?? 2.08;
-    const nextCredit = bal.next_credit_date ? new Date(bal.next_credit_date) : null;
-    const now = new Date();
-
-    if (!nextCredit || nextCredit > now) return; // Not time yet
-
-    // Credit is due - add days
-    const newTotal = (bal.total_days || 0) + daysPerMonth;
-    const creditDateStr = format(nextCredit, "dd.MM.yyyy");
-
-    // Calculate next credit date (last day of next month)
-    const nextCreditMonth = new Date(nextCredit);
-    nextCreditMonth.setMonth(nextCreditMonth.getMonth() + 2, 0); // Last day of next month
-
-    await supabase.from("leave_balances")
-      .update({
-        total_days: Math.round(newTotal * 100) / 100,
-        last_credit_date: bal.next_credit_date,
-        next_credit_date: nextCreditMonth.toISOString().split("T")[0],
-      })
-      .eq("id", bal.id);
-
-    // Log the credit
-    await supabase.from("leave_log" as any).insert({
-      user_id: bal.user_id,
-      year: bal.year,
-      action: "gutschrift",
-      days: daysPerMonth,
-      description: `Monatliche Gutschrift: +${daysPerMonth} Tage (${creditDateStr})`,
-    });
-
-    // Refresh after credit
-    const { data: updated } = await supabase.from("leave_balances").select("*").eq("id", bal.id).single();
-    if (updated) {
-      setBalances(prev => prev.map(b => b.id === bal.id ? updated as LeaveBalance : b));
-    }
-    const { data: newLog } = await supabase.from("leave_log" as any).select("*")
-      .eq("year", selectedYear).order("created_at", { ascending: false });
-    if (newLog) setLeaveLog(newLog as LeaveLogEntry[]);
   };
 
   useEffect(() => {
@@ -133,29 +100,9 @@ export default function LeaveManagement({ profiles }: LeaveManagementProps) {
   const ensureBalance = async (userId: string) => {
     const existing = balances.find((b) => b.user_id === userId && b.year === selectedYear);
     if (existing) return;
-
-    const now = new Date();
-    // Last day of current month
-    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-
-    await supabase.from("leave_balances").insert({
-      user_id: userId,
-      year: selectedYear,
-      total_days: 0,
-      used_days: 0,
-      days_per_month: 2.08,
-      next_credit_date: endOfMonth.toISOString().split("T")[0],
-    });
-
-    // Log
-    await supabase.from("leave_log" as any).insert({
-      user_id: userId,
-      year: selectedYear,
-      action: "kontingent_angelegt",
-      days: 0,
-      description: `Urlaubskontingent angelegt (2,08 Tage/Monat)`,
-    });
-
+    // Grundstufe: Arbeiter-Konto (0 Tage, 2,08/Monat ab jetzt) — Modus danach
+    // über das Zahnrad umstellbar.
+    await createWorkerAccount(userId, selectedYear);
     toast({ title: "Kontingent angelegt" });
     fetchData();
   };
@@ -176,24 +123,60 @@ export default function LeaveManagement({ profiles }: LeaveManagementProps) {
     fetchData();
   };
 
+  // Einstellungen (Modus/Kontingent/Termin) speichern — fasst total_days/used_days
+  // NIE an: eine Umstellung Arbeiter↔Angestellter lässt den Saldo exakt stehen,
+  // nur künftige Gutschriften folgen dem neuen Modus.
   const saveSettings = async (balanceId: string, userId: string) => {
-    const dpm = parseFloat(editDaysPerMonth) || 2.08;
-    await supabase.from("leave_balances").update({
-      days_per_month: dpm,
-      next_credit_date: editNextCreditDate || null,
-    }).eq("id", balanceId);
+    if (editModus === "jaehrlich") {
+      const kontingent = parseFloat(editJahresKontingent.replace(",", "."));
+      if (isNaN(kontingent) || kontingent <= 0) {
+        toast({ title: "Bitte ein Jahres-Kontingent > 0 angeben", variant: "destructive" });
+        return;
+      }
+      if (!editNextCreditDate) {
+        toast({ title: "Bitte einen Stichtag angeben", variant: "destructive" });
+        return;
+      }
+      await supabase.from("leave_balances").update({
+        modus: "jaehrlich",
+        jahres_kontingent: kontingent,
+        next_credit_date: editNextCreditDate,
+      } as any).eq("id", balanceId);
 
-    await supabase.from("leave_log" as any).insert({
-      user_id: userId,
-      year: selectedYear,
-      action: "einstellung_geaendert",
-      days: dpm,
-      description: `Einstellung geändert: ${dpm} Tage/Monat, nächste Gutschrift: ${editNextCreditDate || "nicht gesetzt"}`,
-    });
+      await supabase.from("leave_log" as any).insert({
+        user_id: userId,
+        year: selectedYear,
+        action: "einstellung_geaendert",
+        days: null,
+        description: `Einstellung geändert: Angestellter, ${kontingent} Tage/Jahr, Stichtag ${format(new Date(editNextCreditDate), "dd.MM.yyyy")}`,
+      });
+    } else {
+      const dpm = parseFloat(editDaysPerMonth) || 2.08;
+      await supabase.from("leave_balances").update({
+        modus: "monatlich",
+        days_per_month: dpm,
+        next_credit_date: editNextCreditDate || null,
+      } as any).eq("id", balanceId);
+
+      await supabase.from("leave_log" as any).insert({
+        user_id: userId,
+        year: selectedYear,
+        action: "einstellung_geaendert",
+        days: null,
+        description: `Einstellung geändert: Arbeiter, ${dpm} Tage/Monat, nächste Gutschrift: ${editNextCreditDate || "nicht gesetzt"}`,
+      });
+    }
 
     toast({ title: "Einstellungen gespeichert" });
     setEditingSettings(null);
     fetchData();
+  };
+
+  // Beim Umschalten auf "Angestellter": Stichtag mit dem nächsten künftigen
+  // Jahrestag des heutigen Datums vorbelegen.
+  const defaultStichtag = (): string => {
+    const now = new Date();
+    return `${now.getFullYear() + 1}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
   };
 
   const toggleExpanded = (id: string) => {
@@ -244,17 +227,29 @@ export default function LeaveManagement({ profiles }: LeaveManagementProps) {
               const isExpanded = expandedProfiles.has(profile.id);
               const daysPerMonth = balance?.days_per_month ?? 2.08;
               const nextCredit = balance?.next_credit_date;
+              const isJaehrlich = balance?.modus === "jaehrlich";
 
               return (
                 <div key={profile.id} className="rounded-lg border">
                   {/* Header */}
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3">
                     <div className="flex-1">
-                      <p className="font-medium">{profile.vorname} {profile.nachname}</p>
+                      <p className="font-medium flex items-center gap-2">
+                        {profile.vorname} {profile.nachname}
+                        {balance && (
+                          <Badge variant={isJaehrlich ? "default" : "secondary"} className="text-[10px]">
+                            {isJaehrlich ? "Angestellter" : "Arbeiter"}
+                          </Badge>
+                        )}
+                      </p>
                       {balance ? (
                         <div className="text-sm text-muted-foreground">
                           <span className="font-medium">{usedDays}</span> von {totalDays} Tagen verbraucht · <span className={remaining <= 3 ? "text-red-600 font-medium" : "font-medium"}>{remaining} übrig</span>
-                          <span className="ml-2 text-xs">({daysPerMonth.toFixed(1).replace(".", ",")} Tage/Monat{nextCredit ? `, nächste Gutschrift: ${format(new Date(nextCredit), "dd.MM.yyyy")}` : ""})</span>
+                          <span className="ml-2 text-xs">
+                            {isJaehrlich
+                              ? `(${Math.round((balance.jahres_kontingent ?? 0) * 10) / 10} Tage/Jahr${nextCredit ? `, Stichtag: ${format(new Date(nextCredit), "dd.MM.yyyy")}` : ""})`
+                              : `(${daysPerMonth.toFixed(1).replace(".", ",")} Tage/Monat${nextCredit ? `, nächste Gutschrift: ${format(new Date(nextCredit), "dd.MM.yyyy")}` : ""})`}
+                          </span>
                         </div>
                       ) : (
                         <p className="text-sm text-muted-foreground">Noch kein Kontingent angelegt</p>
@@ -274,6 +269,8 @@ export default function LeaveManagement({ profiles }: LeaveManagementProps) {
                           <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => {
                             if (editingSettings === balance.id) { setEditingSettings(null); } else {
                               setEditingSettings(balance.id);
+                              setEditModus(balance.modus === "jaehrlich" ? "jaehrlich" : "monatlich");
+                              setEditJahresKontingent(balance.jahres_kontingent != null ? String(balance.jahres_kontingent) : "25");
                               setEditDaysPerMonth(String(balance.days_per_month ?? 2.08));
                               setEditNextCreditDate(balance.next_credit_date || "");
                             }
@@ -298,16 +295,62 @@ export default function LeaveManagement({ profiles }: LeaveManagementProps) {
                   {balance && editingSettings === balance.id && (
                     <div className="border-t px-3 py-3 bg-muted/30 space-y-3">
                       <p className="text-xs font-medium text-muted-foreground">Einstellungen</p>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <div className="space-y-1">
-                          <Label className="text-xs">Tage pro Monat</Label>
-                          <Input type="number" step="0.01" value={editDaysPerMonth} onChange={(e) => setEditDaysPerMonth(e.target.value)} className="h-9" />
-                        </div>
-                        <div className="space-y-1">
-                          <Label className="text-xs">Nächste Gutschrift am</Label>
-                          <Input type="date" value={editNextCreditDate} onChange={(e) => setEditNextCreditDate(e.target.value)} className="h-9" />
-                        </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs">Modus</Label>
+                        <Select
+                          value={editModus}
+                          onValueChange={(v) => {
+                            const m = v as "monatlich" | "jaehrlich";
+                            setEditModus(m);
+                            if (m === "jaehrlich") {
+                              if (!editJahresKontingent) setEditJahresKontingent("25");
+                              // Stichtag vorbelegen: nächster künftiger Jahrestag von heute
+                              if (balance.modus !== "jaehrlich" || !balance.next_credit_date) {
+                                setEditNextCreditDate(defaultStichtag());
+                              }
+                            } else {
+                              setEditNextCreditDate(balance.modus === "monatlich" ? (balance.next_credit_date || "") : "");
+                            }
+                          }}
+                        >
+                          <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="monatlich">Arbeiter — monatliche Gutschrift</SelectItem>
+                            <SelectItem value="jaehrlich">Angestellter — Jahres-Kontingent am Stichtag</SelectItem>
+                          </SelectContent>
+                        </Select>
                       </div>
+                      {editModus === "jaehrlich" ? (
+                        <>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div className="space-y-1">
+                              <Label className="text-xs">Jahres-Kontingent (Tage)</Label>
+                              <Input type="number" step="0.5" min="1" value={editJahresKontingent} onChange={(e) => setEditJahresKontingent(e.target.value)} className="h-9" />
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-xs">Stichtag (jährliche Gutschrift)</Label>
+                              <Input type="date" value={editNextCreditDate} onChange={(e) => setEditNextCreditDate(e.target.value)} className="h-9" />
+                            </div>
+                          </div>
+                          <p className="text-xs text-muted-foreground">
+                            Am Stichtag wird das Kontingent gutgeschrieben, danach automatisch jedes Jahr
+                            wieder. Liegt der Stichtag in der Vergangenheit, wird beim nächsten Öffnen sofort
+                            gutgeschrieben. Der aktuelle Tage-Stand bleibt bei der Umstellung unverändert
+                            („Tage ändern" für Korrekturen).
+                          </p>
+                        </>
+                      ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div className="space-y-1">
+                            <Label className="text-xs">Tage pro Monat</Label>
+                            <Input type="number" step="0.01" value={editDaysPerMonth} onChange={(e) => setEditDaysPerMonth(e.target.value)} className="h-9" />
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-xs">Nächste Gutschrift am</Label>
+                            <Input type="date" value={editNextCreditDate} onChange={(e) => setEditNextCreditDate(e.target.value)} className="h-9" />
+                          </div>
+                        </div>
+                      )}
                       <div className="flex gap-2">
                         <Button size="sm" onClick={() => saveSettings(balance.id, profile.id)}>Speichern</Button>
                         <Button variant="outline" size="sm" onClick={() => setEditingSettings(null)}>Abbrechen</Button>
@@ -324,9 +367,9 @@ export default function LeaveManagement({ profiles }: LeaveManagementProps) {
                         {userLog.map((log) => (
                           <div key={log.id} className="flex items-start gap-2 text-xs">
                             <span className="text-muted-foreground shrink-0">{format(new Date(log.created_at), "dd.MM.yyyy HH:mm")}</span>
-                            <span className={log.action === "gutschrift" ? "text-green-600" : ""}>
+                            <span className={["gutschrift", "jahres_gutschrift", "uebertrag"].includes(log.action) ? "text-green-600" : ""}>
                               {log.description}
-                              {log.days != null && log.action === "gutschrift" && <Badge variant="secondary" className="ml-1 text-[10px]">+{Math.round(log.days)}</Badge>}
+                              {log.days != null && ["gutschrift", "jahres_gutschrift", "uebertrag"].includes(log.action) && <Badge variant="secondary" className="ml-1 text-[10px]">+{Math.round(log.days)}</Badge>}
                             </span>
                           </div>
                         ))}
