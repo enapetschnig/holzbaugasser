@@ -351,6 +351,7 @@ export default function HoursReport() {
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [profileMap, setProfileMap] = useState<Record<string, Profile>>({});
   const [externIds, setExternIds] = useState<Set<string>>(new Set());
+  const [adminPlIds, setAdminPlIds] = useState<Set<string>>(new Set());
 
   // Tab 1: Arbeitszeiterfassung state
   const [gridMonth, setGridMonth] = useState(() => {
@@ -481,6 +482,13 @@ export default function HoursReport() {
         .map((r: any) => r.user_id as string)
     );
     setExternIds(externs);
+    // Fürs PDF: nur die Arbeiter (wie früher) — Admins/Projektleiter (= Büro)
+    // erscheinen im Grid (Zeitkonto braucht sie), aber nicht im PDF-Download.
+    setAdminPlIds(new Set(
+      (rolesData || [])
+        .filter((r: any) => r.role === "administrator" || r.role === "projektleiter")
+        .map((r: any) => r.user_id as string)
+    ));
 
     const { data } = await supabase
       .from("profiles")
@@ -1313,11 +1321,18 @@ export default function HoursReport() {
       getMonthlyTargetHours(gridYear, gridMonth), gridYear, gridMonth
     );
 
+    // PDF zeigt nur die Arbeiter (wie früher): Admins/Projektleiter (= Büroleute)
+    // bleiben im Grid, kommen aber nicht in den Download. Ausnahme: ist die
+    // Ansicht explizit auf EINEN Mitarbeiter gefiltert, wird der exportiert.
+    const pdfEmployees = gridEmployee !== "all"
+      ? gridEmployees
+      : gridEmployees.filter((p) => !adminPlIds.has(p.id));
+
     const pdfData: StundenauswertungPDFData = {
       monat: monthNames[gridMonth - 1],
       jahr: gridYear,
       sollStunden: defaultMonthlyTarget,
-      mitarbeiter: gridEmployees.map((p) => {
+      mitarbeiter: pdfEmployees.map((p) => {
         const employeeDays = gridDataMap[p.id] || {};
         let totalHours = 0;
         let cappedTotalHours = 0;
